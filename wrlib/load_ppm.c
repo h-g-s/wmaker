@@ -373,6 +373,13 @@ RImage *RLoadPPM(const char *file_name)
 			fclose(file);
 			return NULL;
 		}
+
+		/* 16-bit samples are not supported */
+		if (m > 255) {
+			RErrorCode = RERR_BADFORMAT;
+			fclose(file);
+			return NULL;
+		}
 	} else {
 		m = 1;
 	}
