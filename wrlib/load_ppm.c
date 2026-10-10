@@ -62,7 +62,7 @@ char pm_getc(FILE *const fileP, const char *filename)
 			if (ich == EOF)
 				fprintf(stderr, _("wrlib: EOF / read error reading a byte from PPM file \"%s\"\n"), filename);
 			ch = (char)ich;
-		} while (ch != '\n' && ch != '\r');
+		} while (ich != EOF && ch != '\n' && ch != '\r');
 	}
 	return ch;
 }
