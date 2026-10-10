@@ -1110,7 +1110,8 @@ void WMFreeColorPanel(WMColorPanel * panel)
 		XFreePixmap(scr->display, panel->selectionImg);
 	if (panel->selectionBackImg)
 		XFreePixmap(scr->display, panel->selectionBackImg);
-	RReleaseImage(panel->customPaletteImg);
+	if (panel->customPaletteImg)
+		RReleaseImage(panel->customPaletteImg);
 
 	/* structs */
 	if (panel->lastBrowseDir)
@@ -2804,6 +2805,8 @@ static void customRenderSpectrum(W_ColorPanel * panel)
 	CPColor cpColor;
 
 	spectrum = RCreateImage(SPECTRUM_WIDTH, SPECTRUM_HEIGHT, False);
+	if (!spectrum)
+		return;
 
 	ptr = spectrum->data;
 
@@ -2840,9 +2843,16 @@ static void customSetPalette(W_ColorPanel * panel)
 	RImage *scaledImg;
 	Pixmap image;
 
-	image = XCreatePixmap(scr->display, W_DRAWABLE(scr), customPaletteWidth, customPaletteHeight, scr->depth);
+	if (!panel->customPaletteImg)
+		return;
+
 	scaledImg = RScaleImage(panel->customPaletteImg, customPaletteWidth, customPaletteHeight);
-	RConvertImage(scr->rcontext, scaledImg, &image);
+	if (!scaledImg)
+		return;
+	if (!RConvertImage(scr->rcontext, scaledImg, &image)) {
+		RReleaseImage(scaledImg);
+		return;
+	}
 	RReleaseImage(scaledImg);
 
 	XCopyArea(scr->display, image, panel->customPaletteContentView->window,
@@ -2869,6 +2879,9 @@ static void customPalettePositionSelection(W_ColorPanel * panel, int x, int y)
 {
 	W_Screen *scr = WMWidgetScreen(panel->win);
 	unsigned long ofs;
+
+	if (!panel->customPaletteImg || !panel->selectionBackImg)
+		return;
 
 	/* undraw selection */
 	XCopyArea(scr->display, panel->selectionBackImg,
