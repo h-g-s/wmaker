@@ -312,40 +312,67 @@ typedef struct {
 	CONTRIB *p;		/* pointer to list of contributions */
 } CLIST;
 
+static void free_contributors(CLIST *contrib, unsigned count)
+{
+	unsigned i;
+
+	if (!contrib)
+		return;
+
+	for (i = 0; i < count; i++)
+		free(contrib[i].p);
+
+	free(contrib);
+}
+
 /* clamp the input to the specified range */
 #define CLAMP(v,l,h)    ((v)<(l) ? (l) : (v) > (h) ? (h) : v)
 
-/* return of calloc is not checked if NULL in the function below! */
 RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 {
-	CLIST *contrib;			/* array of contribution lists */
-	RImage *tmp;		/* intermediate image */
+	CLIST *contrib = NULL;		/* array of contribution lists */
+	RImage *tmp = NULL;		/* intermediate image */
 	double xscale, yscale;	/* zoom scale factors */
 	int i, j, k;		/* loop variables */
 	int n;			/* pixel number */
 	double center, left, right;	/* filter calculation variables */
 	double width, fscale;	/* filter calculation variables */
 	double rweight, gweight, bweight;
-	RImage *dst;
+	RImage *dst = NULL;
 	unsigned char *p;
-	unsigned char *sp;
+	unsigned char *sp = NULL;
+	unsigned contrib_count = 0;
 	int sch = src->format == RRGBAFormat ? 4 : 3;
 
 	dst = RCreateImage(new_width, new_height, False);
+	if (!dst)
+		return NULL;
 
 	/* create intermediate image to hold horizontal zoom */
 	tmp = RCreateImage(dst->width, src->height, False);
+	if (!tmp)
+		goto cleanup;
+
 	xscale = (double)new_width / (double)src->width;
 	yscale = (double)new_height / (double)src->height;
 
 	/* pre-calculate filter contributions for a row */
 	contrib = (CLIST *) calloc(new_width, sizeof(CLIST));
+	contrib_count = new_width;
+	if (!contrib) {
+		RErrorCode = RERR_NOMEMORY;
+		goto cleanup;
+	}
 	if (xscale < 1.0) {
 		width = fwidth / xscale;
 		fscale = 1.0 / xscale;
 		for (i = 0; i < new_width; ++i) {
 			contrib[i].n = 0;
 			contrib[i].p = (CONTRIB *) calloc((int) ceil(width * 2 + 1), sizeof(CONTRIB));
+			if (!contrib[i].p) {
+				RErrorCode = RERR_NOMEMORY;
+				goto cleanup;
+			}
 			center = (double)i / xscale;
 			left = ceil(center - width);
 			right = floor(center + width);
@@ -369,6 +396,10 @@ RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 		for (i = 0; i < new_width; ++i) {
 			contrib[i].n = 0;
 			contrib[i].p = (CONTRIB *) calloc((int) ceil(fwidth * 2 + 1), sizeof(CONTRIB));
+			if (!contrib[i].p) {
+				RErrorCode = RERR_NOMEMORY;
+				goto cleanup;
+			}
 			center = (double)i / xscale;
 			left = ceil(center - fwidth);
 			right = floor(center + fwidth);
@@ -414,19 +445,26 @@ RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 	}
 
 	/* free the memory allocated for horizontal filter weights */
-	for (i = 0; i < new_width; ++i) {
-		free(contrib[i].p);
-	}
-	free(contrib);
+	free_contributors(contrib, contrib_count);
+	contrib = NULL;
 
 	/* pre-calculate filter contributions for a column */
 	contrib = (CLIST *) calloc(dst->height, sizeof(CLIST));
+	contrib_count = dst->height;
+	if (!contrib) {
+		RErrorCode = RERR_NOMEMORY;
+		goto cleanup;
+	}
 	if (yscale < 1.0) {
 		width = fwidth / yscale;
 		fscale = 1.0 / yscale;
 		for (i = 0; i < dst->height; ++i) {
 			contrib[i].n = 0;
 			contrib[i].p = (CONTRIB *) calloc((int) ceil(width * 2 + 1), sizeof(CONTRIB));
+			if (!contrib[i].p) {
+				RErrorCode = RERR_NOMEMORY;
+				goto cleanup;
+			}
 			center = (double)i / yscale;
 			left = ceil(center - width);
 			right = floor(center + width);
@@ -449,6 +487,10 @@ RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 		for (i = 0; i < dst->height; ++i) {
 			contrib[i].n = 0;
 			contrib[i].p = (CONTRIB *) calloc((int) ceil(fwidth * 2 + 1), sizeof(CONTRIB));
+			if (!contrib[i].p) {
+				RErrorCode = RERR_NOMEMORY;
+				goto cleanup;
+			}
 			center = (double)i / yscale;
 			left = ceil(center - fwidth);
 			right = floor(center + fwidth);
@@ -471,6 +513,10 @@ RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 
 	/* apply filter to zoom vertically from tmp to dst */
 	sp = malloc(tmp->height * 3);
+	if (!sp) {
+		RErrorCode = RERR_NOMEMORY;
+		goto cleanup;
+	}
 
 	for (k = 0; k < new_width; ++k) {
 		CONTRIB *pp;
@@ -508,12 +554,18 @@ RImage *RSmoothScaleImage(RImage * src, unsigned new_width, unsigned new_height)
 	free(sp);
 
 	/* free the memory allocated for vertical filter weights */
-	for (i = 0; i < dst->height; ++i) {
-		free(contrib[i].p);
-	}
-	free(contrib);
+	free_contributors(contrib, contrib_count);
 
 	RReleaseImage(tmp);
 
 	return dst;
+
+cleanup:
+	free(sp);
+	free_contributors(contrib, contrib_count);
+	if (tmp)
+		RReleaseImage(tmp);
+	if (dst)
+		RReleaseImage(dst);
+	return NULL;
 }
