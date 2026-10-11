@@ -601,7 +601,10 @@ static void preview(FontPanel * panel)
 	char buffer[512];
 	WMFont *font;
 
+	buffer[0] = '\0';
 	getSelectedFont(panel, buffer, sizeof(buffer));
+	if (buffer[0] == '\0')
+		return;
 	font = WMCreateFont(WMWidgetScreen(panel->win), buffer);
 	if (font) {
 		WMSetTextFieldFont(panel->sampleT, font);
@@ -785,10 +788,8 @@ static void setFontPanelFontName(FontPanel * panel, const char *family, const ch
 
 	stlrow = WMFindRowOfListItemWithTitle(panel->typLs, style);
 
-	if (stlrow < 0) {
+	if (stlrow < 0)
 		stlrow = 0;
-		return;
-	}
 
 	WMSelectListItem(panel->typLs, stlrow);
 
