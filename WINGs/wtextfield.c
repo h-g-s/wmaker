@@ -945,6 +945,56 @@ static void handleEvents(XEvent * event, void *data)
 	}
 }
 
+static int isFocusableTextField(W_View *view)
+{
+	WMTextField *t = (WMTextField *) view->self;
+
+	return view->self != NULL && t->widgetClass == WC_TextField &&
+	    t->flags.enabled && W_VIEW_MAPPED(view);
+}
+
+/* Depth-first walk of the views below 'view' in creation order. When
+ * *seen is false, collects the first focusable field after 'from' (or the
+ * very first one if from is NULL); *last records the last one visited. */
+static void scanTextFields(W_View *view, W_View *from, W_View **next, W_View **first, W_View **last,
+			   W_View **before, int *seen)
+{
+	W_View *child;
+
+	for (child = view->childrenList; child != NULL; child = child->nextSister) {
+		if (isFocusableTextField(child)) {
+			if (!*first)
+				*first = child;
+			if (*seen && !*next)
+				*next = child;
+			if (child == from)
+				*seen = 1;
+			else if (!*seen)
+				*before = child;
+			*last = child;
+		}
+		scanTextFields(child, from, next, first, last, before, seen);
+	}
+}
+
+/* Finds the field to focus on Tab/Shift+Tab when no explicit chain was set,
+ * using the creation order of the text fields in the same top level. */
+static W_View *adjacentTextField(W_View *view, Bool backward)
+{
+	W_View *next = NULL, *first = NULL, *last = NULL, *before = NULL;
+	int seen = 0;
+	W_View *found;
+
+	scanTextFields(W_TopLevelOfView(view), view, &next, &first, &last, &before, &seen);
+
+	if (backward)
+		found = before ? before : last;
+	else
+		found = next ? next : first;
+
+	return found == view ? NULL : found;
+}
+
 static void handleTextFieldKeyPress(TextField * tPtr, XEvent * event)
 {
 	char buffer[64];
@@ -977,16 +1027,22 @@ static void handleTextFieldKeyPress(TextField * tPtr, XEvent * event)
 #endif
 		if (!controled) {
 			if (shifted) {
-				if (tPtr->view->prevFocusChain) {
-					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view),
-							     tPtr->view->prevFocusChain);
+				W_View *target = tPtr->view->prevFocusChain;
+
+				if (!target)
+					target = adjacentTextField(tPtr->view, True);
+				if (target) {
+					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view), target);
 					tPtr->flags.notIllegalMovement = 1;
 				}
 				data = (void *)WMBacktabTextMovement;
 			} else {
-				if (tPtr->view->nextFocusChain) {
-					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view),
-							     tPtr->view->nextFocusChain);
+				W_View *target = tPtr->view->nextFocusChain;
+
+				if (!target)
+					target = adjacentTextField(tPtr->view, False);
+				if (target) {
+					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view), target);
 					tPtr->flags.notIllegalMovement = 1;
 				}
 				data = (void *)WMTabTextMovement;
