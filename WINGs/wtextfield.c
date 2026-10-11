@@ -170,26 +170,48 @@ static void memmv(char *dest, const char *src, int size)
 	}
 }
 
+/*
+ * Both functions look for the first character, from the left, that makes the
+ * text fit. They walk backward from the end of the area that has to be
+ * visible, so only the characters that can actually be shown get measured.
+ * Walking forward from the current view position would measure the whole
+ * remaining text once per skipped character, which takes minutes for long
+ * texts.
+ */
 static int incrToFit(TextField * tPtr)
 {
-	int vp = tPtr->viewPosition;
+	int vp = tPtr->textLen;
 
-	while (TEXT_WIDTH(tPtr, tPtr->viewPosition) > tPtr->usableWidth) {
-		tPtr->viewPosition += oneUTF8CharForward(&tPtr->text[tPtr->viewPosition],
-							 tPtr->textLen - tPtr->viewPosition);
+	while (vp > tPtr->viewPosition) {
+		int prev = vp + oneUTF8CharBackward(&tPtr->text[vp], vp);
+
+		if (TEXT_WIDTH(tPtr, prev) > tPtr->usableWidth)
+			break;
+		vp = prev;
 	}
-	return vp != tPtr->viewPosition;
+	if (vp <= tPtr->viewPosition)
+		return 0;
+
+	tPtr->viewPosition = vp;
+	return 1;
 }
 
 static int incrToFit2(TextField * tPtr)
 {
-	int vp = tPtr->viewPosition;
+	int vp = tPtr->cursorPosition;
 
-	while (TEXT_WIDTH2(tPtr, tPtr->viewPosition, tPtr->cursorPosition)
-	       >= tPtr->usableWidth)
-		tPtr->viewPosition += oneUTF8CharForward(&tPtr->text[tPtr->viewPosition],
-							 tPtr->cursorPosition - tPtr->viewPosition);
-	return vp != tPtr->viewPosition;
+	while (vp > tPtr->viewPosition) {
+		int prev = vp + oneUTF8CharBackward(&tPtr->text[vp], vp);
+
+		if (TEXT_WIDTH2(tPtr, prev, tPtr->cursorPosition) >= tPtr->usableWidth)
+			break;
+		vp = prev;
+	}
+	if (vp <= tPtr->viewPosition)
+		return 0;
+
+	tPtr->viewPosition = vp;
+	return 1;
 }
 
 static void decrToFit(TextField * tPtr)
