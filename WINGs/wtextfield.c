@@ -42,6 +42,8 @@ typedef struct W_TextField {
 
 	WMHandlerID timerID;	/* for cursor blinking */
 
+	char *clipboardText;	/* what we serve while we own CLIPBOARD */
+
 	struct {
 		WMAlignment alignment:2;
 
@@ -60,6 +62,8 @@ typedef struct W_TextField {
 		unsigned int pointerGrabbed:1;
 
 		unsigned int ownsSelection:1;
+
+		unsigned int ownsClipboard:1;
 
 		unsigned int waitingSelection:1;	/* requested selection, but
 							 * didnt get yet */
@@ -113,6 +117,16 @@ static WMData *requestHandler(WMView * view, Atom selection, Atom target, void *
 static WMSelectionProcs selectionHandler = {
 	requestHandler,
 	lostSelection,
+	NULL
+};
+
+static void lostClipboard(WMView *view, Atom selection, void *cdata);
+
+static WMData *clipboardRequestHandler(WMView *view, Atom selection, Atom target, void *cdata, Atom *type);
+
+static WMSelectionProcs clipboardHandler = {
+	clipboardRequestHandler,
+	lostClipboard,
 	NULL
 };
 
@@ -227,40 +241,30 @@ static void decrToFit(TextField * tPtr)
 #undef TEXT_WIDTH
 #undef TEXT_WIDTH2
 
-static WMData *requestHandler(WMView * view, Atom selection, Atom target, void *cdata, Atom * type)
+static WMData *convertText(Display *dpy, const char *text, int len, Atom target, Atom *type)
 {
-	TextField *tPtr = view->self;
-	int count;
-	Display *dpy = tPtr->view->screen->display;
-	Atom XA_TARGETS;
+	Atom XA_TARGETS = XInternAtom(dpy, "TARGETS", False);
 	Atom XA_TEXT = XInternAtom(dpy, "TEXT", False);
 	Atom XA_COMPOUND_TEXT = XInternAtom(dpy, "COMPOUND_TEXT", False);
+	Atom XA_UTF8_STRING = XInternAtom(dpy, "UTF8_STRING", False);
 	WMData *data;
 
-	/* Parameter not used, but tell the compiler that it is ok */
-	(void) selection;
-	(void) cdata;
-
-	count = tPtr->selection.count < 0
-	    ? tPtr->selection.position + tPtr->selection.count : tPtr->selection.position;
-
-	if (target == XA_STRING || target == XA_TEXT || target == XA_COMPOUND_TEXT) {
-
-		data = WMCreateDataWithBytes(&(tPtr->text[count]), abs(tPtr->selection.count));
+	if (target == XA_STRING || target == XA_TEXT || target == XA_COMPOUND_TEXT || target == XA_UTF8_STRING) {
+		data = WMCreateDataWithBytes(text, len);
 		WMSetDataFormat(data, 8);
 		*type = target;
 
 		return data;
 	}
 
-	XA_TARGETS = XInternAtom(dpy, "TARGETS", False);
 	if (target == XA_TARGETS) {
-		Atom supported_type[4];
+		Atom supported_type[5];
 
 		supported_type[0] = XA_TARGETS;
 		supported_type[1] = XA_STRING;
 		supported_type[2] = XA_TEXT;
 		supported_type[3] = XA_COMPOUND_TEXT;
+		supported_type[4] = XA_UTF8_STRING;
 
 		data = WMCreateDataWithBytes(supported_type, sizeof(supported_type));
 		WMSetDataFormat(data, 32);
@@ -270,7 +274,51 @@ static WMData *requestHandler(WMView * view, Atom selection, Atom target, void *
 	}
 
 	return NULL;
+}
 
+static WMData *requestHandler(WMView *view, Atom selection, Atom target, void *cdata, Atom *type)
+{
+	TextField *tPtr = view->self;
+	int start;
+
+	/* Parameter not used, but tell the compiler that it is ok */
+	(void) selection;
+	(void) cdata;
+
+	start = tPtr->selection.count < 0
+	    ? tPtr->selection.position + tPtr->selection.count : tPtr->selection.position;
+
+	return convertText(tPtr->view->screen->display, &tPtr->text[start], abs(tPtr->selection.count),
+			   target, type);
+}
+
+static WMData *clipboardRequestHandler(WMView *view, Atom selection, Atom target, void *cdata, Atom *type)
+{
+	TextField *tPtr = view->self;
+
+	/* Parameter not used, but tell the compiler that it is ok */
+	(void) selection;
+	(void) cdata;
+
+	if (!tPtr->clipboardText)
+		return NULL;
+
+	return convertText(tPtr->view->screen->display, tPtr->clipboardText, strlen(tPtr->clipboardText),
+			   target, type);
+}
+
+static void lostClipboard(WMView *view, Atom selection, void *cdata)
+{
+	TextField *tPtr = (TextField *) view->self;
+
+	/* Parameter not used, but tell the compiler that it is ok */
+	(void) selection;
+	(void) cdata;
+
+	/* the handler is deleted by the selection code once we return */
+	tPtr->flags.ownsClipboard = 0;
+	wfree(tPtr->clipboardText);
+	tPtr->clipboardText = NULL;
 }
 
 static void lostSelection(WMView * view, Atom selection, void *cdata)
@@ -995,6 +1043,91 @@ static W_View *adjacentTextField(W_View *view, Bool backward)
 	return found == view ? NULL : found;
 }
 
+static int selectedRange(TextField *tPtr, int *start)
+{
+	int count = abs(tPtr->selection.count);
+
+	*start = tPtr->selection.count < 0 ? tPtr->selection.position - count : tPtr->selection.position;
+
+	return count;
+}
+
+/* Returns True if the selected text was put on the CLIPBOARD */
+static Bool copyToClipboard(TextField *tPtr, Time timestamp)
+{
+	int start, count;
+	Atom clipboard = tPtr->view->screen->clipboardAtom;
+
+	if (tPtr->flags.secure || tPtr->selection.count == 0)
+		return False;
+
+	count = selectedRange(tPtr, &start);
+
+	wfree(tPtr->clipboardText);
+	tPtr->clipboardText = wstrndup(&tPtr->text[start], count);
+
+	if (!tPtr->flags.ownsClipboard)
+		tPtr->flags.ownsClipboard =
+		    WMCreateSelectionHandler(tPtr->view, clipboard, timestamp, &clipboardHandler, NULL);
+
+	if (!tPtr->flags.ownsClipboard) {
+		wfree(tPtr->clipboardText);
+		tPtr->clipboardText = NULL;
+		return False;
+	}
+
+	return True;
+}
+
+static void pasteClipboard(WMView *view, Atom selection, Atom target, Time timestamp, void *cdata, WMData *data)
+{
+	TextField *tPtr = (TextField *) view->self;
+	char *str, *dst;
+	const char *src;
+	int len;
+
+	/* Parameters not used, but tell the compiler that it is ok */
+	(void) selection;
+	(void) target;
+	(void) timestamp;
+	(void) cdata;
+
+	tPtr->flags.waitingSelection = 0;
+
+	/* a format other than 8 bits means an unsupported reply, such as INCR */
+	if (data == NULL || WMGetDataFormat(data) != 8)
+		return;
+
+	len = WMGetDataLength(data);
+	src = WMDataBytes(data);
+	str = wmalloc(len + 1);
+
+	/* a text field has a single line: drop the control characters */
+	for (dst = str; len > 0; len--, src++) {
+		if ((unsigned char)*src >= 0x20 && *src != 0x7f)
+			*dst++ = *src;
+	}
+
+	if (dst != str) {
+		if (tPtr->selection.count)
+			WMDeleteTextFieldRange(tPtr, tPtr->selection);
+		WMInsertTextFieldText(tPtr, str, tPtr->cursorPosition);
+		NOTIFY(tPtr, didChange, WMTextDidChangeNotification, (void *)WMInsertTextEvent);
+	}
+
+	wfree(str);
+}
+
+static void requestClipboardPaste(TextField *tPtr, Time timestamp)
+{
+	Display *dpy = tPtr->view->screen->display;
+	Atom clipboard = tPtr->view->screen->clipboardAtom;
+
+	if (WMRequestSelection(tPtr->view, clipboard, XInternAtom(dpy, "UTF8_STRING", False),
+			       timestamp, pasteClipboard, NULL))
+		tPtr->flags.waitingSelection = 1;
+}
+
 static void handleTextFieldKeyPress(TextField * tPtr, XEvent * event)
 {
 	char buffer[64];
@@ -1052,6 +1185,43 @@ static void handleTextFieldKeyPress(TextField * tPtr, XEvent * event)
 			cancelSelection = 0;
 
 			relay = False;
+		}
+		break;
+
+	case XK_c:
+	case XK_C:
+		if (!controled)
+			goto normal_key;
+		copyToClipboard(tPtr, event->xkey.time);
+		return;
+
+	case XK_x:
+	case XK_X:
+		if (!controled)
+			goto normal_key;
+		if (copyToClipboard(tPtr, event->xkey.time)) {
+			WMDeleteTextFieldRange(tPtr, tPtr->selection);
+			data = (void *)WMDeleteTextEvent;
+			textEvent = WMTextDidChangeNotification;
+		}
+		relay = False;
+		break;
+
+	case XK_v:
+	case XK_V:
+		if (!controled)
+			goto normal_key;
+		requestClipboardPaste(tPtr, event->xkey.time);
+		return;
+
+	case XK_Insert:
+		if (controled) {
+			copyToClipboard(tPtr, event->xkey.time);
+			return;
+		}
+		if (shifted) {
+			requestClipboardPaste(tPtr, event->xkey.time);
+			return;
 		}
 		break;
 
@@ -1662,6 +1832,9 @@ static void destroyTextField(TextField * tPtr)
 	WMReleaseFont(tPtr->font);
 	/*// use lostSelection() instead of WMDeleteSelectionHandler here? */
 	WMDeleteSelectionHandler(tPtr->view, XA_PRIMARY, CurrentTime);
+	if (tPtr->flags.ownsClipboard)
+		WMDeleteSelectionHandler(tPtr->view, tPtr->view->screen->clipboardAtom, CurrentTime);
+	wfree(tPtr->clipboardText);
 	WMRemoveNotificationObserver(tPtr);
 
 	if (tPtr->text)

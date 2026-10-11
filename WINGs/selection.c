@@ -169,8 +169,8 @@ static void handleRequestEvent(XEvent * event)
 
 		switch (event->type) {
 		case SelectionClear:
-			if (W_VIEW_DRAWABLE(handler->view)
-			    != event->xselectionclear.window) {
+			if (W_VIEW_DRAWABLE(handler->view) != event->xselectionclear.window
+			    || handler->selection != event->xselectionclear.selection) {
 				break;
 			}
 
