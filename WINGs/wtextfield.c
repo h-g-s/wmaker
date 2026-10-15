@@ -386,6 +386,7 @@ WMTextField *WMCreateTextField(WMWidget * parent)
 	tPtr->bufferSize = MIN_TEXT_BUFFER;
 
 	tPtr->flags.enabled = 1;
+	tPtr->view->flags.acceptsFocus = 1;
 
 	WMCreateEventHandler(tPtr->view, ExposureMask | StructureNotifyMask | FocusChangeMask, handleEvents, tPtr);
 
@@ -600,6 +601,7 @@ void WMSetTextFieldEditable(WMTextField * tPtr, Bool flag)
 	CHECK_CLASS(tPtr, WC_TextField);
 
 	tPtr->flags.enabled = ((flag == 0) ? 0 : 1);
+	tPtr->view->flags.acceptsFocus = tPtr->flags.enabled;
 
 	if (tPtr->view->flags.realized) {
 		paintTextField(tPtr);
@@ -967,6 +969,9 @@ static void handleEvents(XEvent * event, void *data)
 		break;
 
 	case FocusOut:
+		/* real X focus changes caused by XSetInputFocus() in W_LookupString() are not ours */
+		if (event->xfocus.detail != NotifyDetailNone)
+			break;
 		W_UnFocusIC(tPtr->view);
 		tPtr->flags.focused = 0;
 
@@ -991,59 +996,6 @@ static void handleEvents(XEvent * event, void *data)
 		destroyTextField(tPtr);
 		break;
 	}
-}
-
-static int isFocusableTextField(W_View *view)
-{
-	WMTextField *t = (WMTextField *) view->self;
-
-	return view->self != NULL && t->widgetClass == WC_TextField &&
-	    t->flags.enabled && W_VIEW_MAPPED(view);
-}
-
-/* Depth-first walk of the views below 'view' in creation order. When
- * *seen is false, collects the first focusable field after 'from' (or the
- * very first one if from is NULL); *last records the last one visited. */
-static void scanTextFields(W_View *view, W_View *from, W_View **next, W_View **first, W_View **last,
-			   W_View **before, int *seen)
-{
-	W_View *child;
-
-	for (child = view->childrenList; child != NULL; child = child->nextSister) {
-		/* children of an unmapped view (e.g. a hidden tab) are not visible either */
-		if (!W_VIEW_MAPPED(child))
-			continue;
-		if (isFocusableTextField(child)) {
-			if (!*first)
-				*first = child;
-			if (*seen && !*next)
-				*next = child;
-			if (child == from)
-				*seen = 1;
-			else if (!*seen)
-				*before = child;
-			*last = child;
-		}
-		scanTextFields(child, from, next, first, last, before, seen);
-	}
-}
-
-/* Finds the field to focus on Tab/Shift+Tab when no explicit chain was set,
- * using the creation order of the text fields in the same top level. */
-static W_View *adjacentTextField(W_View *view, Bool backward)
-{
-	W_View *next = NULL, *first = NULL, *last = NULL, *before = NULL;
-	int seen = 0;
-	W_View *found;
-
-	scanTextFields(W_TopLevelOfView(view), view, &next, &first, &last, &before, &seen);
-
-	if (backward)
-		found = before ? before : last;
-	else
-		found = next ? next : first;
-
-	return found == view ? NULL : found;
 }
 
 static int selectedRange(TextField *tPtr, int *start)
@@ -1163,24 +1115,12 @@ static void handleTextFieldKeyPress(TextField * tPtr, XEvent * event)
 #endif
 		if (!controled) {
 			if (shifted) {
-				W_View *target = tPtr->view->prevFocusChain;
-
-				if (!target)
-					target = adjacentTextField(tPtr->view, True);
-				if (target) {
-					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view), target);
+				if (W_MoveFocus(tPtr->view, True))
 					tPtr->flags.notIllegalMovement = 1;
-				}
 				data = (void *)WMBacktabTextMovement;
 			} else {
-				W_View *target = tPtr->view->nextFocusChain;
-
-				if (!target)
-					target = adjacentTextField(tPtr->view, False);
-				if (target) {
-					W_SetFocusOfTopLevel(W_TopLevelOfView(tPtr->view), target);
+				if (W_MoveFocus(tPtr->view, False))
 					tPtr->flags.notIllegalMovement = 1;
-				}
 				data = (void *)WMTabTextMovement;
 			}
 			textEvent = WMTextDidEndEditingNotification;

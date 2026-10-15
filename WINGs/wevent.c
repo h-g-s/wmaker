@@ -173,6 +173,25 @@ void WMRelayToNextResponder(WMView * view, XEvent * event)
 	}
 }
 
+/* Like WMRelayToNextResponder(), but falls back to the top level window so
+ * that its key bindings (e.g. Return and Escape in panels) keep working. */
+void W_RelayKeyEvent(W_View *view, XEvent *event)
+{
+	unsigned long mask = eventMasks[event->xany.type];
+	W_View *next = view->nextResponder ? view->nextResponder : W_TopLevelOfView(view);
+	W_EventHandler *hPtr;
+	WMArrayIterator iter;
+
+	if (!next || next == view)
+		return;
+
+	WM_ITERATE_ARRAY(next->eventHandlers, hPtr, iter) {
+		if ((hPtr->eventMask & mask)) {
+			(*hPtr->proc) (event, hPtr->clientData);
+		}
+	}
+}
+
 int WMHandleEvent(XEvent * event)
 {
 	W_EventHandler *hPtr;

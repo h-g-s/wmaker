@@ -8,6 +8,7 @@
 #include "GNUstep.h"
 
 #include <X11/Xatom.h>
+#include <X11/keysym.h>
 
 typedef struct W_Window {
 	W_Class widgetClass;
@@ -133,7 +134,7 @@ WMWindow *WMCreateWindowWithStyle(WMScreen * screen, const char *name, int style
 	screen->windowList = win;
 
 	WMCreateEventHandler(win->view, ExposureMask | StructureNotifyMask
-			     | ClientMessageMask | FocusChangeMask, handleEvents, win);
+			     | ClientMessageMask | FocusChangeMask | KeyPressMask, handleEvents, win);
 
 	W_ResizeView(win->view, DEFAULT_WIDTH, DEFAULT_HEIGHT);
 
@@ -621,6 +622,17 @@ static void handleEvents(XEvent * event, void *clientData)
 	W_View *view = win->view;
 
 	switch (event->type) {
+	case KeyPress:
+		/* nothing has the focus yet: Tab picks the first (or last) focusable widget */
+		if (W_FocusedViewOfToplevel(view) == view && !(event->xkey.state & ControlMask)) {
+			KeySym ksym;
+
+			XLookupString(&event->xkey, NULL, 0, &ksym, NULL);
+			if (ksym == XK_Tab || ksym == XK_ISO_Left_Tab)
+				W_MoveFocus(view, ksym == XK_ISO_Left_Tab || (event->xkey.state & ShiftMask));
+		}
+		break;
+
 	case ClientMessage:
 		if (event->xclient.message_type == win->view->screen->protocolsAtom
 		    && event->xclient.format == 32
