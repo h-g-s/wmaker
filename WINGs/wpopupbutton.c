@@ -1,6 +1,8 @@
 
 #include "WINGsP.h"
 
+#include <X11/keysym.h>
+
 typedef struct W_PopUpButton {
 	W_Class widgetClass;
 	WMView *view;
@@ -30,6 +32,8 @@ typedef struct W_PopUpButton {
 		unsigned int insideMenu:1;
 
 		unsigned int enabled:1;
+
+		unsigned int focused:1;
 
 	} flags;
 } PopUpButton;
@@ -68,7 +72,7 @@ WMPopUpButton *WMCreatePopUpButton(WMWidget * parent)
 	bPtr->view->self = bPtr;
 
 	WMCreateEventHandler(bPtr->view, ExposureMask | StructureNotifyMask
-			     | ClientMessageMask, handleEvents, bPtr);
+			     | ClientMessageMask | KeyPressMask | FocusChangeMask, handleEvents, bPtr);
 
 	W_ResizeView(bPtr->view, DEFAULT_WIDTH, DEFAULT_HEIGHT);
 	bPtr->caption = wstrdup(DEFAULT_CAPTION);
@@ -76,6 +80,7 @@ WMPopUpButton *WMCreatePopUpButton(WMWidget * parent)
 	WMCreateEventHandler(bPtr->view, ButtonPressMask | ButtonReleaseMask, handleActionEvents, bPtr);
 
 	bPtr->flags.enabled = 1;
+	bPtr->view->flags.acceptsFocus = 1;
 
 	bPtr->items = WMCreateArrayWithDestructor(4, (WMFreeDataProc *) WMDestroyMenuItem);
 
@@ -167,6 +172,7 @@ void WMRemovePopUpButtonItem(WMPopUpButton * bPtr, int index)
 void WMSetPopUpButtonEnabled(WMPopUpButton * bPtr, Bool flag)
 {
 	bPtr->flags.enabled = ((flag == 0) ? 0 : 1);
+	bPtr->view->flags.acceptsFocus = bPtr->flags.enabled && !bPtr->flags.pullsDown;
 	if (bPtr->view->flags.mapped)
 		paintPopUpButton(bPtr);
 }
@@ -226,6 +232,7 @@ Bool WMGetPopUpButtonItemEnabled(WMPopUpButton * bPtr, int index)
 void WMSetPopUpButtonPullsDown(WMPopUpButton * bPtr, Bool flag)
 {
 	bPtr->flags.pullsDown = ((flag == 0) ? 0 : 1);
+	bPtr->view->flags.acceptsFocus = bPtr->flags.enabled && !bPtr->flags.pullsDown;
 	if (flag) {
 		bPtr->selectedItemIndex = -1;
 	}
@@ -351,10 +358,79 @@ static void paintPopUpButton(PopUpButton * bPtr)
 			  scr->clipGC, 0, 0, scr->popUpIndicator->width, scr->popUpIndicator->height, x, y);
 	}
 
+	if (bPtr->flags.focused) {
+		GC gc = WMColorGC(scr->black);
+		int w = bPtr->view->size.width - 7;
+		int h = bPtr->view->size.height - 7;
+
+		if (w > 0 && h > 0) {
+			XSetLineAttributes(scr->display, gc, 0, LineOnOffDash, CapButt, JoinMiter);
+			XSetDashes(scr->display, gc, 0, "\1\1", 2);
+			XDrawRectangle(scr->display, pixmap, gc, 3, 3, w, h);
+			XSetLineAttributes(scr->display, gc, 0, LineSolid, CapButt, JoinMiter);
+		}
+	}
+
 	XCopyArea(scr->display, pixmap, bPtr->view->window, scr->copyGC, 0, 0,
 		  bPtr->view->size.width, bPtr->view->size.height, 0, 0);
 
 	XFreePixmap(scr->display, pixmap);
+}
+
+static void handleKeyPress(PopUpButton *bPtr, XEvent *event)
+{
+	KeySym ksym;
+	int itemCount, i;
+
+	if (!bPtr->flags.focused) {
+		W_RelayKeyEvent(bPtr->view, event);
+		return;
+	}
+
+	XLookupString(&event->xkey, NULL, 0, &ksym, NULL);
+
+	if ((ksym == XK_Tab || ksym == XK_ISO_Left_Tab) && !(event->xkey.state & ControlMask)) {
+		W_MoveFocus(bPtr->view, ksym == XK_ISO_Left_Tab || (event->xkey.state & ShiftMask));
+		return;
+	}
+
+	if (event->xkey.state & (ControlMask | Mod1Mask | ShiftMask)) {
+		W_RelayKeyEvent(bPtr->view, event);
+		return;
+	}
+
+	switch (ksym) {
+	case XK_Up:
+	case XK_Left:
+		WMSelectPopUpButtonPreviousItem(bPtr);
+		return;
+
+	case XK_Down:
+	case XK_Right:
+		WMSelectPopUpButtonNextItem(bPtr);
+		return;
+
+	case XK_Home:
+	case XK_End:
+		if (bPtr->flags.pullsDown || bPtr->selectedItemIndex < 0)
+			return;
+		itemCount = WMGetArrayItemCount(bPtr->items);
+		for (i = (ksym == XK_Home ? 0 : itemCount - 1); i >= 0 && i < itemCount;
+		     i += (ksym == XK_Home ? 1 : -1)) {
+			if (!WMGetPopUpButtonItemEnabled(bPtr, i))
+				continue;
+			if (i != bPtr->selectedItemIndex) {
+				WMSetPopUpButtonSelectedItem(bPtr, i);
+				if (bPtr->action)
+					(*bPtr->action) (bPtr, bPtr->clientData);
+			}
+			break;
+		}
+		return;
+
+	default:
+		W_RelayKeyEvent(bPtr->view, event);
+	}
 }
 
 static void handleEvents(XEvent * event, void *data)
@@ -364,6 +440,26 @@ static void handleEvents(XEvent * event, void *data)
 	CHECK_CLASS(data, WC_PopUpButton);
 
 	switch (event->type) {
+	case KeyPress:
+		handleKeyPress(bPtr, event);
+		break;
+
+	case FocusIn:
+		if (W_FocusedViewOfToplevel(W_TopLevelOfView(bPtr->view)) != bPtr->view)
+			break;
+		bPtr->flags.focused = 1;
+		if (bPtr->view->flags.mapped)
+			paintPopUpButton(bPtr);
+		break;
+
+	case FocusOut:
+		if (event->xfocus.detail != NotifyDetailNone)
+			break;
+		bPtr->flags.focused = 0;
+		if (bPtr->view->flags.mapped)
+			paintPopUpButton(bPtr);
+		break;
+
 	case Expose:
 		if (event->xexpose.count != 0)
 			break;
@@ -670,6 +766,9 @@ static void handleActionEvents(XEvent * event, void *data)
 			}
 			break;
 		}
+		if (bPtr->view->flags.acceptsFocus)
+			W_SetFocusOfTopLevel(W_TopLevelOfView(bPtr->view), bPtr->view);
+
 		popUpMenu(bPtr);
 		if (!bPtr->flags.pullsDown) {
 			bPtr->highlightedItem = bPtr->selectedItemIndex;
