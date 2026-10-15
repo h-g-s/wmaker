@@ -682,10 +682,75 @@ static void handleEvents(XEvent * event, void *data)
 }
 
 /* Space activates the button like a mouse click would, Tab moves the focus. */
+typedef struct {
+	Button *from, *first, *last, *next, *prev;
+	Bool seen;
+} GroupScan;
+
+static void scanGroup(W_View *view, GroupScan *scan)
+{
+	W_View *child;
+
+	for (child = view->childrenList; child != NULL; child = child->nextSister) {
+		if (!W_VIEW_MAPPED(child))
+			continue;
+
+		if (child->self && W_CLASS(child->self) == WC_Button) {
+			Button *b = child->self;
+
+			if (b->groupIndex == scan->from->groupIndex && b->flags.enabled) {
+				if (!scan->first)
+					scan->first = b;
+				if (scan->seen && !scan->next)
+					scan->next = b;
+				if (b == scan->from)
+					scan->seen = True;
+				else if (!scan->seen)
+					scan->prev = b;
+				scan->last = b;
+			}
+		}
+		scanGroup(child, scan);
+	}
+}
+
+/* The enabled, visible member of the same radio group after/before bPtr, wrapping around */
+static Button *adjacentGroupButton(Button *bPtr, Bool backward)
+{
+	GroupScan scan;
+
+	memset(&scan, 0, sizeof(scan));
+	scan.from = bPtr;
+	scanGroup(W_TopLevelOfView(bPtr->view), &scan);
+
+	if (backward)
+		return scan.prev ? scan.prev : scan.last;
+	return scan.next ? scan.next : scan.first;
+}
+
+/* Simulates a click with the left mouse button; bPtr may be destroyed by its action */
+static void clickButton(Button *bPtr)
+{
+	XEvent click;
+
+	if (!bPtr->flags.enabled || !W_ViewIsVisible(bPtr->view))
+		return;
+
+	memset(&click, 0, sizeof(click));
+	click.xbutton.button = Button1;
+
+	click.type = ButtonPress;
+	handleActionEvents(&click, bPtr);
+	XFlush(bPtr->view->screen->display);
+	wusleep(20000);
+
+	click.type = ButtonRelease;
+	handleActionEvents(&click, bPtr);
+}
+
 static void handleKeyPress(Button *bPtr, XEvent *event)
 {
 	KeySym ksym;
-	XEvent click;
 
 	if (!bPtr->flags.focused) {
 		W_RelayKeyEvent(bPtr->view, event);
@@ -699,18 +764,17 @@ static void handleKeyPress(Button *bPtr, XEvent *event)
 		return;
 	}
 
-	if (ksym == XK_space && bPtr->flags.enabled && W_ViewIsVisible(bPtr->view)) {
-		memset(&click, 0, sizeof(click));
-		click.xbutton.button = Button1;
+	if (ksym == XK_space) {
+		clickButton(bPtr);
+		return;
+	}
 
-		click.type = ButtonPress;
-		handleActionEvents(&click, bPtr);
-		XFlush(bPtr->view->screen->display);
-		wusleep(20000);
+	if (bPtr->groupIndex > 0 && !(event->xkey.state & (ControlMask | ShiftMask))
+	    && (ksym == XK_Left || ksym == XK_Up || ksym == XK_Right || ksym == XK_Down)) {
+		Button *target = adjacentGroupButton(bPtr, ksym == XK_Left || ksym == XK_Up);
 
-		/* the action may destroy the button, so don't use it after this */
-		click.type = ButtonRelease;
-		handleActionEvents(&click, bPtr);
+		if (target)
+			clickButton(target);
 		return;
 	}
 
