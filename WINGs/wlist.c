@@ -2,6 +2,7 @@
 #include "WINGsP.h"
 #include <ctype.h>
 #include <strings.h>
+#include <X11/keysym.h>
 
 const char *WMListDidScrollNotification = "WMListDidScrollNotification";
 const char *WMListSelectionDidChangeNotification = "WMListSelectionDidChangeNotification";
@@ -47,6 +48,7 @@ typedef struct W_List {
 		unsigned int redrawPending:1;
 		unsigned int buttonPressed:1;
 		unsigned int buttonWasPressed:1;
+		unsigned int focused:1;
 	} flags;
 } List;
 
@@ -137,8 +139,10 @@ WMList *WMCreateList(WMWidget * parent)
 
 	lPtr->view->delegate = &_ListViewDelegate;
 
+	lPtr->view->flags.acceptsFocus = 1;
+
 	WMCreateEventHandler(lPtr->view, ExposureMask | StructureNotifyMask
-			     | ClientMessageMask, handleEvents, lPtr);
+			     | ClientMessageMask | FocusChangeMask, handleEvents, lPtr);
 
 	WMCreateEventHandler(lPtr->view, ButtonPressMask | ButtonReleaseMask
 			     | EnterWindowMask | LeaveWindowMask | ButtonMotionMask
@@ -539,6 +543,16 @@ static void paintList(List * lPtr)
 		XClearWindow(scrPtr->display, lPtr->view->window);
 	}
 	W_DrawRelief(scrPtr, lPtr->view->window, 0, 0, lPtr->view->size.width, lPtr->view->size.height, WRSunken);
+
+	if (lPtr->flags.focused) {
+		GC gc = WMColorGC(scrPtr->black);
+
+		XSetLineAttributes(scrPtr->display, gc, 0, LineOnOffDash, CapButt, JoinMiter);
+		XSetDashes(scrPtr->display, gc, 0, "\1\1", 2);
+		XDrawRectangle(scrPtr->display, lPtr->view->window, gc, 1, 1,
+			       lPtr->view->size.width - 3, lPtr->view->size.height - 3);
+		XSetLineAttributes(scrPtr->display, gc, 0, LineSolid, CapButt, JoinMiter);
+	}
 }
 
 #if 0
@@ -655,6 +669,19 @@ static void handleEvents(XEvent * event, void *data)
 		destroyList(lPtr);
 		break;
 
+	case FocusIn:
+		if (W_FocusedViewOfToplevel(W_TopLevelOfView(lPtr->view)) != lPtr->view)
+			break;
+		lPtr->flags.focused = 1;
+		paintList(lPtr);
+		break;
+
+	case FocusOut:
+		if (event->xfocus.detail != NotifyDetailNone)
+			break;
+		lPtr->flags.focused = 0;
+		paintList(lPtr);
+		break;
 	}
 }
 
@@ -1082,6 +1109,8 @@ static void handleActionEvents(XEvent * event, void *data)
 	case ButtonPress:
 		if (event->xbutton.x <= WMWidgetWidth(lPtr->vScroller))
 			break;
+		if (event->xbutton.button == Button1 && !lPtr->flags.focused)
+			W_SetFocusOfTopLevel(W_TopLevelOfView(lPtr->view), lPtr->view);
 		if (event->xbutton.button == WINGsConfiguration.mouseWheelDown ||
 		    event->xbutton.button == WINGsConfiguration.mouseWheelUp) {
 			int amount = 0;
@@ -1203,6 +1232,15 @@ static void handleActionEvents(XEvent * event, void *data)
 			break;
 		if (len > 0)
 			buffer[len] = '\0';
+
+		if (ksym == XK_Tab || ksym == XK_ISO_Left_Tab) {
+			W_MoveFocus(lPtr->view, ksym == XK_ISO_Left_Tab || (event->xkey.state & ShiftMask));
+			break;
+		}
+
+		/* let the window (e.g. a panel's default and cancel keys) see these */
+		if (ksym == XK_Return || ksym == XK_KP_Enter || ksym == XK_Escape)
+			W_RelayKeyEvent(lPtr->view, event);
 
 		/* Handle navigation keys */
 		switch (ksym) {
