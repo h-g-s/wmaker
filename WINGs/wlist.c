@@ -139,7 +139,8 @@ WMList *WMCreateList(WMWidget * parent)
 
 	lPtr->view->delegate = &_ListViewDelegate;
 
-	lPtr->view->flags.acceptsFocus = 1;
+	/* only lists with items are worth a stop when tabbing */
+	lPtr->view->flags.acceptsFocus = 0;
 
 	WMCreateEventHandler(lPtr->view, ExposureMask | StructureNotifyMask
 			     | ClientMessageMask | FocusChangeMask, handleEvents, lPtr);
@@ -214,6 +215,7 @@ WMListItem *WMInsertListItem(WMList * lPtr, int row, const char *text)
 		WMAddToArray(lPtr->items, item);
 	else
 		WMInsertInArray(lPtr->items, row, item);
+	lPtr->view->flags.acceptsFocus = 1;
 
 	/* update the scroller when idle, so that we don't waste time
 	 * updating it when another item is going to be added later */
@@ -248,6 +250,8 @@ void WMRemoveListItem(WMList * lPtr, int row)
 		lPtr->topItem = 0;
 
 	WMDeleteFromArray(lPtr->items, row);
+	if (WMGetArrayItemCount(lPtr->items) == 0)
+		lPtr->view->flags.acceptsFocus = 0;
 
 	if (!lPtr->idleID) {
 		lPtr->idleID = WMAddIdleHandler((WMCallback *) updateScroller, lPtr);
@@ -294,6 +298,7 @@ void WMClearList(WMList * lPtr)
 
 	WMEmptyArray(lPtr->selectedItems);
 	WMEmptyArray(lPtr->items);
+	lPtr->view->flags.acceptsFocus = 0;
 
 	lPtr->topItem = 0;
 
@@ -1238,8 +1243,9 @@ static void handleActionEvents(XEvent * event, void *data)
 			break;
 		}
 
-		/* let the window (e.g. a panel's default and cancel keys) see these */
-		if (ksym == XK_Return || ksym == XK_KP_Enter || ksym == XK_Escape)
+		/* let the owner (a browser) or the window (a panel's default and cancel keys) see these */
+		if (ksym == XK_Return || ksym == XK_KP_Enter || ksym == XK_Escape
+		    || ksym == XK_Left || ksym == XK_Right)
 			W_RelayKeyEvent(lPtr->view, event);
 
 		/* Handle navigation keys */
@@ -1309,8 +1315,9 @@ static void handleActionEvents(XEvent * event, void *data)
 					cur = WMGetFirstInArray(lPtr->items, lastSel);
 			}
 
+			/* with nothing selected, the first press selects the top item */
 			if (cur == WLNotFound)
-				cur = lPtr->topItem;
+				cur = lPtr->topItem - 1;
 			newRow = cur + 1;
 			if (newRow >= itemCount)
 				newRow = itemCount - 1;
