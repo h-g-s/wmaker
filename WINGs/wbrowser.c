@@ -1,5 +1,6 @@
 
 #include "WINGsP.h"
+#include <X11/keysym.h>
 #include <math.h>		/* for : double rint (double) */
 
 typedef struct W_Browser {
@@ -73,6 +74,8 @@ static void paintItem(WMList * lPtr, int index, Drawable d, char *text, int stat
 
 static void loadColumn(WMBrowser * bPtr, int column);
 
+static void listCallback(void *self, void *clientData);
+
 static void removeColumn(WMBrowser * bPtr, int column);
 
 static char *createTruncatedString(WMFont * font, const char *text, int *textLen, int width);
@@ -108,7 +111,7 @@ WMBrowser *WMCreateBrowser(WMWidget * parent)
 	bPtr->view->delegate = &_BrowserViewDelegate;
 
 	WMCreateEventHandler(bPtr->view, ExposureMask | StructureNotifyMask
-			     | ClientMessageMask, handleEvents, bPtr);
+			     | ClientMessageMask | KeyPressMask, handleEvents, bPtr);
 
 	/* default configuration */
 	bPtr->flags.hasScroller = DEFAULT_HAS_SCROLLER;
@@ -850,6 +853,41 @@ static void paintBrowser(WMBrowser * bPtr)
 	}
 }
 
+/* Left and Right, relayed by the focused column, move the focus between columns */
+static void handleKeyPress(WMBrowser *bPtr, XEvent *event)
+{
+	W_View *focused = W_FocusedViewOfToplevel(W_TopLevelOfView(bPtr->view));
+	KeySym ksym;
+	int i, target;
+
+	XLookupString(&event->xkey, NULL, 0, &ksym, NULL);
+
+	if (!(ksym == XK_Left || ksym == XK_Right) || (event->xkey.state & (ControlMask | Mod1Mask | ShiftMask))) {
+		W_RelayKeyEvent(bPtr->view, event);
+		return;
+	}
+
+	for (i = 0; i < bPtr->columnCount; i++) {
+		if (W_VIEW(bPtr->columns[i]) == focused)
+			break;
+	}
+	if (i == bPtr->columnCount)
+		return;
+
+	target = (ksym == XK_Left) ? i - 1 : i + 1;
+	if (target < 0 || target >= bPtr->columnCount || WMGetListNumberOfRows(bPtr->columns[target]) == 0)
+		return;
+
+	if (!COLUMN_IS_VISIBLE(bPtr, target))
+		scrollToColumn(bPtr, ksym == XK_Left ? target : target - bPtr->maxVisibleColumns + 1, True);
+
+	if (ksym == XK_Right && WMGetListSelectedItem(bPtr->columns[target]) == NULL) {
+		WMSelectListItem(bPtr->columns[target], 0);
+		listCallback(bPtr->columns[target], bPtr);
+	}
+	W_SetFocusOfTopLevel(W_TopLevelOfView(bPtr->view), W_VIEW(bPtr->columns[target]));
+}
+
 static void handleEvents(XEvent * event, void *data)
 {
 	WMBrowser *bPtr = (WMBrowser *) data;
@@ -857,6 +895,10 @@ static void handleEvents(XEvent * event, void *data)
 	CHECK_CLASS(data, WC_Browser);
 
 	switch (event->type) {
+	case KeyPress:
+		handleKeyPress(bPtr, event);
+		break;
+
 	case Expose:
 		paintBrowser(bPtr);
 		break;
@@ -1074,6 +1116,7 @@ int WMAddBrowserColumn(WMBrowser * bPtr)
 	bPtr->titles[index] = NULL;
 
 	list = WMCreateList(bPtr);
+	W_VIEW(list)->nextResponder = bPtr->view;
 	WMSetListAllowMultipleSelection(list, bPtr->flags.allowMultipleSelection);
 	WMSetListAllowEmptySelection(list, bPtr->flags.allowEmptySelection);
 	WMSetListAction(list, listCallback, bPtr);
