@@ -1010,6 +1010,9 @@ static void scanTextFields(W_View *view, W_View *from, W_View **next, W_View **f
 	W_View *child;
 
 	for (child = view->childrenList; child != NULL; child = child->nextSister) {
+		/* children of an unmapped view (e.g. a hidden tab) are not visible either */
+		if (!W_VIEW_MAPPED(child))
+			continue;
 		if (isFocusableTextField(child)) {
 			if (!*first)
 				*first = child;
