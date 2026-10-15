@@ -1,6 +1,8 @@
 
 #include "WINGsP.h"
 
+#include <X11/keysym.h>
+
 typedef struct W_Button {
 	W_Class widgetClass;
 	WMView *view;
@@ -71,6 +73,8 @@ typedef struct W_Button {
 		unsigned int redrawPending:1;
 
 		unsigned int addedObserver:1;
+
+		unsigned int focused:1;
 	} flags;
 } Button;
 
@@ -96,6 +100,7 @@ static void paintButton(Button * bPtr);
 
 static void handleEvents(XEvent * event, void *data);
 static void handleActionEvents(XEvent * event, void *data);
+static void handleKeyPress(Button *bPtr, XEvent *event);
 
 static char *WMPushedRadioNotification = "WMPushedRadioNotification";
 
@@ -131,8 +136,10 @@ WMButton *WMCreateCustomButton(WMWidget * parent, int behaviourMask)
 
 	bPtr->flags.enabled = 1;
 	bPtr->flags.dimsWhenDisabled = 1;
+	bPtr->view->flags.acceptsFocus = 1;
 
-	WMCreateEventHandler(bPtr->view, ExposureMask | StructureNotifyMask, handleEvents, bPtr);
+	WMCreateEventHandler(bPtr->view, ExposureMask | StructureNotifyMask | KeyPressMask | FocusChangeMask,
+			     handleEvents, bPtr);
 
 	WMCreateEventHandler(bPtr->view, ButtonPressMask | ButtonReleaseMask
 			     | EnterWindowMask | LeaveWindowMask, handleActionEvents, bPtr);
@@ -422,6 +429,7 @@ void WMSetButtonFont(WMButton * bPtr, WMFont * font)
 void WMSetButtonEnabled(WMButton * bPtr, Bool flag)
 {
 	bPtr->flags.enabled = ((flag == 0) ? 0 : 1);
+	bPtr->view->flags.acceptsFocus = bPtr->flags.enabled;
 
 	if (bPtr->view->flags.mapped) {
 		paintButton(bPtr);
@@ -535,6 +543,24 @@ void WMSetButtonPeriodicDelay(WMButton * bPtr, float delay, float interval)
 	bPtr->periodicDelay = delay;
 }
 
+static void paintFocusRing(Button *bPtr)
+{
+	W_Screen *scrPtr = bPtr->view->screen;
+	Display *dpy = scrPtr->display;
+	GC gc = WMColorGC(scrPtr->black);
+	int inset = bPtr->flags.bordered ? 3 : 1;
+	int w = bPtr->view->size.width - 2 * inset - 1;
+	int h = bPtr->view->size.height - 2 * inset - 1;
+
+	if (w <= 0 || h <= 0)
+		return;
+
+	XSetLineAttributes(dpy, gc, 0, LineOnOffDash, CapButt, JoinMiter);
+	XSetDashes(dpy, gc, 0, "\1\1", 2);
+	XDrawRectangle(dpy, bPtr->view->window, gc, inset, inset, w, h);
+	XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
+}
+
 static void paintButton(Button * bPtr)
 {
 	W_Screen *scrPtr = bPtr->view->screen;
@@ -611,6 +637,9 @@ static void paintButton(Button * bPtr)
 			    (bPtr->font != NULL ? bPtr->font : scrPtr->normalFont),
 			    relief, caption, bPtr->flags.alignment, image,
 			    bPtr->flags.imagePosition, backColor, offset);
+
+	if (bPtr->flags.focused)
+		paintFocusRing(bPtr);
 }
 
 static void handleEvents(XEvent * event, void *data)
@@ -626,10 +655,66 @@ static void handleEvents(XEvent * event, void *data)
 		paintButton(bPtr);
 		break;
 
+	case FocusIn:
+		if (W_FocusedViewOfToplevel(W_TopLevelOfView(bPtr->view)) != bPtr->view)
+			break;
+		bPtr->flags.focused = 1;
+		if (bPtr->view->flags.mapped)
+			paintButton(bPtr);
+		break;
+
+	case FocusOut:
+		if (event->xfocus.detail != NotifyDetailNone)
+			break;
+		bPtr->flags.focused = 0;
+		if (bPtr->view->flags.mapped)
+			paintButton(bPtr);
+		break;
+
+	case KeyPress:
+		handleKeyPress(bPtr, event);
+		break;
+
 	case DestroyNotify:
 		destroyButton(bPtr);
 		break;
 	}
+}
+
+/* Space activates the button like a mouse click would, Tab moves the focus. */
+static void handleKeyPress(Button *bPtr, XEvent *event)
+{
+	KeySym ksym;
+	XEvent click;
+
+	if (!bPtr->flags.focused) {
+		W_RelayKeyEvent(bPtr->view, event);
+		return;
+	}
+
+	XLookupString(&event->xkey, NULL, 0, &ksym, NULL);
+
+	if ((ksym == XK_Tab || ksym == XK_ISO_Left_Tab) && !(event->xkey.state & ControlMask)) {
+		W_MoveFocus(bPtr->view, ksym == XK_ISO_Left_Tab || (event->xkey.state & ShiftMask));
+		return;
+	}
+
+	if (ksym == XK_space && bPtr->flags.enabled && W_ViewIsVisible(bPtr->view)) {
+		memset(&click, 0, sizeof(click));
+		click.xbutton.button = Button1;
+
+		click.type = ButtonPress;
+		handleActionEvents(&click, bPtr);
+		XFlush(bPtr->view->screen->display);
+		wusleep(20000);
+
+		/* the action may destroy the button, so don't use it after this */
+		click.type = ButtonRelease;
+		handleActionEvents(&click, bPtr);
+		return;
+	}
+
+	W_RelayKeyEvent(bPtr->view, event);
 }
 
 static void autoRepeat(void *data)

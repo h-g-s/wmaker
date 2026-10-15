@@ -603,6 +603,8 @@ struct W_View {
         unsigned int mapWhenRealized:1; /* map the view when it's realized */
         unsigned int alreadyDead:1;     /* view was freed */
 
+        unsigned int acceptsFocus:1;    /* can receive the keyboard focus with Tab */
+
         unsigned int dontCompressMotion:1; /* motion notify event compress */
         unsigned int notifySizeChanged:1;
         unsigned int dontCompressExpose:1; /* expose event compress */
@@ -681,6 +683,12 @@ void W_SetViewCursor(W_View *view, Cursor cursor);
 void W_SetFocusOfTopLevel(W_View *toplevel, W_View *view);
 
 W_View *W_FocusedViewOfToplevel(W_View *view);
+
+Bool W_MoveFocus(W_View *view, Bool backward);
+
+Bool W_ViewIsVisible(W_View *view);
+
+void W_RelayKeyEvent(W_View *view, XEvent *event);
 
 void W_BroadcastMessage(W_View *targetParent, XEvent *event);
 

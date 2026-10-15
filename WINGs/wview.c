@@ -572,6 +572,77 @@ void W_SetFocusOfTopLevel(W_View * toplevel, W_View * view)
 	}
 }
 
+/*
+ * Depth-first walk, in creation order, of the mapped views below 'view'.
+ * Records the first and last focusable views, the one after 'from' and the
+ * one before it. Children of an unmapped view (e.g. a hidden tab page) are
+ * not visible, so they are not visited.
+ */
+typedef struct {
+	W_View *from, *first, *last, *next, *prev;
+	Bool seen;
+} FocusScan;
+
+static void scanFocusable(W_View *view, FocusScan *scan)
+{
+	W_View *child;
+
+	for (child = view->childrenList; child != NULL; child = child->nextSister) {
+		if (!W_VIEW_MAPPED(child))
+			continue;
+
+		if (child->flags.acceptsFocus) {
+			if (!scan->first)
+				scan->first = child;
+			if (scan->seen && !scan->next)
+				scan->next = child;
+			if (child == scan->from)
+				scan->seen = True;
+			else if (!scan->seen)
+				scan->prev = child;
+			scan->last = child;
+		}
+		scanFocusable(child, scan);
+	}
+}
+
+/*
+ * Moves the focus to the next (or previous) view of the same top level,
+ * wrapping around at the ends. An explicit focus chain takes precedence over
+ * the creation order. Returns True if the focus has moved.
+ */
+Bool W_MoveFocus(W_View *view, Bool backward)
+{
+	W_View *toplevel = W_TopLevelOfView(view);
+	W_View *target = backward ? view->prevFocusChain : view->nextFocusChain;
+	FocusScan scan = { view, NULL, NULL, NULL, NULL, False };
+
+	if (!target) {
+		scanFocusable(toplevel, &scan);
+		if (backward)
+			target = scan.prev ? scan.prev : scan.last;
+		else
+			target = scan.next ? scan.next : scan.first;
+	}
+
+	if (!target || target == view)
+		return False;
+
+	W_SetFocusOfTopLevel(toplevel, target);
+
+	return True;
+}
+
+Bool W_ViewIsVisible(W_View *view)
+{
+	for (; view != NULL; view = view->parent) {
+		if (!W_VIEW_MAPPED(view))
+			return False;
+	}
+
+	return True;
+}
+
 void W_BroadcastMessage(W_View * targetParent, XEvent * event)
 {
 	W_View *target;
