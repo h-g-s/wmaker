@@ -763,6 +763,11 @@ static void handleActionEvents(XEvent * event, void *data)
 		if (event->xbutton.button == Button1) {
 			static const unsigned int next_state[4] = { [0] = 1, [1] = 2, [2] = 0 };
 
+			if (bPtr->view->flags.acceptsFocus
+			    && (bPtr->flags.type == WBTSwitch || bPtr->flags.type == WBTRadio
+				|| bPtr->flags.type == WBTTriState))
+				W_SetFocusOfTopLevel(W_TopLevelOfView(bPtr->view), bPtr->view);
+
 			bPtr->flags.prevSelected = bPtr->flags.selected;
 			bPtr->flags.wasPushed = 0;
 			bPtr->flags.pushed = 1;
