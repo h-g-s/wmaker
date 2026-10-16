@@ -3,6 +3,8 @@
 
 #include <X11/Xresource.h>
 
+static void focusFirstFocusable(W_View *toplevel);
+
 /* the notifications about views */
 
 const char *WMViewSizeDidChangeNotification = "WMViewSizeDidChangeNotification";
@@ -220,6 +222,10 @@ void W_RealizeView(W_View * view)
 
 		ptr = ptr->nextSister;
 	}
+
+	if (view->flags.topLevel && view->flags.mapped
+	    && W_FocusedViewOfToplevel(view) == view)
+		focusFirstFocusable(view);
 }
 
 void W_ReparentView(W_View * view, W_View * newParent, int x, int y)
@@ -263,6 +269,8 @@ void W_MapView(W_View * view)
 			XMapRaised(view->screen->display, view->window);
 			XFlush(view->screen->display);
 			view->flags.mapped = 1;
+			if (view->flags.topLevel && W_FocusedViewOfToplevel(view) == view)
+				focusFirstFocusable(view);
 		} else {
 			view->flags.mapWhenRealized = 1;
 		}
@@ -604,6 +612,15 @@ static void scanFocusable(W_View *view, FocusScan *scan)
 		}
 		scanFocusable(child, scan);
 	}
+}
+
+static void focusFirstFocusable(W_View *toplevel)
+{
+	FocusScan scan = { NULL, NULL, NULL, NULL, NULL, False };
+
+	scanFocusable(toplevel, &scan);
+	if (scan.first)
+		W_SetFocusOfTopLevel(toplevel, scan.first);
 }
 
 /*
