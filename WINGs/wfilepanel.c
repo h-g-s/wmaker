@@ -243,6 +243,7 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonImage(fPtr->trashcanButton, scrPtr->trashcanIcon);
 	WMSetButtonAltImage(fPtr->trashcanButton, scrPtr->altTrashcanIcon);
 	WMSetButtonAction(fPtr->trashcanButton, deleteFile, fPtr);
+	WMSetBalloonTextForView(_("Delete the selected file or directory"), WMWidgetView(fPtr->trashcanButton));
 
 	fPtr->createDirButton = WMCreateCommandButton(fPtr->win);
 	WMMoveWidget(fPtr->createDirButton, 37, 325);
@@ -251,6 +252,7 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonImage(fPtr->createDirButton, scrPtr->createDirIcon);
 	WMSetButtonAltImage(fPtr->createDirButton, scrPtr->altCreateDirIcon);
 	WMSetButtonAction(fPtr->createDirButton, createDir, fPtr);
+	WMSetBalloonTextForView(_("Create a directory"), WMWidgetView(fPtr->createDirButton));
 
 	fPtr->homeButton = WMCreateCommandButton(fPtr->win);
 	WMMoveWidget(fPtr->homeButton, 67, 325);
@@ -259,6 +261,7 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonImage(fPtr->homeButton, scrPtr->homeIcon);
 	WMSetButtonAltImage(fPtr->homeButton, scrPtr->altHomeIcon);
 	WMSetButtonAction(fPtr->homeButton, goHome, fPtr);
+	WMSetBalloonTextForView(_("Go to your home directory"), WMWidgetView(fPtr->homeButton));
 
 	fPtr->disketteButton = WMCreateCommandButton(fPtr->win);
 	WMMoveWidget(fPtr->disketteButton, 97, 325);
@@ -267,6 +270,7 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonImage(fPtr->disketteButton, scrPtr->disketteIcon);
 	WMSetButtonAltImage(fPtr->disketteButton, scrPtr->altDisketteIcon);
 	WMSetButtonAction(fPtr->disketteButton, goFloppy, fPtr);
+	WMSetBalloonTextForView(_("Browse the floppy disk directory"), WMWidgetView(fPtr->disketteButton));
 
 	fPtr->unmountButton = WMCreateCommandButton(fPtr->win);
 	WMMoveWidget(fPtr->unmountButton, 127, 325);
@@ -276,6 +280,7 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonAltImage(fPtr->unmountButton, scrPtr->altUnmountIcon);
 	WMSetButtonAction(fPtr->unmountButton, goUnmount, fPtr);
 	WMSetButtonEnabled(fPtr->unmountButton, False);
+	WMSetBalloonTextForView(_("Unmount (not implemented)"), WMWidgetView(fPtr->unmountButton));
 
 	WMRealizeWidget(fPtr->win);
 	WMMapSubwidgets(fPtr->win);
