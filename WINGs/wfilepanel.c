@@ -32,8 +32,6 @@ typedef struct W_FilePanel {
 	WMButton *homeButton;
 	WMButton *trashcanButton;
 	WMButton *createDirButton;
-	WMButton *disketteButton;
-	WMButton *unmountButton;
 
 	WMView *accessoryView;
 
@@ -73,8 +71,6 @@ static void normalizePath(char *s);
 static void deleteFile(WMWidget *widget, void *p_panel);
 static void createDir(WMWidget *widget, void *p_panel);
 static void goHome(WMWidget *widget, void *p_panel);
-static void goFloppy(WMWidget *widget, void *p_panel);
-static void goUnmount(WMWidget *widget, void *p_panel);
 static void buttonClick(WMWidget *widget, void *p_panel);
 
 static char *getCurrentFileName(WMFilePanel * panel);
@@ -262,25 +258,6 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonAltImage(fPtr->homeButton, scrPtr->altHomeIcon);
 	WMSetButtonAction(fPtr->homeButton, goHome, fPtr);
 	WMSetBalloonTextForView(_("Go to your home directory"), WMWidgetView(fPtr->homeButton));
-
-	fPtr->disketteButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->disketteButton, 97, 325);
-	WMResizeWidget(fPtr->disketteButton, 28, 28);
-	WMSetButtonImagePosition(fPtr->disketteButton, WIPImageOnly);
-	WMSetButtonImage(fPtr->disketteButton, scrPtr->disketteIcon);
-	WMSetButtonAltImage(fPtr->disketteButton, scrPtr->altDisketteIcon);
-	WMSetButtonAction(fPtr->disketteButton, goFloppy, fPtr);
-	WMSetBalloonTextForView(_("Browse the floppy disk directory"), WMWidgetView(fPtr->disketteButton));
-
-	fPtr->unmountButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->unmountButton, 127, 325);
-	WMResizeWidget(fPtr->unmountButton, 28, 28);
-	WMSetButtonImagePosition(fPtr->unmountButton, WIPImageOnly);
-	WMSetButtonImage(fPtr->unmountButton, scrPtr->unmountIcon);
-	WMSetButtonAltImage(fPtr->unmountButton, scrPtr->altUnmountIcon);
-	WMSetButtonAction(fPtr->unmountButton, goUnmount, fPtr);
-	WMSetButtonEnabled(fPtr->unmountButton, False);
-	WMSetBalloonTextForView(_("Unmount (not implemented)"), WMWidgetView(fPtr->unmountButton));
 
 	WMRealizeWidget(fPtr->win);
 	WMMapSubwidgets(fPtr->win);
@@ -736,33 +713,6 @@ out:
 	wfree(file);
 }
 
-static void goUnmount(WMWidget *widget, void *p_panel)
-{
-	/* Not implemented yet */
-	(void) widget;
-	(void) p_panel;
-}
-
-static void goFloppy(WMWidget *widget, void *p_panel)
-{
-	WMFilePanel *panel = p_panel;
-	struct stat filestat;
-	WMScreen *scr = WMWidgetScreen(panel->win);
-
-	/* Parameter not used, but tell the compiler that it is ok */
-	(void) widget;
-
-	if (stat(WINGsConfiguration.floppyPath, &filestat)) {
-		showError(scr, panel->win, _("An error occurred browsing '%s'."), WINGsConfiguration.floppyPath);
-		return;
-	} else if (!S_ISDIR(filestat.st_mode)) {
-		showError(scr, panel->win, _("'%s' is not a directory."), WINGsConfiguration.floppyPath);
-		return;
-	}
-
-	WMSetFilePanelDirectory(panel, WINGsConfiguration.floppyPath);
-}
-
 static void goHome(WMWidget *widget, void *p_panel)
 {
 	WMFilePanel *panel = p_panel;
@@ -802,8 +752,6 @@ static void handleEvents(XEvent * event, void *data)
 			WMMoveWidget(pPtr->trashcanButton, 7, newHeight - (PHEIGHT - 325));
 			WMMoveWidget(pPtr->createDirButton, 37, newHeight - (PHEIGHT - 325));
 			WMMoveWidget(pPtr->homeButton, 67, newHeight - (PHEIGHT - 325));
-			WMMoveWidget(pPtr->disketteButton, 97, newHeight - (PHEIGHT - 325));
-			WMMoveWidget(pPtr->unmountButton, 127, newHeight - (PHEIGHT - 325));
 
 			newColumnCount = (newWidth - 14) / 140;
 			WMSetBrowserMaxVisibleColumns(pPtr->browser, newColumnCount);
