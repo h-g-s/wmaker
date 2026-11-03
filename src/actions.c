@@ -49,6 +49,7 @@
 #include "placement.h"
 #include "misc.h"
 #include "event.h"
+#include "snapshot.h"
 
 
 #ifndef HAVE_FLOAT_MATHFUNC
@@ -234,6 +235,9 @@ void wSetFocusTo(WScreen *scr, WWindow *wwin)
 	}
 	if (napp && wPreferences.highlight_active_app)
 		wApplicationActivate(napp);
+
+	if (wwin && !wwin->flags.internal_window)
+		wSnapshotScheduleFocused(wwin);
 
 	XFlush(dpy);
 	old_scr = scr;
@@ -1521,46 +1525,16 @@ void wIconifyWindow(WWindow *wwin)
 
 		/* extract the window screenshot every time, as the option can be enable anytime */
 		if (wwin->client_win && wwin->flags.mapped) {
-			RImage *mini_preview;
-			XImage *pimg;
-			unsigned int w, h;
-			int x, y;
-			Window baz;
+			RImage *full = wSnapshotGrabWindow(wwin, True);
 
-			XRaiseWindow(dpy, wwin->frame->core->window);
-			XTranslateCoordinates(dpy, wwin->client_win, wwin->screen_ptr->root_win, 0, 0, &x, &y, &baz);
-
-			w = attribs.width;
-			h = attribs.height;
-
-			if (x - attribs.x + attribs.width > wwin->screen_ptr->scr_width)
-				w = wwin->screen_ptr->scr_width - x + attribs.x;
-
-			if (y - attribs.y + attribs.height > wwin->screen_ptr->scr_height)
-				h = wwin->screen_ptr->scr_height - y + attribs.y;
-
-			pimg = XGetImage(dpy, wwin->client_win, 0, 0, w, h, AllPlanes, ZPixmap);
-			if (pimg) {
-				mini_preview = RCreateImageFromXImage(wwin->screen_ptr->rcontext, pimg, NULL);
-				XDestroyImage(pimg);
-
-				if (mini_preview) {
-					set_icon_minipreview(wwin->icon, mini_preview);
-					RReleaseImage(mini_preview);
-				} else {
-					const char *title;
-					char title_buf[32];
-
-					if (wwin->frame->title) {
-						title = wwin->frame->title;
-					} else {
-						snprintf(title_buf, sizeof(title_buf), "(id=0x%lx)", wwin->client_win);
-						title = title_buf;
-					}
-					wwarning(_("creation of mini-preview failed for window \"%s\""), title);
-				}
+			if (full) {
+				set_icon_minipreview(wwin->icon, full);
+				wSnapshotStore(wwin, full);
+				RReleaseImage(full);
 			}
 		}
+	} else if (wwin->client_win && wwin->flags.mapped) {
+		wSnapshotUpdate(wwin, True);
 	}
 
 	wwin->flags.miniaturized = 1;
@@ -1782,6 +1756,8 @@ static void hideWindow(WIcon *icon, int icon_x, int icon_y, WWindow *wwin, int a
 
 	if (wwin->flags.inspector_open)
 		wHideInspectorForWindow(wwin);
+
+	wSnapshotUpdate(wwin, False);
 
 	wwin->flags.hidden = 1;
 	wWindowUnmap(wwin);
@@ -2096,6 +2072,55 @@ void wUnhideApplication(WApplication *wapp, Bool miniwindows, Bool bringToCurren
 #ifdef HIDDENDOT
 	wAppIconPaint(wapp->app_icon);
 #endif
+}
+
+/* Bring back a single minimized or hidden window to the current workspace */
+void wRestoreWindow(WWindow *wwin)
+{
+	WScreen *scr = wwin->screen_ptr;
+	WApplication *wapp;
+	WAppIcon *aicon;
+	WWindow *tmp;
+
+	if (!wwin->flags.hidden) {
+		if (wwin->flags.miniaturized)
+			wDeiconifyWindow(wwin);
+		return;
+	}
+
+	wapp = wApplicationOf(wwin->main_window);
+
+	if (wwin->flags.miniaturized) {
+		wwin->flags.hidden = 0;
+		wDeiconifyWindow(wwin);
+	} else {
+		aicon = wapp ? wapp->app_icon : NULL;
+		if (aicon)
+			unhideWindow(aicon->icon, aicon->x_pos, aicon->y_pos, wwin, True, True);
+		else
+			unhideWindow(NULL, 0, 0, wwin, False, True);
+
+		/* dialogs of this window were hidden along with it */
+		for (tmp = scr->focused_window; tmp; tmp = tmp->prev) {
+			if (tmp != wwin && tmp->transient_for == wwin->client_win
+			    && tmp->flags.hidden && !tmp->flags.miniaturized)
+				unhideWindow(NULL, 0, 0, tmp, False, True);
+		}
+
+		wRaiseFrame(wwin->frame->core);
+		wSetFocusTo(scr, wwin);
+	}
+
+	if (wapp) {
+		wapp->flags.hidden = 0;
+#ifdef HIDDENDOT
+		if (wapp->app_icon)
+			wAppIconPaint(wapp->app_icon);
+#endif
+	}
+
+	if (wPreferences.auto_arrange_icons)
+		wArrangeIcons(scr, True);
 }
 
 void wShowAllWindows(WScreen *scr)

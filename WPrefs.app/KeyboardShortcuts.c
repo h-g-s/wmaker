@@ -119,6 +119,7 @@ static struct keyOption {
 
 	/* Workspace Related */
 	{ "WorkspaceMapKey",  N_("Open workspace pager") },
+	{ "WindowOverviewKey", N_("Show overview of all windows") },
 	{ "NextWorkspaceKey", N_("Switch to next workspace") },
 	{ "PrevWorkspaceKey", N_("Switch to previous workspace") },
 	{ "LastWorkspaceKey", N_("Switch to last used workspace") },

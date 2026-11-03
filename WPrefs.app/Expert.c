@@ -50,6 +50,12 @@ static struct expert_option {
 	{ N_("Enable workspace pager."),
 	  /* default: */ False, OPTION_WMAKER, "EnableWorkspacePager" },
 
+	{ N_("Keep window contents off-screen for previews of covered windows (needs restart)."),
+	  /* default: */ True, OPTION_WMAKER, "CompositeWindowPreviews" },
+
+	{ N_("Show the window overview instead of the switch panel when cycling windows."),
+	  /* default: */ True, OPTION_WMAKER, "CycleWithWindowOverview" },
+
 	{ N_("Do not set non-WindowMaker specific parameters (do not use xset)."),
 	  /* default: */ False, OPTION_USERDEF, "NoXSetStuff" },
 

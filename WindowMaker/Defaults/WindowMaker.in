@@ -104,6 +104,7 @@
 	SingleClickLaunch = NO;
 	StrictWindozeCycle = YES;
 	SwitchPanelOnlyOpen = NO;
+	CycleWithWindowOverview = YES;
 	MiniPreviewSize = 128;
 	IgnoreGtkHints = NO;
 	KeepDockOnPrimaryHead = NO;
@@ -185,6 +186,7 @@
 	ShadeKey = None;
 	SelectKey = None;
 	WorkspaceMapKey = None;
+	WindowOverviewKey = None;
 	FocusNextKey = "Mod1+Tab";
 	FocusPrevKey = "Mod1+Shift+Tab";
 	GroupNextKey = None;

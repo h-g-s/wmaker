@@ -234,6 +234,35 @@ AC_SUBST([LIBXRANDR])dnl
 ]) dnl AC_DEFUN
 
 
+# WM_XEXT_CHECK_XCOMPOSITE
+# ------------------------
+#
+# Check for the X Composite extension, used to capture the content of
+# windows that are covered by other windows. The XRender library is also
+# required, to scale window contents in the server
+# The check depends on variable 'enable_composite' being either:
+#   yes  - detect, fail if not found
+#   no   - do not detect, disable support
+#   auto - detect, disable if not found
+#
+# When found, append appropriate stuff in LIBXCOMPOSITE, and append info to
+# the variable 'supported_xext'
+# When not found, append info to variable 'unsupported'
+AC_DEFUN_ONCE([WM_XEXT_CHECK_XCOMPOSITE],
+[WM_LIB_CHECK([Composite], ["-lXcomposite -lXrender"], [XCompositeQueryExtension], [$XLIBS -lXrender],
+    [wm_save_CFLAGS="$CFLAGS"
+     AS_IF([wm_fn_lib_try_compile "X11/extensions/Xcomposite.h" "Display *dpy;" "XCompositeQueryExtension(dpy, NULL, NULL)" ""],
+        [],
+        [AC_MSG_ERROR([found $CACHEVAR but cannot compile using XComposite header])])
+     AS_IF([wm_fn_lib_try_compile "X11/extensions/Xrender.h" "Display *dpy;" "XRenderQueryExtension(dpy, NULL, NULL)" ""],
+        [],
+        [AC_MSG_ERROR([found $CACHEVAR but cannot compile using XRender header])])
+     CFLAGS="$wm_save_CFLAGS"],
+    [supported_xext], [LIBXCOMPOSITE], [], [-])dnl
+AC_SUBST([LIBXCOMPOSITE])dnl
+]) dnl AC_DEFUN
+
+
 # WM_XEXT_CHECK_XKBFILE
 # ---------------------
 #

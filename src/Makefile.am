@@ -73,6 +73,8 @@ wmaker_SOURCES = 	\
 	session.c \
 	shutdown.h \
 	shutdown.c \
+	snapshot.c \
+	snapshot.h \
 	switchpanel.c \
 	switchpanel.h \
 	stacking.c \
@@ -102,6 +104,10 @@ wmaker_SOURCES = 	\
 	window.h \
 	winmenu.c \
 	winmenu.h \
+	winpreview.c \
+	winpreview.h \
+	winoverview.c \
+	winoverview.h \
 	winspector.h \
 	winspector.c \
 	wmspec.h \
@@ -166,6 +172,7 @@ wmaker_LDADD = \
 	$(top_builddir)/wrlib/libwraster.la\
 	@XLFLAGS@ \
 	@LIBXRANDR@ \
+	@LIBXCOMPOSITE@ \
 	@LIBXINERAMA@ \
 	@LIBXKBFILE@ \
 	@XLIBS@ \

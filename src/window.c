@@ -75,6 +75,8 @@
 #include "winmenu.h"
 #include "osdep.h"
 #include "switchmenu.h"
+#include "snapshot.h"
+#include "winpreview.h"
 
 #ifdef USE_MWM_HINTS
 # include "motif.h"
@@ -245,6 +247,9 @@ void wWindowDestroy(WWindow *wwin)
 	}
 	if (wwin->net_icon_image)
 		RReleaseImage(wwin->net_icon_image);
+
+	wSnapshotRelease(wwin);
+	wWinPreviewForgetWindow(wwin);
 
 	wrelease(wwin);
 }

@@ -404,6 +404,11 @@ static WMArray *makeWindowFlagsArray(int count)
 	return flags;
 }
 
+WMArray *wSwitchPanelWindowList(WScreen *scr, Bool class_only)
+{
+	return makeWindowListArray(scr, True, class_only);
+}
+
 WSwitchPanel *wInitSwitchPanel(WScreen *scr, WWindow *curwin, Bool class_only)
 {
 	int wmScaleWidth, wmScaleHeight;

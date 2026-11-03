@@ -76,6 +76,8 @@
 #include "winmenu.h"
 #include "switchmenu.h"
 #include "wsmap.h"
+#include "winpreview.h"
+#include "winoverview.h"
 
 
 #define MOD_MASK wPreferences.modifier_mask
@@ -857,6 +859,7 @@ static void handleButtonPress(XEvent * event)
 #ifdef BALLOON_TEXT
 	wBalloonHide(scr);
 #endif
+	wWinPreviewButtonPress(event);
 
 	if (!wPreferences.disable_root_mouse && event->xbutton.window == scr->root_win) {
 		if (event->xbutton.button == Button1 && wPreferences.mouse_button1 != WA_NONE) {
@@ -1024,6 +1027,9 @@ static void handlePropertyNotify(XEvent * event)
 	if (wapp) {
 		wClientCheckProperty(wapp->main_window_desc, &event->xproperty);
 	}
+
+	if (!wwin && !wapp)
+		wWindowOverviewPropertyNotify(&event->xproperty);
 }
 
 static void handleClientMessage(XEvent * event)
@@ -1252,14 +1258,22 @@ static void handleEnterNotify(XEvent * event)
 
 		wSetFocusTo(scr, scr->focused_window);
 	}
+	if (wWinPreviewEnterNotify(scr, desc, event)) {
 #ifdef BALLOON_TEXT
-	wBalloonEnteredObject(scr, desc);
+		wBalloonHide(scr);
 #endif
+	} else {
+#ifdef BALLOON_TEXT
+		wBalloonEnteredObject(scr, desc);
+#endif
+	}
 }
 
 static void handleLeaveNotify(XEvent * event)
 {
 	WObjDescriptor *desc = NULL;
+
+	wWinPreviewLeaveNotify(event);
 
 	if (XFindContext(dpy, event->xcrossing.window, w_global.context.client_win, (XPointer *) & desc) != XCNOENT) {
 		if (desc->handle_leavenotify)
@@ -1778,6 +1792,10 @@ static void dispatchWKBDCommand(int command, WScreen *scr, WWindow *wwin, XEvent
 	case WKBD_WORKSPACEMAP:
 		if (wPreferences.enable_workspace_pager)
 			StartWorkspaceMap(scr);
+		break;
+	case WKBD_WINDOWOVERVIEW:
+		if (!CheckFullScreenWindowFocused(scr))
+			StartWindowOverview(scr);
 		break;
 
 	case WKBD_FOCUSNEXT:
@@ -2343,6 +2361,9 @@ static void hotCornerDelay(void *data)
 
 static void handleMotionNotify(XEvent *event)
 {
+	if (wWinPreviewMotionNotify(event))
+		return;
+
 	if (wPreferences.scrollable_menus || wPreferences.hot_corners) {
 		WScreen *scr = wScreenForRootWindow(event->xmotion.root);
 		WMPoint p = wmkpoint(event->xmotion.x_root, event->xmotion.y_root);

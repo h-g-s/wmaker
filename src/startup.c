@@ -45,6 +45,11 @@
 #include <X11/extensions/Xrandr.h>
 #endif
 
+#ifdef USE_COMPOSITE
+#include <X11/extensions/Xcomposite.h>
+#include <X11/extensions/Xrender.h>
+#endif
+
 #include "WindowMaker.h"
 #include "GNUstep.h"
 #include "texture.h"
@@ -70,6 +75,8 @@
 #endif
 
 #include "xutil.h"
+#include "snapshot.h"
+#include "winoverview.h"
 
 /* for SunOS */
 #ifndef SA_RESTART
@@ -621,6 +628,17 @@ void StartUp(Bool defaultScreenOnly)
 	}
 #endif
 
+#ifdef USE_COMPOSITE
+	{
+		int major = 0, minor = 2;
+
+		w_global.xext.composite.supported = XCompositeQueryExtension(dpy, &j, &j)
+			&& XCompositeQueryVersion(dpy, &major, &minor)
+			&& (major > 0 || minor >= 2)
+			&& XRenderQueryExtension(dpy, &j, &j);
+	}
+#endif
+
 	w_global.xext.xkb.supported = XkbQueryExtension(dpy, NULL, &w_global.xext.xkb.event_base, NULL, NULL, NULL);
 #ifdef KEEP_XKB_LOCK_STATUS
 	if (wPreferences.modelock && !w_global.xext.xkb.supported) {
@@ -667,6 +685,8 @@ void StartUp(Bool defaultScreenOnly)
 				continue;
 			}
 		}
+		wSnapshotInitScreen(wScreen[w_global.screen_count]);
+		wWindowOverviewInit(wScreen[w_global.screen_count]);
 		w_global.screen_count++;
 	}
 

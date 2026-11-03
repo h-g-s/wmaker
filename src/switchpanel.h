@@ -26,6 +26,9 @@ WSwitchPanel *wInitSwitchPanel(WScreen *scr, WWindow *curwin, Bool class_only);
 
 void wSwitchPanelDestroy(WSwitchPanel *panel);
 
+/* Windows the switch panel would cycle through, most recently focused first */
+WMArray *wSwitchPanelWindowList(WScreen *scr, Bool class_only);
+
 WWindow *wSwitchPanelSelectNext(WSwitchPanel *panel, int back, int ignore_minimized, Bool class_only);
 WWindow *wSwitchPanelSelectFirst(WSwitchPanel *panel, int back);
 

@@ -666,6 +666,19 @@ m4_divert_pop([INIT_PREPARE])dnl
 WM_XEXT_CHECK_XRANDR
 
 
+dnl Composite support
+dnl =================
+m4_divert_push([INIT_PREPARE])dnl
+AC_ARG_ENABLE([composite],
+    [AS_HELP_STRING([--enable-composite], [enable Composite extension support for window previews of covered windows])],
+    [AS_CASE(["$enableval"],
+        [yes|no], [],
+        [AC_MSG_ERROR([bad value $enableval for --enable-composite]) ]) ],
+    [enable_composite=auto])
+m4_divert_pop([INIT_PREPARE])dnl
+WM_XEXT_CHECK_XCOMPOSITE
+
+
 dnl Math library
 dnl ============
 dnl libWINGS uses math functions, check whether usage requires linking

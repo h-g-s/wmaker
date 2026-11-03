@@ -70,6 +70,8 @@ void wHideApplication(WApplication *wapp);
 void wUnhideApplication(WApplication *wapp, Bool miniwindows,
                         Bool bringToCurrentWS);
 
+void wRestoreWindow(WWindow *wwin);
+
 void wRefreshDesktop(WScreen *scr);
 
 void wArrangeIcons(WScreen *scr, Bool arrangeAll);

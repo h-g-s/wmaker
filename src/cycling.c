@@ -36,6 +36,7 @@
 #include "cycling.h"
 #include "xinerama.h"
 #include "switchpanel.h"
+#include "winoverview.h"
 
 
 static void raiseWindow(WSwitchPanel * swpanel, WWindow * wwin)
@@ -103,6 +104,9 @@ void StartWindozeCycle(WWindow *wwin, XEvent *event, Bool next, Bool class_only)
 
 
 	if (!wwin)
+		return;
+
+	if (wPreferences.cycle_overview && wWindowOverviewCycle(wwin, event, next, class_only))
 		return;
 
 	if (next) {

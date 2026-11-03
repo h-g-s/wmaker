@@ -297,6 +297,7 @@ typedef struct WWindow {
 	int icon_x, icon_y;			/* position of the icon */
 	int icon_w, icon_h;
 	RImage *net_icon_image;			/* Window Image */
+	RImage *snapshot;			/* reduced image of the contents, see snapshot.c */
 	Atom type;
 	char *mark_key_label;		/* Vim-like Window Marking */
 } WWindow;

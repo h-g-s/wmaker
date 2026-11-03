@@ -405,6 +405,8 @@ extern struct WPreferences {
 	char dont_confirm_kill;            /* do not confirm Kill application */
 	char disable_miniwindows;
 	char enable_workspace_pager;
+	char composite_previews;            /* use Composite to snapshot covered windows */
+	char cycle_overview;                /* use the window overview instead of the switch panel */
 	char ignore_gtk_decoration_hints;
 
 	char dont_blink;                   /* do not blink icon selection */
@@ -639,6 +641,13 @@ extern struct wmaker_global_variables {
 			Bool supported;
 			int event_base;
 		} randr;
+#endif
+
+#ifdef USE_COMPOSITE
+		struct {
+			Bool supported;
+			Bool redirected;	/* window contents are kept off-screen */
+		} composite;
 #endif
 
 		/*
