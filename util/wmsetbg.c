@@ -353,15 +353,14 @@ static BackgroundTexture *parseTexture(RContext * rc, char *text)
 		}
 		XAllocColor(dpy, DefaultColormap(dpy, scr), &color);
 
-		/* Compositors may display the published root pixmap without tiling it. */
-		pixmap = XCreatePixmap(dpy, root, scrWidth, scrHeight, DefaultDepth(dpy, scr));
+		pixmap = XCreatePixmap(dpy, root, 8, 8, DefaultDepth(dpy, scr));
 		XSetForeground(dpy, DefaultGC(dpy, scr), color.pixel);
-		XFillRectangle(dpy, pixmap, DefaultGC(dpy, scr), 0, 0, scrWidth, scrHeight);
+		XFillRectangle(dpy, pixmap, DefaultGC(dpy, scr), 0, 0, 8, 8);
 
 		texture->pixmap = pixmap;
 		texture->color = color;
-		texture->width = scrWidth;
-		texture->height = scrHeight;
+		texture->width = 8;
+		texture->height = 8;
 	} else if (strcasecmp(type, "vgradient") == 0
 		   || strcasecmp(type, "dgradient") == 0 || strcasecmp(type, "hgradient") == 0) {
 		XColor color;
@@ -819,10 +818,16 @@ static void setupTexture(RContext * rc, BackgroundTexture ** textures, int *maxT
 		*maxTextures = workspace;
 }
 
-static Pixmap duplicatePixmap(Pixmap pixmap, int width, int height)
+/*
+ * Publish a full-screen copy: compositors draw _XROOTPMAP_ID as-is
+ * instead of tiling it like the X server does for the root background.
+ */
+static Pixmap duplicatePixmap(Pixmap pixmap)
 {
 	Display *tmpDpy;
 	Pixmap copyP;
+	XGCValues gcv;
+	GC gc;
 
 	/* must open a new display or the RetainPermanent will
 	 * leave stuff allocated in RContext unallocated after exit */
@@ -834,8 +839,12 @@ static Pixmap duplicatePixmap(Pixmap pixmap, int width, int height)
 	} else {
 		XSync(dpy, False);
 
-		copyP = XCreatePixmap(tmpDpy, root, width, height, DefaultDepth(tmpDpy, scr));
-		XCopyArea(tmpDpy, pixmap, copyP, DefaultGC(tmpDpy, scr), 0, 0, width, height, 0, 0);
+		copyP = XCreatePixmap(tmpDpy, root, scrWidth, scrHeight, DefaultDepth(tmpDpy, scr));
+		gcv.fill_style = FillTiled;
+		gcv.tile = pixmap;
+		gc = XCreateGC(tmpDpy, copyP, GCFillStyle | GCTile, &gcv);
+		XFillRectangle(tmpDpy, copyP, gc, 0, 0, scrWidth, scrHeight);
+		XFreeGC(tmpDpy, gc);
 		XSync(tmpDpy, False);
 
 		XSetCloseDownMode(tmpDpy, RetainPermanent);
@@ -938,7 +947,7 @@ static void changeTexture(BackgroundTexture * texture)
 	{
 		Pixmap pixmap;
 
-		pixmap = duplicatePixmap(texture->pixmap, texture->width, texture->height);
+		pixmap = duplicatePixmap(texture->pixmap);
 
 		setPixmapProperty(pixmap);
 	}

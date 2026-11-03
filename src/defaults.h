@@ -37,6 +37,7 @@ void wDefaultUpdateIcons(WScreen *scr);
 void wDefaultRefreshWorkspaceBackground(WScreen *scr);
 void wReadStaticDefaults(WMPropList *dict);
 void wDefaultsCheckDomains(void *arg);
+void wDefaultsReconfigure(void);
 void wSaveDefaults(WScreen *scr);
 void wDefaultFillAttributes(const char *instance, const char *class,
                             WWindowAttributes *attr, WWindowAttributes *mask,

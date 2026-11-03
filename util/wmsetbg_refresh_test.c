@@ -105,21 +105,36 @@ int main(int argc, char **argv)
 	assert(textures[0]->width == attrs.width);
 	assert(textures[0]->height == attrs.height);
 	assert(textures[3]->solid);
-	assert(XGetGeometry(dpy, textures[3]->pixmap, &pixmap_root, &x, &y,
-	                    &width, &height, &border, &depth));
-	assert(width == (unsigned int)attrs.width && height == (unsigned int)attrs.height);
-	{
-		XImage *image = XGetImage(dpy, textures[3]->pixmap, 0, 0,
-		                         width, height, AllPlanes, ZPixmap);
-
-		assert(image);
-		assert(XGetPixel(image, 0, 0) == textures[3]->color.pixel);
-		assert(XGetPixel(image, width - 1, height - 1) == textures[3]->color.pixel);
-		XDestroyImage(image);
-	}
 	assert(XGetGeometry(dpy, textures[0]->pixmap, &pixmap_root, &x, &y,
 	                    &width, &height, &border, &depth));
 	assert(width == (unsigned int)attrs.width && height == (unsigned int)attrs.height);
+
+	/* Small textures must be published tiled over the whole screen. */
+	{
+		BackgroundTexture tile = { 0 };
+		Pixmap published;
+		XImage *image;
+		int cx = attrs.width - 1, cy = attrs.height - 1;
+
+		tile.pixmap = XCreatePixmap(dpy, root, 2, 2, DefaultDepth(dpy, scr));
+		tile.width = tile.height = 2;
+		XSetForeground(dpy, DefaultGC(dpy, scr), BlackPixel(dpy, scr));
+		XFillRectangle(dpy, tile.pixmap, DefaultGC(dpy, scr), 0, 0, 2, 2);
+		XSetForeground(dpy, DefaultGC(dpy, scr), WhitePixel(dpy, scr));
+		XDrawPoint(dpy, tile.pixmap, DefaultGC(dpy, scr), 1, 1);
+		changeTexture(&tile);
+		wait_background_size(attrs.width, attrs.height, NULL);
+		assert(getRootPixmapAtom(XInternAtom(dpy, "_XROOTPMAP_ID", False), &published));
+		image = XGetImage(dpy, published, 0, 0, attrs.width, attrs.height,
+		                  AllPlanes, ZPixmap);
+		assert(image);
+		assert(XGetPixel(image, 0, 0) == BlackPixel(dpy, scr));
+		assert(XGetPixel(image, 1, 1) == WhitePixel(dpy, scr));
+		assert(XGetPixel(image, cx, cy) ==
+		       ((cx & cy & 1) ? WhitePixel(dpy, scr) : BlackPixel(dpy, scr)));
+		XDestroyImage(image);
+		XFreePixmap(dpy, tile.pixmap);
+	}
 
 	/* A second resize must invalidate the cache again, including shared entries. */
 	scrWidth = 1;

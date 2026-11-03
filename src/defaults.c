@@ -128,6 +128,7 @@ static WDECallbackUpdate setPTitleBack;
 static WDECallbackUpdate setUTitleBack;
 static WDECallbackUpdate setResizebarBack;
 static WDECallbackUpdate setWorkspaceBack;
+static time_t workspace_back_applied;
 static WDECallbackUpdate setWorkspaceSpecificBack;
 static WDECallbackUpdate setMenuTitleColor;
 static WDECallbackUpdate setMenuTextColor;
@@ -3282,6 +3283,8 @@ static int setWorkspaceBack(WScreen * scr, WDefaultEntry * entry, void *tdata, v
 	(void) entry;
 	(void) bar;
 
+	workspace_back_applied = time(NULL);
+
 	if (scr->flags.backimage_helper_launched) {
 		char *str;
 
@@ -3323,14 +3326,9 @@ static int setWorkspaceBack(WScreen * scr, WDefaultEntry * entry, void *tdata, v
 	return 0;
 }
 
-void wDefaultRefreshWorkspaceBackground(WScreen *scr)
+static void reapplyWorkspaceBack(WScreen *scr)
 {
 	unsigned int i;
-
-	if (scr->flags.backimage_helper_launched) {
-		SendHelperMessage(scr, 'R', scr->current_workspace + 1, NULL);
-		return;
-	}
 
 	for (i = 0; i < wlengthof(optionList); i++) {
 		WDefaultEntry *entry = &optionList[i];
@@ -3346,6 +3344,42 @@ void wDefaultRefreshWorkspaceBackground(WScreen *scr)
 		if (getWSBackground(scr, entry, value, NULL, &tdata) && tdata)
 			setWorkspaceBack(scr, entry, tdata, NULL);
 		return;
+	}
+}
+
+void wDefaultRefreshWorkspaceBackground(WScreen *scr)
+{
+	if (scr->flags.backimage_helper_launched) {
+		SendHelperMessage(scr, 'R', scr->current_workspace + 1, NULL);
+		return;
+	}
+	reapplyWorkspaceBack(scr);
+}
+
+/*
+ * Handle an explicit reconfigure request (e.g. from setstyle). Re-applying
+ * an unchanged theme must still restore its background, which may have been
+ * replaced by another program, so push it again unless the reload (or an
+ * inotify-triggered reload just before) already did.
+ */
+void wDefaultsReconfigure(void)
+{
+	int i;
+
+	wDefaultsCheckDomains(NULL);
+
+	if (time(NULL) - workspace_back_applied <= 1)
+		return;
+
+	for (i = 0; i < w_global.screen_count; i++) {
+		WScreen *scr = wScreenWithNumber(i);
+
+		if (!scr)
+			continue;
+		if (scr->flags.backimage_helper_launched)
+			SendHelperMessage(scr, 'C', scr->current_workspace + 1, NULL);
+		else
+			reapplyWorkspaceBack(scr);
 	}
 }
 

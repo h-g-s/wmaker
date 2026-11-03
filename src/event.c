@@ -1068,7 +1068,7 @@ static void handleClientMessage(XEvent * event)
 
 		if (strncmp(command, "Reconfigure", sizeof("Reconfigure")) == 0) {
 			wwarning(_("Got Reconfigure command"));
-			wDefaultsCheckDomains(NULL);
+			wDefaultsReconfigure();
 		} else {
 			wwarning(_("Got unknown command %s"), command);
 		}
