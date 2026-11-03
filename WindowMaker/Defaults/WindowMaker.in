@@ -108,6 +108,7 @@
 	MiniPreviewSize = 128;
 	IgnoreGtkHints = NO;
 	KeepDockOnPrimaryHead = NO;
+	HotplugMonitor = YES;
 	MenuStyle = normal;
 	WidgetColor = (solid, gray);
 	WorkspaceSpecificBack = ();

@@ -34,6 +34,7 @@ void wDefaultsMergeGlobalMenus(WDDomain *menuDomain);
 void wReadDefaults(WScreen *scr, WMPropList *new_dict);
 void wReadKeybindings(WScreen *scr, WMPropList *dict);
 void wDefaultUpdateIcons(WScreen *scr);
+void wDefaultRefreshWorkspaceBackground(WScreen *scr);
 void wReadStaticDefaults(WMPropList *dict);
 void wDefaultsCheckDomains(void *arg);
 void wSaveDefaults(WScreen *scr);

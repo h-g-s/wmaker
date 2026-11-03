@@ -140,7 +140,7 @@ static struct expert_option {
 
 #ifdef USE_RANDR
 	{ N_("Automatically (de)activate monitors on hotplug events."),
-	  /* default: */ False, OPTION_WMAKER, "HotplugMonitor"},
+	  /* default: */ True, OPTION_WMAKER, "HotplugMonitor"},
 #endif
 };
 

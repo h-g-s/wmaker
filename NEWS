@@ -153,13 +153,17 @@ in ~/GNUstep/Defaults/WindowMaker (NO by default).
 RandR and multi-monitor improvements
 ------------------------------------
 
-RandR version >= 1.3 is automatically enabled when detected. By default,
-it operates in static mode, requiring the screen layout to be defined
-manually. A new "HotplugMonitor" option in ~/GNUstep/Defaults/WindowMaker
-(NO by default) enables automatic monitor detection on hotplug events,
-adding newly connected monitors to the right of the existing layout.
+RandR version >= 1.3 is automatically enabled when detected. The
+"HotplugMonitor" option in ~/GNUstep/Defaults/WindowMaker (YES by default)
+automatically activates newly connected monitors to the right of the
+existing layout. Set it to NO to manage the layout manually with tools
+such as xrandr or arandr. Existing explicit NO settings are preserved.
 This option is also available in WPrefs expert panel under
 "Automatically (de)activate monitors on hotplug events".
+
+Workspace backgrounds are re-rendered after monitor geometry changes,
+including layouts configured with external tools. The wallpaper helper
+refreshes its cached backgrounds and paints images on each active head.
 
 
 Titlebar language button revamp
@@ -3448,5 +3452,4 @@ them for a while.
 	remove the files in /usr/local/share/WindowMaker before installation
 
 	the /usr/local/share/pixmaps directory can be removed
-
 

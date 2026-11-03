@@ -46,6 +46,10 @@
 # endif
 #endif
 
+#ifdef USE_RANDR
+# include <X11/extensions/Xrandr.h>
+#endif
+
 #ifdef HAVE_STDNORETURN
 #include <stdnoreturn.h>
 #endif
@@ -74,7 +78,7 @@ int scrX, scrY;
 WXineramaInfo xineInfo;
 
 Bool smooth = False;
-#ifdef USE_XINERAMA
+#if defined(USE_XINERAMA) || defined(USE_RANDR)
 Bool xineStretch = False;
 #endif
 
@@ -104,6 +108,8 @@ static noreturn void quit(int rcode)
 
 static void initXinerama(void)
 {
+	if (xineInfo.screens)
+		wfree(xineInfo.screens);
 	xineInfo.screens = NULL;
 	xineInfo.count = 0;
 #ifdef USE_XINERAMA
@@ -132,6 +138,9 @@ static void initXinerama(void)
 
 		xine_screens = XineramaQueryScreens(dpy, &xineInfo.count);
 
+		if (!xine_screens)
+			xineInfo.count = 0;
+
 		xineInfo.screens = wmalloc(sizeof(WMRect) * (xineInfo.count + 1));
 
 		for (i = 0; i < xineInfo.count; i++) {
@@ -144,6 +153,40 @@ static void initXinerama(void)
 	}
 # endif				/* !SOLARIS_XINERAMA */
 #endif				/* USE_XINERAMA */
+#ifdef USE_RANDR
+	if (xineInfo.count == 0) {
+		XRRScreenResources *resources;
+		int major = 1, minor = 3;
+		int i;
+
+		if (!XRRQueryVersion(dpy, &major, &minor) ||
+		    major < 1 || (major == 1 && minor < 3))
+			return;
+		resources = XRRGetScreenResourcesCurrent(dpy, root);
+		if (!resources) {
+			wwarning("could not query RandR screen resources");
+			return;
+		}
+		if (xineInfo.screens)
+			wfree(xineInfo.screens);
+		xineInfo.screens = wmalloc(sizeof(WMRect) * (resources->ncrtc + 1));
+		for (i = 0; i < resources->ncrtc; i++) {
+			XRRCrtcInfo *crtc = XRRGetCrtcInfo(dpy, resources, resources->crtcs[i]);
+
+			if (crtc && crtc->mode != None && crtc->width && crtc->height) {
+				WMRect *rect = &xineInfo.screens[xineInfo.count++];
+
+				rect->pos.x = crtc->x;
+				rect->pos.y = crtc->y;
+				rect->size.width = crtc->width;
+				rect->size.height = crtc->height;
+			}
+			if (crtc)
+				XRRFreeCrtcInfo(crtc);
+		}
+		XRRFreeScreenResources(resources);
+	}
+#endif
 }
 
 static RImage *loadImage(RContext * rc, const char *file)
@@ -310,14 +353,15 @@ static BackgroundTexture *parseTexture(RContext * rc, char *text)
 		}
 		XAllocColor(dpy, DefaultColormap(dpy, scr), &color);
 
-		pixmap = XCreatePixmap(dpy, root, 8, 8, DefaultDepth(dpy, scr));
+		/* Compositors may display the published root pixmap without tiling it. */
+		pixmap = XCreatePixmap(dpy, root, scrWidth, scrHeight, DefaultDepth(dpy, scr));
 		XSetForeground(dpy, DefaultGC(dpy, scr), color.pixel);
-		XFillRectangle(dpy, pixmap, DefaultGC(dpy, scr), 0, 0, 8, 8);
+		XFillRectangle(dpy, pixmap, DefaultGC(dpy, scr), 0, 0, scrWidth, scrHeight);
 
 		texture->pixmap = pixmap;
 		texture->color = color;
-		texture->width = 8;
-		texture->height = 8;
+		texture->width = scrWidth;
+		texture->height = scrHeight;
 	} else if (strcasecmp(type, "vgradient") == 0
 		   || strcasecmp(type, "dgradient") == 0 || strcasecmp(type, "hgradient") == 0) {
 		XColor color;
@@ -564,7 +608,7 @@ static BackgroundTexture *parseTexture(RContext * rc, char *text)
 				if (!image)
 					break;
 
-#ifdef USE_XINERAMA
+#if defined(USE_XINERAMA) || defined(USE_RANDR)
 				if (xineInfo.count && ! xineStretch) {
 					int i;
 					for (i = 0; i < xineInfo.count; ++i) {
@@ -900,6 +944,45 @@ static void changeTexture(BackgroundTexture * texture)
 	}
 }
 
+static void refreshTextures(RContext *rc, BackgroundTexture **textures, int maxTextures)
+{
+	XWindowAttributes attrs;
+	int i, j;
+
+	if (!XGetWindowAttributes(dpy, root, &attrs)) {
+		wwarning("could not query root window geometry for background refresh");
+		return;
+	}
+	scrWidth = attrs.width;
+	scrHeight = attrs.height;
+	initXinerama();
+
+	for (i = 0; i <= maxTextures; i++) {
+		BackgroundTexture *old = textures[i];
+		BackgroundTexture *new;
+
+		if (!old)
+			continue;
+		for (j = 0; j < i; j++) {
+			if (textures[j] == old)
+				break;
+		}
+		if (j < i)
+			continue;
+		new = parseTexture(rc, old->spec);
+		if (!new) {
+			wwarning("could not refresh workspace %d background", i);
+			continue;
+		}
+		new->refcount = old->refcount;
+		for (j = i; j <= maxTextures; j++) {
+			if (textures[j] == old)
+				textures[j] = new;
+		}
+		freeTexture(old);
+	}
+}
+
 static int readmsg(int fd, char *buffer, int size)
 {
 	int count;
@@ -920,6 +1003,7 @@ static int readmsg(int fd, char *buffer, int size)
  * Message Format:
  * sizeSntexture_spec - sets the texture for workspace n
  * sizeCn - change background texture to the one for workspace n
+ * sizeRn - re-render backgrounds for the current geometry and select workspace n
  * sizePpath - set the pixmap search path
  *
  * n is 4 bytes
@@ -992,6 +1076,9 @@ static noreturn void helperLoop(RContext * rc)
 			setupTexture(rc, textures, &maxTextures, workspace, &buffer[5]);
 			break;
 
+		case 'R':
+			refreshTextures(rc, textures, maxTextures);
+			/* fall through */
 		case 'C':
 #ifdef DEBUG
 			printf("change texture %i\n", workspace);
@@ -1194,7 +1281,7 @@ static void print_help(void)
 	puts(" -d, --dither                  dither image");
 	puts(" -m, --match                   match  colors");
 	puts(" -S, --smooth                  smooth scaled image");
-#ifdef USE_XINERAMA
+#if defined(USE_XINERAMA) || defined(USE_RANDR)
 	puts(" -X, --xinerama                stretch image across Xinerama heads");
 #endif
 	puts(" -b, --back-color <color>      background color");
@@ -1310,7 +1397,7 @@ int main(int argc, char **argv)
 			obey_user++;
 		} else if (strcmp(argv[i], "-S") == 0 || strcmp(argv[i], "--smooth") == 0) {
 			smooth = True;
-#ifdef USE_XINERAMA
+#if defined(USE_XINERAMA) || defined(USE_RANDR)
 		} else if (strcmp(argv[i], "-X") == 0 || strcmp(argv[i], "--xinerama") == 0) {
 			xineStretch = True;
 #endif

@@ -140,3 +140,5 @@ WPrefs.app/WPrefs.desktop
 *~
 
 .pc
+src/randr_hotplug_test
+util/wmsetbg_refresh_test

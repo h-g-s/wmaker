@@ -530,7 +530,7 @@ WDefaultEntry optionList[] = {
 	    &wPreferences.keep_dock_on_primary_head, getBool, updateDock,
 	    NULL, NULL},
 #ifdef USE_RANDR
-	{"HotplugMonitor", "NO", NULL,
+	{"HotplugMonitor", "YES", NULL,
 	    &wPreferences.hotplug_monitor, getBool, NULL, NULL, NULL},
 #endif
 	{"HotCorners", "NO", NULL,
@@ -3321,6 +3321,32 @@ static int setWorkspaceBack(WScreen * scr, WDefaultEntry * entry, void *tdata, v
 	WMReleasePropList(value);
 
 	return 0;
+}
+
+void wDefaultRefreshWorkspaceBackground(WScreen *scr)
+{
+	unsigned int i;
+
+	if (scr->flags.backimage_helper_launched) {
+		SendHelperMessage(scr, 'R', scr->current_workspace + 1, NULL);
+		return;
+	}
+
+	for (i = 0; i < wlengthof(optionList); i++) {
+		WDefaultEntry *entry = &optionList[i];
+		WMPropList *value;
+		void *tdata = NULL;
+
+		if (strcmp(entry->key, "WorkspaceBack") != 0)
+			continue;
+
+		value = WMGetFromPLDictionary(w_global.domain.wmaker->dictionary, entry->plkey);
+		if (!value)
+			value = entry->plvalue;
+		if (getWSBackground(scr, entry, value, NULL, &tdata) && tdata)
+			setWorkspaceBack(scr, entry, tdata, NULL);
+		return;
+	}
 }
 
 static int setWidgetColor(WScreen * scr, WDefaultEntry * entry, void *tdata, void *foo)

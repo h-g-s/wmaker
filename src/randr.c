@@ -33,6 +33,7 @@
 #include "dock.h"
 #include "workspace.h"
 #include "actions.h"
+#include "defaults.h"
 
 #define RANDR_MAX_OUTPUTS     32
 #define RANDR_DEBOUNCE_DELAY  100   /* milliseconds */
@@ -113,13 +114,23 @@ static int wRandR_PrimaryHeadIndex(Window root, const RROutput *xids, int count)
 }
 
 /* Push RandR geometry into the Xinerama head layer */
-static void wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
+static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
 {
     WMRect new_screens[RANDR_MAX_OUTPUTS];
     RROutput new_xids[RANDR_MAX_OUTPUTS];   /* parallel: XID of each head */
     int count = 0;
     int old_count;
     int i;
+    XWindowAttributes attrs;
+    Bool changed;
+
+    if (!XGetWindowAttributes(dpy, scr->root_win, &attrs)) {
+        wwarning("RandR: could not query root window geometry");
+        return False;
+    }
+    changed = scr->scr_width != attrs.width || scr->scr_height != attrs.height;
+    scr->scr_width = attrs.width;
+    scr->scr_height = attrs.height;
 
     for (i = 0; i < state->n_outputs && count < RANDR_MAX_OUTPUTS; i++) {
         WRandROutput *o = &state->outputs[i];
@@ -160,6 +171,19 @@ static void wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
 
     old_count = wXineramaHeads(scr);
 
+    if (old_count != count || !scr->xine_info.screens) {
+        changed = True;
+    } else {
+        for (i = 0; i < count; i++) {
+            WMRect *old = &scr->xine_info.screens[i];
+            WMRect *new = &new_screens[i];
+
+            if (old->pos.x != new->pos.x || old->pos.y != new->pos.y ||
+                old->size.width != new->size.width || old->size.height != new->size.height)
+                changed = True;
+        }
+    }
+
     /* Replace the screens array */
     if (scr->xine_info.screens)
         wfree(scr->xine_info.screens);
@@ -169,10 +193,6 @@ static void wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
     scr->xine_info.count = count;
 
     scr->xine_info.primary_head = wRandR_PrimaryHeadIndex(scr->root_win, new_xids, count);
-
-    /* Refresh cached screen dimensions (updated by XRRUpdateConfiguration) */
-    scr->scr_width = WidthOfScreen(ScreenOfDisplay(dpy, scr->screen));
-    scr->scr_height = HeightOfScreen(ScreenOfDisplay(dpy, scr->screen));
 
     /* Reallocate per-head usable area arrays if the head count changed */
     if (old_count != count) {
@@ -191,6 +211,8 @@ static void wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
         scr->usableArea[i].x2 = scr->totalUsableArea[i].x2 = r->pos.x + r->size.width;
         scr->usableArea[i].y2 = scr->totalUsableArea[i].y2 = r->pos.y + r->size.height;
     }
+
+    return changed;
 }
 
 /* Bring any off-screen windows in */
@@ -329,7 +351,6 @@ static Bool wRandR_AutoDeactivate(WScreen *scr, WRandRState *state, XRRScreenRes
  * Returns True if at least one output was activated */
 static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResources *sr)
 {
-    Bool activated = False;
     int i, j;
 
     for (i = 0; i < state->n_outputs; i++) {
@@ -341,10 +362,12 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
         int mode_w = 0, mode_h = 0;
         int new_x = 0;
         int new_vw, new_vh;
+        int min_w, min_h, max_w, max_h;
+        XWindowAttributes attrs;
         Status ret;
 
         /* Only process newly connected outputs that have no CRTC yet */
-        if (!o->connected || o->crtc != None)
+        if (!o->connected || o->crtc != None || o->stale)
             continue;
 
         oi = XRRGetOutputInfo(dpy, sr, o->xid);
@@ -406,6 +429,13 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
         if (mode_w == 0 || mode_h == 0)
             continue;
 
+        if (rotation & (RR_Rotate_90 | RR_Rotate_270)) {
+            int tmp = mode_w;
+
+            mode_w = mode_h;
+            mode_h = tmp;
+        }
+
         /* Position it to the right of all currently active outputs, same as GNOME */
         for (j = 0; j < state->n_outputs; j++) {
             WRandROutput *a = &state->outputs[j];
@@ -419,30 +449,49 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
         }
 
         /* Expand virtual framebuffer if the new head exceeds current size */
+        if (!XGetWindowAttributes(dpy, scr->root_win, &attrs) ||
+            !XRRGetScreenSizeRange(dpy, scr->root_win, &min_w, &min_h, &max_w, &max_h)) {
+            wwarning("RandR: could not query screen size limits for output %s", o->name);
+            continue;
+        }
         new_vw = new_x + mode_w;
-        new_vh = mode_h > scr->scr_height ? mode_h : scr->scr_height;
+        if (new_vw < attrs.width)
+            new_vw = attrs.width;
+        new_vh = mode_h > attrs.height ? mode_h : attrs.height;
 
-        if (new_vw > scr->scr_width || new_vh > scr->scr_height) {
+        if (new_vw < min_w) new_vw = min_w;
+        if (new_vh < min_h) new_vh = min_h;
+        if (new_vw > max_w || new_vh > max_h) {
+            wwarning("RandR: output %s would exceed the maximum screen size %dx%d",
+                     o->name, max_w, max_h);
+            continue;
+        }
+
+        if (new_vw > attrs.width || new_vh > attrs.height) {
             int mm_w = (int)((long)WidthMMOfScreen(ScreenOfDisplay(dpy, scr->screen))
-                          * new_vw / scr->scr_width);
+                          * new_vw / attrs.width);
             int mm_h = (int)((long)HeightMMOfScreen(ScreenOfDisplay(dpy, scr->screen))
-                          * new_vh / scr->scr_height);
+                          * new_vh / attrs.height);
             XRRSetScreenSize(dpy, scr->root_win, new_vw, new_vh, mm_w, mm_h);
         }
 
-        ret = XRRSetCrtcConfig(dpy, sr, free_crtc, sr->timestamp,
+        ret = XRRSetCrtcConfig(dpy, sr, free_crtc, CurrentTime,
                                new_x, 0, best_mode, rotation,
                                &o->xid, 1);
         if (ret == RRSetConfigSuccess) {
             wwarning("RandR: auto-activated output %s at +%d+0", o->name, new_x);
-            activated = True;
+            /* Re-query resources before assigning another output: CRTC use,
+             * framebuffer size and configuration timestamps have changed. */
+            return True;
         } else {
             wwarning("RandR: failed to auto-activate output %s", o->name);
         }
     }
 
-    return activated;
+    return False;
 }
+
+static void wRandRDebounceTimerFired(void *data);
 
 /* Synchronize RandR state with the X server */
 static void wRandR_Update(WScreen *scr)
@@ -450,6 +499,7 @@ static void wRandR_Update(WScreen *scr)
     WRandRState *state = (WRandRState *)scr->randr_state;
     XRRScreenResources *sr;
     int i, j;
+    Bool geometry_changed;
 
     /* Assume all outputs removed until server confirms */
     for (i = 0; i < state->n_outputs; i++)
@@ -514,10 +564,15 @@ static void wRandR_Update(WScreen *scr)
     if (wPreferences.hotplug_monitor) {
         Bool changed;
 
-        changed  = wRandR_AutoDeactivate(scr, state, sr);
-        changed |= wRandR_AutoActivate(scr, state, sr);
+        changed = wRandR_AutoDeactivate(scr, state, sr);
+        if (!changed)
+            changed = wRandR_AutoActivate(scr, state, sr);
         if (changed) {
             XRRFreeScreenResources(sr);
+            if (scr->randr_debounce_timer)
+                WMDeleteTimerHandler(scr->randr_debounce_timer);
+            scr->randr_debounce_timer =
+                WMAddTimerHandler(RANDR_DEBOUNCE_DELAY, wRandRDebounceTimerFired, scr);
             return;
         }
     }
@@ -536,7 +591,10 @@ static void wRandR_Update(WScreen *scr)
 
     /* Apply new geometry to the Xinerama head layer */
     i = scr->xine_info.primary_head;
-    wRandR_ApplyToXinerama(scr, state);
+    geometry_changed = wRandR_ApplyToXinerama(scr, state);
+
+    if (geometry_changed)
+        wDefaultRefreshWorkspaceBackground(scr);
 
     /* Move the dock if needed */
     if (scr->dock &&

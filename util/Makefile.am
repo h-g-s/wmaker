@@ -54,7 +54,14 @@ wmsetbg_LDADD = \
 	$(top_builddir)/WINGs/libWINGs.la \
 	$(top_builddir)/WINGs/libWUtil.la \
 	$(top_builddir)/wrlib/libwraster.la \
-	@XLFLAGS@ @LIBXINERAMA@ @XLIBS@ @INTLIBS@
+	@XLFLAGS@ @LIBXINERAMA@ @LIBXRANDR@ @XLIBS@ @INTLIBS@
+
+check_PROGRAMS = wmsetbg_refresh_test
+wmsetbg_refresh_test_SOURCES = wmsetbg_refresh_test.c
+wmsetbg_refresh_test_LDADD = $(wmsetbg_LDADD)
+
+check-local: wmsetbg_refresh_test
+	./wmsetbg_refresh_test || test $$? -eq 77
 
 wmgenmenu_LDADD = \
 	$(top_builddir)/WINGs/libWUtil.la \
