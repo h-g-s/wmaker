@@ -1024,13 +1024,32 @@ static void selectWindow(WMWidget *bPtr, void *data)
 	}
 }
 
+static int layoutInspectorOptions(WMFrame *frame, WMButton **buttons, int count, int width, int top)
+{
+	WMFont *font = WMDefaultSystemFont(WMWidgetScreen(frame));
+	int y = WMFontHeight(font) + 8;
+	int i;
+
+	WMReleaseFont(font);
+	for (i = 0; i < count; i++) {
+		WMSize size = WMGetButtonPreferredSize(buttons[i]);
+
+		WMMoveWidget(buttons[i], 10, y);
+		WMResizeWidget(buttons[i], width - 20, size.height);
+		y += size.height + 2;
+	}
+	WMMoveWidget(frame, 15, top);
+	WMResizeWidget(frame, width, y + 8);
+	return top + y + 8;
+}
+
 static InspectorPanel *createInspectorForWindow(WWindow *wwin, int xpos, int ypos, Bool showSelectPanel)
 {
 	WScreen *scr = wwin->screen_ptr;
 	InspectorPanel *panel;
 	Window parent;
 	char *str = NULL, *tmp = NULL;
-	int x, y, btn_width, frame_width;
+	int x, y, btn_width, frame_width, pwidth, pheight;
 	WMButton *selectedBtn = NULL;
 
 	spec_text = _("The configuration will apply to all\n"
@@ -1161,6 +1180,51 @@ static InspectorPanel *createInspectorForWindow(WWindow *wwin, int xpos, int ypo
 	create_tab_icon_workspace(wwin, panel);
 	create_tab_app_specific(wwin, panel, frame_width);
 
+	{
+		WMButton *actions[] = { panel->revertBtn, panel->applyBtn, panel->saveBtn };
+		WMSize popup = WMGetPopUpButtonPreferredSize(panel->pagePopUp);
+		int i, bottom, advancedBottom, top = WMAX(45, 15 + (int)popup.height + 10);
+		int actionHeight = 28;
+
+		pwidth = WMAX(PWIDTH, popup.width + 50);
+		for (i = 0; i < wlengthof(panel->attrChk); i++)
+			pwidth = WMAX(pwidth, WMGetButtonPreferredSize(panel->attrChk[i]).width + 50);
+		for (i = 0; i < wlengthof(panel->moreChk); i++)
+			pwidth = WMAX(pwidth, WMGetButtonPreferredSize(panel->moreChk[i]).width + 50);
+		for (i = 0; i < wlengthof(actions); i++) {
+			WMSize size = WMGetButtonPreferredSize(actions[i]);
+
+			pwidth = WMAX(pwidth, 3 * (int)size.width + 50);
+			actionHeight = WMAX(actionHeight, size.height);
+		}
+		frame_width = pwidth - 30;
+		bottom = layoutInspectorOptions(panel->attrFrm, panel->attrChk,
+						wlengthof(panel->attrChk), frame_width, top);
+		advancedBottom = layoutInspectorOptions(panel->moreFrm, panel->moreChk,
+						       wlengthof(panel->moreChk), frame_width, top);
+		bottom = WMAX(bottom, advancedBottom);
+		pheight = WMAX(PHEIGHT + top - 45, bottom + 10 + actionHeight + 12);
+		if (top > 45) {
+			WMWidget *otherPages[] = { panel->specFrm, panel->specLbl, panel->iconFrm,
+						  panel->wsFrm, panel->appFrm };
+
+			for (i = 0; i < wlengthof(otherPages); i++) {
+				if (otherPages[i]) {
+					WMPoint position = WMGetViewPosition(WMWidgetView(otherPages[i]));
+
+					WMMoveWidget(otherPages[i], position.x, position.y + top - 45);
+				}
+			}
+		}
+		WMResizeWidget(panel->win, pwidth, pheight);
+		WMResizeWidget(panel->pagePopUp, pwidth - 50, popup.height);
+		btn_width = (pwidth - 50) / 3;
+		for (i = 0; i < wlengthof(actions); i++) {
+			WMMoveWidget(actions[i], 15 + i * (btn_width + 10), pheight - actionHeight - 12);
+			WMResizeWidget(actions[i], btn_width, actionHeight);
+		}
+	}
+
 	/* if the window is a transient, don't let it have a miniaturize button */
 	if (wwin->transient_for != None && wwin->transient_for != scr->root_win)
 		WMSetButtonEnabled(panel->attrChk[3], False);
@@ -1189,7 +1253,7 @@ static InspectorPanel *createInspectorForWindow(WWindow *wwin, int xpos, int ypo
 		changePage(panel->pagePopUp, panel);
 	}
 
-	parent = XCreateSimpleWindow(dpy, scr->root_win, 0, 0, PWIDTH, PHEIGHT, 0, 0, 0);
+	parent = XCreateSimpleWindow(dpy, scr->root_win, 0, 0, pwidth, pheight, 0, 0, 0);
 	XSelectInput(dpy, parent, KeyPressMask | KeyReleaseMask);
 	panel->parent = parent;
 	XReparentWindow(dpy, WMWidgetXID(panel->win), parent, 0, 0);
@@ -1201,16 +1265,16 @@ static InspectorPanel *createInspectorForWindow(WWindow *wwin, int xpos, int ypo
 	if (xpos == UNDEFINED_POS) {
 		x = wwin->frame_x + wwin->frame->core->width / 2;
 		y = wwin->frame_y + wwin->frame->top_width * 2;
-		if (y + PHEIGHT > scr->scr_height)
-			y = scr->scr_height - PHEIGHT - 30;
-		if (x + PWIDTH > scr->scr_width)
-			x = scr->scr_width - PWIDTH;
+		if (y + pheight > scr->scr_height)
+			y = WMAX(0, scr->scr_height - pheight - 30);
+		if (x + pwidth > scr->scr_width)
+			x = WMAX(0, scr->scr_width - pwidth);
 	} else {
 		x = xpos;
 		y = ypos;
 	}
 
-	panel->frame = wManageInternalWindow(scr, parent, wwin->client_win, "Inspector", x, y, PWIDTH, PHEIGHT);
+	panel->frame = wManageInternalWindow(scr, parent, wwin->client_win, "Inspector", x, y, pwidth, pheight);
 
 	if (!selectedBtn)
 		selectedBtn = panel->defaultRb;
