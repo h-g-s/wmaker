@@ -174,6 +174,15 @@ WMSize WMGetBoxMinimumSize(WMBox *box)
 	return box->horizontal ? wmksize(length, breadth) : wmksize(breadth, length);
 }
 
+void WMPackBoxSubview(WMBox *box, WMWidget *child, WMSize size, Bool expand, int space)
+{
+	int length;
+
+	WMResizeWidget(child, WMAX(size.width, 1), WMAX(size.height, 1));
+	length = box->horizontal ? WMWidgetWidth(child) : WMWidgetHeight(child);
+	WMAddBoxSubview(box, WMWidgetView(child), expand, True, length, 0, space);
+}
+
 void WMAddBoxSubview(WMBox * bPtr, WMView * view, Bool expand, Bool fill, int minSize, int maxSize, int space)
 {
 	SubviewItem *subView;

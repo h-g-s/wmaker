@@ -69,6 +69,18 @@ static WMPoint getCenter(WScreen * scr, int width, int height)
 	return wGetPointToCenterRectInHead(scr, wGetHeadForPointerLocation(scr), width, height);
 }
 
+WMSize wGetDialogMaximumSize(WScreen *scr, int margin)
+{
+	WMRect rect = wGetRectForHead(scr, wGetHeadForPointerLocation(scr));
+	int titleHeight = WMFontHeight(scr->title_font) +
+		2 * (wPreferences.window_title_clearance + TITLEBAR_EXTEND_SPACE);
+
+	titleHeight = WMAX(wPreferences.window_title_min_height,
+			   WMIN(titleHeight, wPreferences.window_title_max_height));
+	return wmksize(WMAX(64, (int)rect.size.width - 2 * (margin + scr->frame_border_width)),
+		       WMAX(64, (int)rect.size.height - titleHeight - 2 * (margin + scr->frame_border_width)));
+}
+
 int wMessageDialog(WScreen *scr, const char *title, const char *message, const char *defBtn, const char *altBtn, const char *othBtn)
 {
 	WMAlertPanel *panel;
@@ -797,7 +809,7 @@ static void drawIconProc(WMList * lPtr, int index, Drawable d, char *text, int s
 		int ofx, ofy;
 
 		ofx = x + (width - twidth) / 2;
-		ofy = y + 64 - fheight;
+		ofy = y + height - 4 - fheight;
 
 		for (i = -1; i < 2; i++)
 			for (j = -1; j < 2; j++)
@@ -826,7 +838,7 @@ static void buttonCallback(void *self, void *clientData)
 	} else if (bPtr == panel->previewButton) {
 	/**** Previewer ****/
 		WMSetButtonEnabled(bPtr, False);
-		WMSetListUserDrawItemHeight(panel->iconList, 68);
+		WMSetListUserDrawItemHeight(panel->iconList, WMAX(68, WMFontHeight(panel->normalfont) + 4));
 		WMSetListUserDrawProc(panel->iconList, drawIconProc);
 		WMRedisplayWidget(panel->iconList);
 		/* for draw proc to access screen/gc */
@@ -931,6 +943,9 @@ Bool wIconChooserDialog(WScreen *scr, char **file, const char *instance, const c
 	Bool result;
 	int wmScaleWidth, wmScaleHeight;
 	int pwidth, pheight;
+	int padding, spacing, em, listWidth;
+	WMBox *column, *columns, *directories, *icons, *preview, *fileRow, *buttons;
+	WMSize size, buttonSize, cancelSize, maximum;
 
 	panel = wmalloc(sizeof(IconPanel));
 
@@ -938,27 +953,31 @@ Bool wIconChooserDialog(WScreen *scr, char **file, const char *instance, const c
 
 	panel->win = WMCreateWindow(scr->wmscreen, "iconChooser");
 	WMGetScaleBaseFromSystemFont(scr->wmscreen, &wmScaleWidth, &wmScaleHeight);
-	pwidth = WMScaleX(680);
-	pheight = WMScaleY(280);
-	WMResizeWidget(panel->win, pwidth, pheight);
+	padding = WMAX(WMScaleY(10), 1);
+	spacing = WMAX(WMScaleY(5), 1);
+	maximum = wGetDialogMaximumSize(scr, padding);
+	column = WMCreateBox(panel->win);
+	WMSetBoxBorderWidth(column, padding);
+	columns = WMCreateBox(column);
+	WMSetBoxHorizontal(columns, True);
+	directories = WMCreateBox(columns);
+	icons = WMCreateBox(columns);
+	preview = WMCreateBox(columns);
 
 	WMCreateEventHandler(WMWidgetView(panel->win), KeyPressMask | KeyReleaseMask, keyPressHandler, panel);
 
-	boldFont = WMBoldSystemFontOfSize(scr->wmscreen, WMScaleY(12));
-	panel->normalfont = WMSystemFontOfSize(WMWidgetScreen(panel->win), WMScaleY(12));
+	boldFont = WMDefaultBoldSystemFont(scr->wmscreen);
+	panel->normalfont = WMDefaultSystemFont(scr->wmscreen);
+	em = WMWidthOfString(panel->normalfont, "M", 1);
 
-	panel->dirLabel = WMCreateLabel(panel->win);
-	WMResizeWidget(panel->dirLabel, WMScaleX(300), WMScaleY(20));
-	WMMoveWidget(panel->dirLabel, WMScaleX(10), WMScaleY(7));
+	panel->dirLabel = WMCreateLabel(directories);
 	WMSetLabelText(panel->dirLabel, _("Directories"));
 	WMSetLabelFont(panel->dirLabel, boldFont);
 	WMSetLabelTextAlignment(panel->dirLabel, WACenter);
 
 	WMSetLabelRelief(panel->dirLabel, WRSunken);
 
-	panel->iconLabel = WMCreateLabel(panel->win);
-	WMResizeWidget(panel->iconLabel, WMScaleX(260), WMScaleY(20));
-	WMMoveWidget(panel->iconLabel, WMScaleX(320), WMScaleY(7));
+	panel->iconLabel = WMCreateLabel(icons);
 	WMSetLabelText(panel->iconLabel, _("Icons"));
 	WMSetLabelFont(panel->iconLabel, boldFont);
 	WMSetLabelTextAlignment(panel->iconLabel, WACenter);
@@ -977,54 +996,80 @@ Bool wIconChooserDialog(WScreen *scr, char **file, const char *instance, const c
 
 	WMSetLabelRelief(panel->iconLabel, WRSunken);
 
-	panel->dirList = WMCreateList(panel->win);
-	WMResizeWidget(panel->dirList, WMScaleX(300), WMScaleY(170));
-	WMMoveWidget(panel->dirList, WMScaleX(10), WMScaleY(30));
+	size = WMGetLabelPreferredSize(panel->dirLabel);
+	cancelSize = WMGetLabelPreferredSize(panel->iconLabel);
+	size.height = cancelSize.height = WMAX(size.height, cancelSize.height);
+	WMPackBoxSubview(directories, panel->dirLabel, size, False, spacing);
+	WMPackBoxSubview(icons, panel->iconLabel, cancelSize, False, spacing);
+
+	panel->dirList = WMCreateList(directories);
 	WMSetListAction(panel->dirList, listCallback, panel);
-
-	panel->iconList = WMCreateList(panel->win);
-	WMResizeWidget(panel->iconList, WMScaleX(260), WMScaleY(170));
-	WMMoveWidget(panel->iconList, WMScaleX(320), WMScaleY(30));
+	panel->iconList = WMCreateList(icons);
 	WMSetListAction(panel->iconList, listCallback, panel);
-
 	WMHangData(panel->iconList, panel);
 
-	panel->previewButton = WMCreateCommandButton(panel->win);
-	WMResizeWidget(panel->previewButton, WMScaleX(75), WMScaleY(26));
-	WMMoveWidget(panel->previewButton, WMScaleX(595), WMScaleY(130));
+	panel->previewButton = WMCreateCommandButton(preview);
 	WMSetButtonText(panel->previewButton, _("Preview"));
 	WMSetButtonAction(panel->previewButton, buttonCallback, panel);
 
-	panel->iconView = WMCreateLabel(panel->win);
-	WMResizeWidget(panel->iconView, WMScaleX(75), WMScaleY(75));
-	WMMoveWidget(panel->iconView, WMScaleX(595), WMScaleY(40));
+	panel->iconView = WMCreateLabel(preview);
 	WMSetLabelImagePosition(panel->iconView, WIPOverlaps);
 	WMSetLabelRelief(panel->iconView, WRSunken);
 	WMSetLabelTextAlignment(panel->iconView, WACenter);
+	WMSetLabelWraps(panel->iconView, True);
+	size = WMGetButtonPreferredSize(panel->previewButton);
+	buttonSize.width = buttonSize.height = WMAX(WMScaleX(75), size.width);
+	WMPackBoxSubview(preview, panel->iconView, buttonSize, False, spacing);
+	WMPackBoxSubview(preview, panel->previewButton, size, False, 0);
+	listWidth = WMAX(0, (int)maximum.width - 4 * padding - (int)buttonSize.width);
+	WMPackBoxSubview(directories, panel->dirList,
+			 wmksize(WMAX(12 * em, WMIN(30 * em, listWidth * 30 / 56)),
+				 8 * WMGetListItemHeight(panel->dirList) + 4), True, 0);
+	WMPackBoxSubview(icons, panel->iconList,
+			 wmksize(WMAX(12 * em, WMIN(26 * em, listWidth * 26 / 56)),
+				 8 * WMGetListItemHeight(panel->iconList) + 4), True, 0);
+	WMPackBoxSubview(columns, directories, WMGetBoxMinimumSize(directories), True, padding);
+	WMPackBoxSubview(columns, icons, WMGetBoxMinimumSize(icons), True, padding);
+	WMPackBoxSubview(columns, preview, WMGetBoxMinimumSize(preview), False, 0);
+	WMPackBoxSubview(column, columns, WMGetBoxMinimumSize(columns), False, padding);
+	WMMapSubwidgets(directories);
+	WMMapSubwidgets(icons);
+	WMMapSubwidgets(preview);
+	WMMapSubwidgets(columns);
 
-	panel->fileLabel = WMCreateLabel(panel->win);
-	WMResizeWidget(panel->fileLabel, WMScaleX(80), WMScaleY(20));
-	WMMoveWidget(panel->fileLabel, WMScaleX(10), WMScaleY(210));
+	fileRow = WMCreateBox(column);
+	WMSetBoxHorizontal(fileRow, True);
+	panel->fileLabel = WMCreateLabel(fileRow);
 	WMSetLabelText(panel->fileLabel, _("File Name:"));
+	WMPackBoxSubview(fileRow, panel->fileLabel, WMGetLabelPreferredSize(panel->fileLabel), False, spacing);
 
-	panel->fileField = WMCreateTextField(panel->win);
+	panel->fileField = WMCreateTextField(fileRow);
 	WMSetViewNextResponder(WMWidgetView(panel->fileField), WMWidgetView(panel->win));
-	WMResizeWidget(panel->fileField, WMScaleX(575), WMScaleY(20));
-	WMMoveWidget(panel->fileField, WMScaleX(95), WMScaleY(210));
 	WMSetTextFieldEditable(panel->fileField, False);
+	WMPackBoxSubview(fileRow, panel->fileField, WMGetTextFieldPreferredSize(panel->fileField, 28), True, 0);
+	WMPackBoxSubview(column, fileRow, WMGetBoxMinimumSize(fileRow), False, padding);
+	WMMapSubwidgets(fileRow);
 
-	panel->okButton = WMCreateCommandButton(panel->win);
-	WMResizeWidget(panel->okButton, WMScaleX(80), WMScaleY(26));
-	WMMoveWidget(panel->okButton, WMScaleX(590), WMScaleY(242));
+	buttons = WMCreateBox(column);
+	WMSetBoxHorizontal(buttons, True);
+	panel->okButton = WMCreateCommandButton(buttons);
 	WMSetButtonText(panel->okButton, _("OK"));
 	WMSetButtonEnabled(panel->okButton, False);
 	WMSetButtonAction(panel->okButton, buttonCallback, panel);
 
-	panel->cancelButton = WMCreateCommandButton(panel->win);
-	WMResizeWidget(panel->cancelButton, WMScaleX(80), WMScaleY(26));
-	WMMoveWidget(panel->cancelButton, WMScaleX(500), WMScaleY(242));
+	panel->cancelButton = WMCreateCommandButton(buttons);
 	WMSetButtonText(panel->cancelButton, _("Cancel"));
 	WMSetButtonAction(panel->cancelButton, buttonCallback, panel);
+	buttonSize = WMGetButtonPreferredSize(panel->okButton);
+	cancelSize = WMGetButtonPreferredSize(panel->cancelButton);
+	buttonSize.width = WMAX(WMScaleX(80), WMAX(buttonSize.width, cancelSize.width));
+	buttonSize.height = WMAX(buttonSize.height, cancelSize.height);
+	WMResizeWidget(panel->okButton, buttonSize.width, buttonSize.height);
+	WMResizeWidget(panel->cancelButton, buttonSize.width, buttonSize.height);
+	WMAddBoxSubviewAtEnd(buttons, WMWidgetView(panel->okButton), False, True, buttonSize.width, 0, 0);
+	WMAddBoxSubviewAtEnd(buttons, WMWidgetView(panel->cancelButton), False, True, buttonSize.width, 0, spacing);
+	WMPackBoxSubview(column, buttons, WMGetBoxMinimumSize(buttons), False, 0);
+	WMMapSubwidgets(buttons);
 #if 0
 	panel->chooseButton = WMCreateCommandButton(panel->win);
 	WMResizeWidget(panel->chooseButton, WMScaleX(110), WMScaleY(26));
@@ -1032,8 +1077,14 @@ Bool wIconChooserDialog(WScreen *scr, char **file, const char *instance, const c
 	WMSetButtonText(panel->chooseButton, _("Choose File"));
 	WMSetButtonAction(panel->chooseButton, buttonCallback, panel);
 #endif
+	size = WMGetBoxMinimumSize(column);
+	WMResizeWidget(column, size.width, size.height);
+	size = WMResizeWindowToFitContent(panel->win, column, maximum);
+	pwidth = size.width;
+	pheight = size.height;
 	WMRealizeWidget(panel->win);
 	WMMapSubwidgets(panel->win);
+	WMMapSubwidgets(column);
 
 	parent = XCreateSimpleWindow(dpy, scr->root_win, 0, 0, pwidth, pheight, 0, 0, 0);
 

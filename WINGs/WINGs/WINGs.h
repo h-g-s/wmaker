@@ -1001,6 +1001,9 @@ void WMSetBalloonEnabled(WMScreen *scr, Bool flag);
 
 WMWindow* WMCreateWindow(WMScreen *screen, const char *name);
 
+/* Call once before realization, after sizing content; oversized content scrolls. */
+WMSize WMResizeWindowToFitContent(WMWindow *win, WMWidget *content, WMSize maximum);
+
 WMWindow* WMCreateWindowWithStyle(WMScreen *screen, const char *name, int style);
 
 WMWindow* WMCreatePanelWithStyleForWindow(WMWindow *owner, const char *name,
@@ -1134,6 +1137,9 @@ WMFont* WMGetLabelFont(WMLabel *lPtr);
 
 /* Unwrapped size, including the image and relief, if present. */
 WMSize WMGetLabelPreferredSize(WMLabel *lPtr);
+
+/* Measures wrapping at width, using the same text layout as drawing. */
+WMSize WMGetLabelPreferredSizeForWidth(WMLabel *lPtr, unsigned int width);
 
 void WMSetLabelFont(WMLabel *lPtr, WMFont *font);
 
@@ -1832,6 +1838,9 @@ void WMSetBoxBorderWidth(WMBox *box, unsigned width);
 
 /* Uses the minimum lengths and initial cross-axis sizes of registered subviews. */
 WMSize WMGetBoxMinimumSize(WMBox *box);
+
+/* Sizes and registers a child; expansion is along the box's current axis. */
+void WMPackBoxSubview(WMBox *box, WMWidget *child, WMSize size, Bool expand, int space);
 
 void WMAddBoxSubview(WMBox *bPtr, WMView *view, Bool expand, Bool fill,
                      int minSize, int maxSize, int space);

@@ -611,7 +611,9 @@ WMInputPanel *WMCreateScaledInputPanel(WMScreen * scrPtr, WMWindow * owner, cons
 				       const char *defaultText, const char *okButton, const char *cancelButton)
 {
 	WMInputPanel *panel;
-	int x, dw = 0, aw = 0, w;
+	WMBox *column, *buttons;
+	WMSize size, buttonSize = { 0, 0 }, alternateSize = { 0, 0 };
+	int padding, spacing, width;
 	int wmScaleWidth, wmScaleHeight;
 
 	panel = wmalloc(sizeof(WMInputPanel));
@@ -623,79 +625,88 @@ WMInputPanel *WMCreateScaledInputPanel(WMScreen * scrPtr, WMWindow * owner, cons
 	WMSetWindowTitle(panel->win, "");
 
 	WMGetScaleBaseFromSystemFont(scrPtr, &wmScaleWidth, &wmScaleHeight);
-	WMResizeWidget(panel->win, WMScaleX(320), WMScaleY(160));
+	padding = WMAX(WMScaleY(15), 1);
+	spacing = WMAX(WMScaleY(10), 1);
+	column = WMCreateBox(panel->win);
+	WMSetBoxBorderWidth(column, padding);
+	buttons = WMCreateBox(column);
+	WMSetBoxHorizontal(buttons, True);
+
+	if (okButton) {
+		panel->defBtn = WMCreateCustomButton(buttons, WBBPushInMask
+						     | WBBPushChangeMask | WBBPushLightMask);
+		WMSetButtonAction(panel->defBtn, inputBoxOnClick, panel);
+		WMSetButtonText(panel->defBtn, okButton);
+		WMSetButtonImage(panel->defBtn, scrPtr->buttonArrow);
+		WMSetButtonAltImage(panel->defBtn, scrPtr->pushedButtonArrow);
+		WMSetButtonImagePosition(panel->defBtn, WIPRight);
+		buttonSize = WMGetButtonPreferredSize(panel->defBtn);
+	}
+	if (cancelButton) {
+		panel->altBtn = WMCreateCommandButton(buttons);
+		WMSetButtonAction(panel->altBtn, inputBoxOnClick, panel);
+		WMSetButtonText(panel->altBtn, cancelButton);
+		alternateSize = WMGetButtonPreferredSize(panel->altBtn);
+	}
+	buttonSize.width = WMAX(buttonSize.width, alternateSize.width);
+	buttonSize.height = WMAX(buttonSize.height, alternateSize.height);
+	if (panel->defBtn) {
+		WMResizeWidget(panel->defBtn, buttonSize.width, buttonSize.height);
+		WMAddBoxSubviewAtEnd(buttons, WMWidgetView(panel->defBtn), False, True, buttonSize.width, 0, 0);
+	}
+	if (panel->altBtn) {
+		WMResizeWidget(panel->altBtn, buttonSize.width, buttonSize.height);
+		WMAddBoxSubviewAtEnd(buttons, WMWidgetView(panel->altBtn), False, True, buttonSize.width, 0,
+				     panel->defBtn ? spacing : 0);
+	}
+
+	panel->text = WMCreateTextField(column);
+	WMSetTextFieldText(panel->text, defaultText);
+	size = WMGetTextFieldPreferredSize(panel->text, 28);
+	width = WMAX(size.width, WMGetBoxMinimumSize(buttons).width);
 
 	if (title) {
 		WMFont *largeFont;
 
 		largeFont = WMBoldSystemFontOfSize(scrPtr, WMScaleY(24));
 
-		panel->tLbl = WMCreateLabel(panel->win);
-		WMMoveWidget(panel->tLbl, WMScaleX(20), WMScaleY(16));
-		WMResizeWidget(panel->tLbl, WMScaleX(320) - 2 * WMScaleX(20), WMFontHeight(largeFont) + WMScaleY(4));
+		panel->tLbl = WMCreateLabel(column);
 		WMSetLabelText(panel->tLbl, title);
 		WMSetLabelTextAlignment(panel->tLbl, WALeft);
 		WMSetLabelFont(panel->tLbl, largeFont);
+		WMSetLabelWraps(panel->tLbl, True);
 
 		WMReleaseFont(largeFont);
 	}
 
 	if (msg) {
-		panel->mLbl = WMCreateLabel(panel->win);
-		WMMoveWidget(panel->mLbl, WMScaleX(20), WMScaleY(50));
-		WMResizeWidget(panel->mLbl, WMScaleX(320) - 2 * WMScaleX(20), WMFontHeight(scrPtr->normalFont) * 2);
+		panel->mLbl = WMCreateLabel(column);
 		WMSetLabelText(panel->mLbl, msg);
 		WMSetLabelTextAlignment(panel->mLbl, WALeft);
+		WMSetLabelWraps(panel->mLbl, True);
 	}
 
-	panel->text = WMCreateTextField(panel->win);
-	WMMoveWidget(panel->text, WMScaleX(20), WMScaleY(85));
-	WMResizeWidget(panel->text, WMScaleX(320) - 2 * WMScaleX(20), WMScaleY(20));
-	WMSetTextFieldText(panel->text, defaultText);
+	if (panel->tLbl)
+		WMPackBoxSubview(column, panel->tLbl, WMGetLabelPreferredSizeForWidth(panel->tLbl, width), False, spacing);
+	if (panel->mLbl)
+		WMPackBoxSubview(column, panel->mLbl, WMGetLabelPreferredSizeForWidth(panel->mLbl, width), False, spacing);
+	size.width = width;
+	WMPackBoxSubview(column, panel->text, size, False, spacing);
+	WMPackBoxSubview(column, buttons, WMGetBoxMinimumSize(buttons), False, 0);
+	size = WMGetBoxMinimumSize(column);
+	WMResizeWidget(column, size.width, size.height);
+	WMResizeWindowToFitContent(panel->win, column,
+				  wmksize(WMAX(64, (int)scrPtr->rootView->size.width - 2 * padding),
+					  WMAX(64, (int)scrPtr->rootView->size.height - 2 * padding - 32)));
 
 	WMAddNotificationObserver(endedEditingObserver, panel, WMTextDidEndEditingNotification, panel->text);
-
-	/* create buttons */
-	if (cancelButton)
-		aw = WMWidthOfString(scrPtr->normalFont, cancelButton, strlen(cancelButton));
-
-	if (okButton)
-		dw = WMWidthOfString(scrPtr->normalFont, okButton, strlen(okButton));
-
-	w = dw + (scrPtr->buttonArrow ? scrPtr->buttonArrow->width : 0);
-	if (aw > w)
-		w = aw;
-
-	w += WMScaleX(30);
-	x = WMScaleX(310);
-
-	if (okButton) {
-		x -= w + WMScaleX(10);
-
-		panel->defBtn = WMCreateCustomButton(panel->win, WBBPushInMask
-						     | WBBPushChangeMask | WBBPushLightMask);
-		WMSetButtonAction(panel->defBtn, inputBoxOnClick, panel);
-		WMMoveWidget(panel->defBtn, x, WMScaleY(124));
-		WMResizeWidget(panel->defBtn, w, WMScaleY(24));
-		WMSetButtonText(panel->defBtn, okButton);
-		WMSetButtonImage(panel->defBtn, scrPtr->buttonArrow);
-		WMSetButtonAltImage(panel->defBtn, scrPtr->pushedButtonArrow);
-		WMSetButtonImagePosition(panel->defBtn, WIPRight);
-	}
-	if (cancelButton) {
-		x -= w + WMScaleX(10);
-
-		panel->altBtn = WMCreateCommandButton(panel->win);
-		WMSetButtonAction(panel->altBtn, inputBoxOnClick, panel);
-		WMMoveWidget(panel->altBtn, x, WMScaleY(124));
-		WMResizeWidget(panel->altBtn, w, WMScaleY(24));
-		WMSetButtonText(panel->altBtn, cancelButton);
-	}
 
 	WMCreateEventHandler(W_VIEW(panel->win), KeyPressMask, handleKeyPress2, panel);
 
 	WMRealizeWidget(panel->win);
 	WMMapSubwidgets(panel->win);
+	WMMapSubwidgets(column);
+	WMMapSubwidgets(buttons);
 
 	WMSetFocusToWidget(panel->text);
 

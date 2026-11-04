@@ -46,6 +46,32 @@ WMSize WMGetLabelPreferredSize(WMLabel *lPtr)
 	return size;
 }
 
+WMSize WMGetLabelPreferredSizeForWidth(WMLabel *lPtr, unsigned int width)
+{
+	WMFont *font = lPtr->font ? lPtr->font : lPtr->view->screen->normalFont;
+	WMSize size = WMGetLabelPreferredSize(lPtr);
+	int inset = lPtr->flags.relief == WRFlat ? 0 : 3;
+	int available = (int)width - inset - 8;
+	int height;
+
+	if (lPtr->flags.noWrap || !lPtr->caption || lPtr->flags.imagePosition == WIPImageOnly)
+		return size;
+
+	if (lPtr->image && (lPtr->flags.imagePosition == WIPLeft || lPtr->flags.imagePosition == WIPRight))
+		available -= lPtr->image->width + 5;
+
+	height = W_GetTextHeight(font, lPtr->caption, WMAX(available, 1), True);
+	if (lPtr->image && lPtr->flags.imagePosition != WIPNoImage) {
+		if (lPtr->flags.imagePosition == WIPAbove || lPtr->flags.imagePosition == WIPBelow)
+			height += lPtr->image->height;
+		else
+			height = WMAX(height, lPtr->image->height);
+	}
+	size.width = width;
+	size.height = height + inset;
+	return size;
+}
+
 WMLabel *WMCreateLabel(WMWidget * parent)
 {
 	Label *lPtr;

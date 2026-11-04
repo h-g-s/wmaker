@@ -140,7 +140,8 @@ static int fitText(const char *text, WMFont * font, int width, int wrap)
 		i++;
 	}
 
-	return i;
+	/* A glyph wider than the available line must still consume input. */
+	return i > 0 ? i : oneUTF8CharForward(text, beforecrlf);
 }
 
 WMSize W_GetTextAndImageSize(WMFont *font, const char *text, WMPixmap *image,

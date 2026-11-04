@@ -217,16 +217,6 @@ static void panelBtnCallback(WMWidget * self, void *data)
 	DestroyDockAppSettingsPanel(panel);
 }
 
-static void packSettingsWidget(WMBox *box, WMWidget *widget, WMSize size,
-			       Bool horizontal, Bool expand, int spacing)
-{
-	int length;
-
-	WMResizeWidget(widget, WMAX(size.width, 1), WMAX(size.height, 1));
-	length = horizontal ? WMWidgetWidth(widget) : WMWidgetHeight(widget);
-	WMAddBoxSubview(box, WMWidgetView(widget), expand, True, length, 0, spacing);
-}
-
 static void resizeSettingsFrame(XEvent *event, void *data)
 {
 	WMBox *content = data;
@@ -265,7 +255,7 @@ static void packSettingsFrame(WMBox *parent, WMFrame *frame, WMBox *content,
 	size.width += 4;
 	size.height += WMFontHeight(font) + 2;
 	WMReleaseFont(font);
-	packSettingsWidget(parent, frame, size, False, False, spacing);
+	WMPackBoxSubview(parent, frame, size, False, spacing);
 	WMMapSubwidgets(content);
 	WMMapSubwidgets(frame);
 }
@@ -283,7 +273,8 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	const char *title;
 	int wmScaleWidth, wmScaleHeight;
 	int pwidth, pheight;
-	int iconSize, padding, spacing, titleHeight;
+	int iconSize, padding, spacing;
+	WMSize maximum;
 
 	/* get the width and height values of the system font for use with the WMScaleX/WMScaleY macros */
 	WMGetScaleBaseFromSystemFont(scr->wmscreen, &wmScaleWidth, &wmScaleHeight);
@@ -291,10 +282,7 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	iconSize = wPreferences.icon_size;
 	padding = WMAX(WMScaleY(10), 1);
 	spacing = WMAX(WMScaleY(5), 1);
-	titleHeight = WMFontHeight(scr->title_font) +
-		2 * (wPreferences.window_title_clearance + TITLEBAR_EXTEND_SPACE);
-	titleHeight = WMAX(wPreferences.window_title_min_height,
-			   WMIN(titleHeight, wPreferences.window_title_max_height));
+	maximum = wGetDialogMaximumSize(scr, padding);
 
 	panel = wmalloc(sizeof(AppSettingsPanel));
 
@@ -311,7 +299,7 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	WMSetBoxHorizontal(header, True);
 	panel->iconLabel = WMCreateLabel(header);
 	WMSetLabelImagePosition(panel->iconLabel, WIPImageOnly);
-	packSettingsWidget(header, panel->iconLabel, wmksize(iconSize, iconSize), True, False, padding);
+	WMPackBoxSubview(header, panel->iconLabel, wmksize(iconSize, iconSize), False, padding);
 
 	panel->nameLabel = WMCreateLabel(header);
 	font = WMDefaultBoldSystemFont(scr->wmscreen);
@@ -322,46 +310,46 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 		WMSetLabelText(panel->nameLabel, aicon->wm_instance);
 	else
 		WMSetLabelText(panel->nameLabel, aicon->wm_class);
-	packSettingsWidget(header, panel->nameLabel, WMGetLabelPreferredSize(panel->nameLabel), True, True, 0);
-	packSettingsWidget(vbox, header, WMGetBoxMinimumSize(header), False, False, padding);
+	WMPackBoxSubview(header, panel->nameLabel, WMGetLabelPreferredSize(panel->nameLabel), True, 0);
+	WMPackBoxSubview(vbox, header, WMGetBoxMinimumSize(header), False, padding);
 	WMMapSubwidgets(header);
 
 	panel->autoLaunchBtn = WMCreateSwitchButton(vbox);
 	WMSetButtonText(panel->autoLaunchBtn, _("Start when Window Maker is started"));
 	WMSetButtonSelected(panel->autoLaunchBtn, aicon->auto_launch);
-	packSettingsWidget(vbox, panel->autoLaunchBtn, WMGetButtonPreferredSize(panel->autoLaunchBtn),
-			   False, False, spacing);
+	WMPackBoxSubview(vbox, panel->autoLaunchBtn, WMGetButtonPreferredSize(panel->autoLaunchBtn),
+			 False, spacing);
 
 	panel->lockBtn = WMCreateSwitchButton(vbox);
 	WMSetButtonText(panel->lockBtn, _("Lock (prevent accidental removal)"));
 	WMSetButtonSelected(panel->lockBtn, aicon->lock);
-	packSettingsWidget(vbox, panel->lockBtn, WMGetButtonPreferredSize(panel->lockBtn), False, False, spacing);
+	WMPackBoxSubview(vbox, panel->lockBtn, WMGetButtonPreferredSize(panel->lockBtn), False, spacing);
 
 	title = _("Application path and arguments");
 	content = createSettingsFrame(vbox, &panel->commandFrame, title, padding);
 	panel->commandField = WMCreateTextField(content);
 	WMSetTextFieldText(panel->commandField, aicon->command);
-	packSettingsWidget(content, panel->commandField, WMGetTextFieldPreferredSize(panel->commandField, 26),
-			   False, False, 0);
+	WMPackBoxSubview(content, panel->commandField, WMGetTextFieldPreferredSize(panel->commandField, 26),
+			 False, 0);
 	packSettingsFrame(vbox, panel->commandFrame, content, title, padding, spacing);
 
 	title = _("Command for middle-click launch");
 	content = createSettingsFrame(vbox, &panel->pasteCommandFrame, title, padding);
 	panel->pasteCommandField = WMCreateTextField(content);
 	WMSetTextFieldText(panel->pasteCommandField, aicon->paste_command);
-	packSettingsWidget(content, panel->pasteCommandField,
-			   WMGetTextFieldPreferredSize(panel->pasteCommandField, 26), False, False, spacing);
+	WMPackBoxSubview(content, panel->pasteCommandField,
+			 WMGetTextFieldPreferredSize(panel->pasteCommandField, 26), False, spacing);
 	panel->pasteCommandLabel = WMCreateLabel(content);
 	WMSetLabelText(panel->pasteCommandLabel, _("%s will be replaced with current selection"));
-	packSettingsWidget(content, panel->pasteCommandLabel, WMGetLabelPreferredSize(panel->pasteCommandLabel),
-			   False, False, 0);
+	WMPackBoxSubview(content, panel->pasteCommandLabel, WMGetLabelPreferredSize(panel->pasteCommandLabel),
+			 False, 0);
 	packSettingsFrame(vbox, panel->pasteCommandFrame, content, title, padding, spacing);
 
 	title = _("Command for dragged and dropped files");
 	content = createSettingsFrame(vbox, &panel->dndCommandFrame, title, padding);
 	panel->dndCommandField = WMCreateTextField(content);
-	packSettingsWidget(content, panel->dndCommandField,
-			   WMGetTextFieldPreferredSize(panel->dndCommandField, 26), False, False, spacing);
+	WMPackBoxSubview(content, panel->dndCommandField,
+			 WMGetTextFieldPreferredSize(panel->dndCommandField, 26), False, spacing);
 	panel->dndCommandLabel = WMCreateLabel(content);
 #ifdef USE_DOCK_XDND
 	WMSetTextFieldText(panel->dndCommandField, aicon->dnd_command);
@@ -373,8 +361,8 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	WMSetFrameTitleColor(panel->dndCommandFrame, WMDarkGrayColor(scr->wmscreen));
 	WMSetLabelTextColor(panel->dndCommandLabel, WMDarkGrayColor(scr->wmscreen));
 #endif
-	packSettingsWidget(content, panel->dndCommandLabel, WMGetLabelPreferredSize(panel->dndCommandLabel),
-			   False, False, 0);
+	WMPackBoxSubview(content, panel->dndCommandLabel, WMGetLabelPreferredSize(panel->dndCommandLabel),
+			 False, 0);
 	packSettingsFrame(vbox, panel->dndCommandFrame, content, title, padding, spacing);
 
 	title = _("Icon Image");
@@ -383,14 +371,14 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	WMSetBoxHorizontal(row, True);
 	panel->iconField = WMCreateTextField(row);
 	WMSetTextFieldText(panel->iconField, wDefaultGetIconFile(aicon->wm_instance, aicon->wm_class, False));
-	packSettingsWidget(row, panel->iconField, WMGetTextFieldPreferredSize(panel->iconField, 18),
-			   True, True, spacing);
+	WMPackBoxSubview(row, panel->iconField, WMGetTextFieldPreferredSize(panel->iconField, 18),
+			 True, spacing);
 
 	panel->browseBtn = WMCreateCommandButton(row);
 	WMSetButtonText(panel->browseBtn, _("Browse..."));
 	WMSetButtonAction(panel->browseBtn, chooseIconCallback, panel);
-	packSettingsWidget(row, panel->browseBtn, WMGetButtonPreferredSize(panel->browseBtn), True, False, 0);
-	packSettingsWidget(content, row, WMGetBoxMinimumSize(row), False, False, 0);
+	WMPackBoxSubview(row, panel->browseBtn, WMGetButtonPreferredSize(panel->browseBtn), False, 0);
+	WMPackBoxSubview(content, row, WMGetBoxMinimumSize(row), False, 0);
 	WMMapSubwidgets(row);
 	packSettingsFrame(vbox, panel->iconFrame, content, title, padding, padding);
 
@@ -413,7 +401,7 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 		WMResizeWidget(panel->cancelBtn, buttonSize.width, buttonSize.height);
 		WMAddBoxSubviewAtEnd(hbox, WMWidgetView(panel->okBtn), False, True, buttonSize.width, 0, 0);
 		WMAddBoxSubviewAtEnd(hbox, WMWidgetView(panel->cancelBtn), False, True, buttonSize.width, 0, spacing);
-		packSettingsWidget(vbox, hbox, WMGetBoxMinimumSize(hbox), False, False, 0);
+		WMPackBoxSubview(vbox, hbox, WMGetBoxMinimumSize(hbox), False, 0);
 
 		WMMapSubwidgets(hbox);
 	}
@@ -421,18 +409,9 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	size = WMGetBoxMinimumSize(vbox);
 	size.width = WMAX(size.width, WMScaleX(300));
 	WMResizeWidget(vbox, size.width, size.height);
-	pwidth = WMIN(size.width, WMAX(64, (int)rect.size.width - 2 * (padding + scr->frame_border_width)));
-	pheight = WMIN(size.height, WMAX(64, (int)rect.size.height - titleHeight -
-					2 * (padding + scr->frame_border_width)));
-	WMResizeWidget(panel->win, pwidth, pheight);
-	if (pwidth < size.width || pheight < size.height) {
-		WMScrollView *scroll = WMCreateScrollView(panel->win);
-
-		WMResizeWidget(scroll, pwidth, pheight);
-		WMSetScrollViewHasHorizontalScroller(scroll, True);
-		WMSetScrollViewHasVerticalScroller(scroll, True);
-		WMSetScrollViewContentView(scroll, WMWidgetView(vbox));
-	}
+	size = WMResizeWindowToFitContent(panel->win, vbox, maximum);
+	pwidth = size.width;
+	pheight = size.height;
 
 	WMRealizeWidget(panel->win);
 	WMMapSubwidgets(panel->win);
@@ -452,8 +431,7 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	{
 		y = aicon->y_pos;
 		y = WMAX(rect.pos.y + padding,
-			 WMIN(y, rect.pos.y + (int)rect.size.height - pheight - titleHeight -
-			      padding - 2 * scr->frame_border_width));
+			 WMIN(y, rect.pos.y + padding + (int)maximum.height - pheight));
 
 		if (aicon->dock && aicon->dock->type == WM_DOCK) {
 			if (aicon->dock->on_right_side)

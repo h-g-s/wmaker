@@ -35,6 +35,8 @@ int wMessageDialog(WScreen *scr, const char *title, const char *message,
 int wAdvancedInputDialog(WScreen *scr, const char *title, const char *message, const char *name, char **text);
 int wInputDialog(WScreen *scr, const char *title, const char *message, char **text);
 
+WMSize wGetDialogMaximumSize(WScreen *scr, int margin);
+
 int wExitDialog(WScreen *scr, const char *title, const char *message, const char *defBtn,
                 const char *altBtn, const char *othBtn);
 

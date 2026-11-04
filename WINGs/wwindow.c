@@ -71,6 +71,29 @@ static void handleEvents(XEvent * event, void *clientData);
 
 static void realizeWindow(WMWindow * win);
 
+WMSize WMResizeWindowToFitContent(WMWindow *win, WMWidget *content, WMSize maximum)
+{
+	WMSize size;
+
+	assert(!W_VIEW(win)->flags.realized);
+	assert(W_VIEW(content)->parent == W_VIEW(win));
+	assert(maximum.width > 0 && maximum.height > 0);
+	size.width = WMIN(WMWidgetWidth(content), maximum.width);
+	size.height = WMIN(WMWidgetHeight(content), maximum.height);
+	WMResizeWidget(win, size.width, size.height);
+	if (size.width < WMWidgetWidth(content) || size.height < WMWidgetHeight(content)) {
+		WMScrollView *scroll = WMCreateScrollView(win);
+
+		WMResizeWidget(scroll, size.width, size.height);
+		WMSetScrollViewHasHorizontalScroller(scroll, True);
+		WMSetScrollViewHasVerticalScroller(scroll, True);
+		WMSetScrollViewContentView(scroll, WMWidgetView(content));
+		WMMapWidget(scroll);
+	}
+	WMMapWidget(content);
+	return size;
+}
+
 static void realizeObserver(void *self, WMNotification * not)
 {
 	/* Parameter not used, but tell the compiler that it is ok */

@@ -1106,9 +1106,8 @@ static void handleActionEvents(XEvent * event, void *data)
 				lPtr->selectID = WMAddTimerHandler(SCROLL_DELAY, scrollBackwardSelecting, lPtr);
 			}
 		}
-		WMWidget *parentWidget = WMWidgetOfView(lPtr->view->parent);
-		if (parentWidget)
-			WMSetFocusToWidget(parentWidget);
+		W_View *toplevel = W_TopLevelOfView(lPtr->view);
+		W_SetFocusOfTopLevel(toplevel, lPtr->view->nextResponder ? lPtr->view->nextResponder : toplevel);
 		break;
 
 	case ButtonPress:
