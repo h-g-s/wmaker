@@ -83,6 +83,46 @@ W_DrawReliefWithGC(W_Screen * scr, Drawable d, int x, int y, unsigned int width,
 	}
 }
 
+int W_ButtonBorderWidth(WMFont *font)
+{
+	return WMAX(1, (WMFontHeight(font) + 8) / 17);
+}
+
+void W_DrawButtonRelief(W_Screen *scr, Drawable d, int x, int y, unsigned int width,
+		       unsigned int height, WMReliefType relief, WMFont *font)
+{
+	int thickness = W_ButtonBorderWidth(font);
+	int i;
+	GC top, bottom, innerTop, innerBottom;
+
+	thickness = WMIN(thickness, WMIN(width, height) / 4);
+	if (thickness <= 1 || (relief != WRRaised && relief != WRSunken && relief != WRPushed)) {
+		W_DrawRelief(scr, d, x, y, width, height, relief);
+		return;
+	}
+	top = WMColorGC(relief == WRRaised ? scr->white : relief == WRSunken ? scr->darkGray : scr->black);
+	bottom = WMColorGC(relief == WRRaised ? scr->black : scr->white);
+	innerTop = WMColorGC(scr->black);
+	innerBottom = WMColorGC(relief == WRRaised ? scr->darkGray : scr->gray);
+	for (i = 0; i < 2 * thickness; i++) {
+		int right = x + width - i - 1;
+		int lower = y + height - i - 1;
+
+		if (i < thickness || relief == WRSunken) {
+			GC gc = i < thickness ? top : innerTop;
+
+			XDrawLine(scr->display, d, gc, x + i, y + i, right, y + i);
+			XDrawLine(scr->display, d, gc, x + i, y + i, x + i, lower);
+		}
+		if (i < thickness || relief != WRPushed) {
+			GC gc = i < thickness ? bottom : innerBottom;
+
+			XDrawLine(scr->display, d, gc, x + i, lower, right, lower);
+			XDrawLine(scr->display, d, gc, right, y + i, right, lower);
+		}
+	}
+}
+
 static int findNextWord(const char *text, int limit)
 {
 	int pos, len;
@@ -254,6 +294,7 @@ W_PaintTextAndImage(W_View * view, int wrap, WMColor * textColor, W_Font * font,
 	int ix, iy;
 	int x, y, w, h;
 	Drawable d = view->window;
+	int border = WMWidgetClass(view->self) == WC_Button ? W_ButtonBorderWidth(font) : 1;
 
 #ifdef DOUBLE_BUFFER
 	d = XCreatePixmap(screen->display, view->window, view->size.width, view->size.height, screen->depth);
@@ -286,10 +327,10 @@ W_PaintTextAndImage(W_View * view, int wrap, WMColor * textColor, W_Font * font,
 		w = view->size.width;
 		h = view->size.height;
 	} else {
-		x = 1;
-		y = 1;
-		w = view->size.width - 3;
-		h = view->size.height - 3;
+		x = border;
+		y = border;
+		w = WMAX(1, (int)view->size.width - 3 * border);
+		h = WMAX(1, (int)view->size.height - 3 * border);
 	}
 
 	/* calc. image alignment */
@@ -359,7 +400,10 @@ W_PaintTextAndImage(W_View * view, int wrap, WMColor * textColor, W_Font * font,
 	}
 
 	/* draw relief */
-	W_DrawRelief(screen, d, 0, 0, view->size.width, view->size.height, relief);
+	if (WMWidgetClass(view->self) == WC_Button)
+		W_DrawButtonRelief(screen, d, 0, 0, view->size.width, view->size.height, relief, font);
+	else
+		W_DrawRelief(screen, d, 0, 0, view->size.width, view->size.height, relief);
 
 #ifdef DOUBLE_BUFFER
 	XCopyArea(screen->display, d, view->window, screen->copyGC, 0, 0,

@@ -504,6 +504,11 @@ KeySym W_KeycodeToKeysym(Display *display, KeyCode keycode, int index);
 void W_DrawRelief(W_Screen *scr, Drawable d, int x, int y, unsigned int width,
                   unsigned int height, WMReliefType relief);
 
+int W_ButtonBorderWidth(WMFont *font);
+
+void W_DrawButtonRelief(W_Screen *scr, Drawable d, int x, int y, unsigned int width,
+                       unsigned int height, WMReliefType relief, WMFont *font);
+
 void W_DrawReliefWithGC(W_Screen *scr, Drawable d, int x, int y,
                         unsigned int width, unsigned int height,
                         WMReliefType relief,

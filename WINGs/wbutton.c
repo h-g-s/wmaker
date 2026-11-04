@@ -113,7 +113,7 @@ WMSize WMGetButtonPreferredSize(WMButton *bPtr)
 {
 	WMFont *font = bPtr->font ? bPtr->font : bPtr->view->screen->normalFont;
 	WMSize size, alternate;
-	unsigned int padding = bPtr->flags.bordered ? 10 : 4;
+	unsigned int padding = bPtr->flags.bordered ? 10 + 4 * (W_ButtonBorderWidth(font) - 1) : 4;
 
 	size = W_GetTextAndImageSize(font, bPtr->caption, bPtr->scaledImage, bPtr->flags.imagePosition);
 	alternate = W_GetTextAndImageSize(font, bPtr->altCaption ? bPtr->altCaption : bPtr->caption,
@@ -593,7 +593,8 @@ static void paintFocusRing(Button *bPtr)
 	W_Screen *scrPtr = bPtr->view->screen;
 	Display *dpy = scrPtr->display;
 	GC gc = WMColorGC(scrPtr->black);
-	int inset = bPtr->flags.bordered ? 3 : 1;
+	WMFont *font = bPtr->font ? bPtr->font : scrPtr->normalFont;
+	int inset = bPtr->flags.bordered ? 2 * W_ButtonBorderWidth(font) + 1 : 1;
 	int w = bPtr->view->size.width - 2 * inset - 1;
 	int h = bPtr->view->size.height - 2 * inset - 1;
 
@@ -654,14 +655,14 @@ static void paintButton(Button * bPtr)
 
 		if (bPtr->flags.statePush && bPtr->flags.bordered) {
 			relief = WRSunken;
-			offset = 1;
+			offset = W_ButtonBorderWidth(bPtr->font ? bPtr->font : scrPtr->normalFont);
 		}
 	}
 
 	if (bPtr->flags.pushed) {
 		if (bPtr->flags.pushIn) {
 			relief = WRPushed;
-			offset = 1;
+			offset = W_ButtonBorderWidth(bPtr->font ? bPtr->font : scrPtr->normalFont);
 		}
 		if (bPtr->flags.pushLight) {
 			backColor = scrPtr->white;

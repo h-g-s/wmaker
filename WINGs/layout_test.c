@@ -365,6 +365,38 @@ static void testSymbolWidgets(WMWindow *window)
 	WMReleasePixmap(custom);
 }
 
+static void testButtonBorders(WMScreen *screen)
+{
+	WMFont *small = WMSystemFontOfSize(screen, 1);
+	WMFont *large = WMSystemFontOfSize(screen, 32);
+	WMPixmap *old = WMCreatePixmap(screen, 100, 80, screen->depth, False);
+	WMPixmap *scaled = WMCreatePixmap(screen, 100, 80, screen->depth, False);
+	WMReliefType reliefs[] = { WRRaised, WRSunken, WRPushed };
+	unsigned int i;
+
+	for (i = 0; i < sizeof(reliefs) / sizeof(reliefs[0]); i++) {
+		XImage *image;
+
+		XFillRectangle(screen->display, old->pixmap, WMColorGC(screen->gray), 0, 0, 100, 80);
+		XFillRectangle(screen->display, scaled->pixmap, WMColorGC(screen->gray), 0, 0, 100, 80);
+		W_DrawRelief(screen, old->pixmap, 0, 0, 100, 80, reliefs[i]);
+		W_DrawButtonRelief(screen, scaled->pixmap, 0, 0, 100, 80, reliefs[i], small);
+		assert(samePixmapPixels(old, scaled));
+		W_DrawButtonRelief(screen, scaled->pixmap, 0, 0, 100, 80, reliefs[i], large);
+		assert(!samePixmapPixels(old, scaled));
+		image = XGetImage(screen->display, scaled->pixmap, 0, 0, 100, 80, AllPlanes, ZPixmap);
+		assert(image);
+		assert(XGetPixel(image, 50, 1) == W_PIXEL(reliefs[i] == WRRaised ? screen->white :
+						       reliefs[i] == WRSunken ? screen->darkGray : screen->black));
+		assert(XGetPixel(image, 50, 78) == W_PIXEL(reliefs[i] == WRRaised ? screen->black : screen->white));
+		XDestroyImage(image);
+	}
+	WMReleasePixmap(old);
+	WMReleasePixmap(scaled);
+	WMReleaseFont(small);
+	WMReleaseFont(large);
+}
+
 int main(int argc, char **argv)
 {
 	Display *display;
@@ -390,6 +422,7 @@ int main(int argc, char **argv)
 	testNestedListKeys(screen);
 	testSymbolImages(screen);
 	testSymbolWidgets(window);
+	testButtonBorders(screen);
 	WMDestroyWidget(window);
 	WMReleaseApplication();
 	XCloseDisplay(display);

@@ -128,8 +128,9 @@ WMSize WMGetPopUpButtonPreferredSize(WMPopUpButton *bPtr)
 		if (title)
 			width = WMAX(width, WMWidthOfString(bPtr->font, title, strlen(title)));
 	}
-	return wmksize(width + bPtr->indicator->width + 16,
-		       WMAX(WMFontHeight(bPtr->font), bPtr->indicator->height) + 8);
+	return wmksize(width + bPtr->indicator->width + 16 + 4 * (W_ButtonBorderWidth(bPtr->font) - 1),
+		       WMAX(WMFontHeight(bPtr->font), bPtr->indicator->height) + 8 +
+		       4 * (W_ButtonBorderWidth(bPtr->font) - 1));
 }
 
 void WMSetPopUpButtonAction(WMPopUpButton * bPtr, WMAction * action, void *clientData)
@@ -353,6 +354,7 @@ static void paintPopUpButton(PopUpButton * bPtr)
 	W_Screen *scr = bPtr->view->screen;
 	char *caption;
 	Pixmap pixmap;
+	int extra = 2 * (W_ButtonBorderWidth(bPtr->font) - 1);
 
 	if (bPtr->flags.pullsDown) {
 		caption = bPtr->caption;
@@ -370,10 +372,10 @@ static void paintPopUpButton(PopUpButton * bPtr)
 	XFillRectangle(scr->display, pixmap, WMColorGC(scr->gray), 0, 0,
 		       bPtr->view->size.width, bPtr->view->size.height);
 
-	W_DrawRelief(scr, pixmap, 0, 0, bPtr->view->size.width, bPtr->view->size.height, WRRaised);
+	W_DrawButtonRelief(scr, pixmap, 0, 0, bPtr->view->size.width, bPtr->view->size.height, WRRaised, bPtr->font);
 
 	if (caption) {
-		W_PaintText(bPtr->view, pixmap, bPtr->font, 6,
+		W_PaintText(bPtr->view, pixmap, bPtr->font, 6 + extra,
 			    (bPtr->view->size.height - WMFontHeight(bPtr->font)) / 2,
 			    bPtr->view->size.width, WALeft,
 			    bPtr->flags.enabled ? scr->black : scr->darkGray, False, caption, strlen(caption));
@@ -383,12 +385,12 @@ static void paintPopUpButton(PopUpButton * bPtr)
 		XCopyArea(scr->display, bPtr->indicator->pixmap,
 			  pixmap, scr->copyGC, 0, 0, bPtr->indicator->width,
 			  bPtr->indicator->height,
-			  bPtr->view->size.width - bPtr->indicator->width - 4,
+			  bPtr->view->size.width - bPtr->indicator->width - 4 - extra,
 			  (bPtr->view->size.height - bPtr->indicator->height) / 2);
 	} else {
 		int x, y;
 
-		x = bPtr->view->size.width - bPtr->indicator->width - 4;
+		x = bPtr->view->size.width - bPtr->indicator->width - 4 - extra;
 		y = (bPtr->view->size.height - bPtr->indicator->height) / 2;
 
 		XSetClipOrigin(scr->display, scr->clipGC, x, y);
@@ -399,13 +401,13 @@ static void paintPopUpButton(PopUpButton * bPtr)
 
 	if (bPtr->flags.focused) {
 		GC gc = WMColorGC(scr->black);
-		int w = bPtr->view->size.width - 7;
-		int h = bPtr->view->size.height - 7;
+		int w = bPtr->view->size.width - 7 - 2 * extra;
+		int h = bPtr->view->size.height - 7 - 2 * extra;
 
 		if (w > 0 && h > 0) {
 			XSetLineAttributes(scr->display, gc, 0, LineOnOffDash, CapButt, JoinMiter);
 			XSetDashes(scr->display, gc, 0, "\1\1", 2);
-			XDrawRectangle(scr->display, pixmap, gc, 3, 3, w, h);
+			XDrawRectangle(scr->display, pixmap, gc, 3 + extra, 3 + extra, w, h);
 			XSetLineAttributes(scr->display, gc, 0, LineSolid, CapButt, JoinMiter);
 		}
 	}
@@ -517,6 +519,7 @@ static void paintMenuEntry(PopUpButton * bPtr, int index, int highlight)
 	int yo;
 	int width, itemHeight, itemCount;
 	char *title;
+	int extra = 2 * (W_ButtonBorderWidth(bPtr->font) - 1);
 
 	itemCount = WMGetArrayItemCount(bPtr->items);
 	if (index < 0 || index >= itemCount)
@@ -536,16 +539,16 @@ static void paintMenuEntry(PopUpButton * bPtr, int index, int highlight)
 
 	title = WMGetPopUpButtonItem(bPtr, index);
 
-	W_DrawRelief(scr, bPtr->menuView->window, 0, index * itemHeight, width, itemHeight, WRRaised);
+	W_DrawButtonRelief(scr, bPtr->menuView->window, 0, index * itemHeight, width, itemHeight, WRRaised, bPtr->font);
 
-	W_PaintText(bPtr->menuView, bPtr->menuView->window, bPtr->font, 6,
+	W_PaintText(bPtr->menuView, bPtr->menuView->window, bPtr->font, 6 + extra,
 		    index * itemHeight + yo, width, WALeft, scr->black, False, title, strlen(title));
 
 	if (!bPtr->flags.pullsDown && index == bPtr->selectedItemIndex) {
 		XCopyArea(scr->display, bPtr->indicator->pixmap,
 			  bPtr->menuView->window, scr->copyGC, 0, 0,
 			  bPtr->indicator->width, bPtr->indicator->height,
-			  width - bPtr->indicator->width - 4,
+			  width - bPtr->indicator->width - 4 - extra,
 			  index * itemHeight + (itemHeight - bPtr->indicator->height) / 2);
 	}
 }
@@ -558,6 +561,7 @@ static Pixmap makeMenuPixmap(PopUpButton * bPtr)
 	WMArrayIterator iter;
 	int yo, i;
 	int width, height, itemHeight;
+	int extra = 2 * (W_ButtonBorderWidth(bPtr->font) - 1);
 
 	itemHeight = bPtr->view->size.height;
 	width = bPtr->view->size.width;
@@ -575,21 +579,21 @@ static Pixmap makeMenuPixmap(PopUpButton * bPtr)
 
 		text = WMGetMenuItemTitle(item);
 
-		W_DrawRelief(scr, pixmap, 0, i * itemHeight, width, itemHeight, WRRaised);
+		W_DrawButtonRelief(scr, pixmap, 0, i * itemHeight, width, itemHeight, WRRaised, bPtr->font);
 
 		if (!WMGetMenuItemEnabled(item))
 			color = scr->darkGray;
 		else
 			color = scr->black;
 
-		W_PaintText(bPtr->menuView, pixmap, bPtr->font, 6,
+		W_PaintText(bPtr->menuView, pixmap, bPtr->font, 6 + extra,
 			    i * itemHeight + yo, width, WALeft, color, False, text, strlen(text));
 
 		if (!bPtr->flags.pullsDown && i == bPtr->selectedItemIndex) {
 			XCopyArea(scr->display, bPtr->indicator->pixmap, pixmap,
 				  scr->copyGC, 0, 0, bPtr->indicator->width,
 				  bPtr->indicator->height,
-				  width - bPtr->indicator->width - 4,
+				  width - bPtr->indicator->width - 4 - extra,
 				  i * itemHeight + (itemHeight - bPtr->indicator->height) / 2);
 		}
 

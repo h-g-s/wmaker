@@ -555,8 +555,14 @@ WMPixmap *W_CreateButtonImage(WMScreen *scr, WMPixmap *source, WMFont *font)
 	} else {
 		XPoint triangle[] = { { w / 6, h / 4 }, { 5 * w / 6, h / 4 }, { w / 2, 3 * h / 4 } };
 
-		XSetForeground(dpy, gc, W_PIXEL(scr->black));
+		XSetForeground(dpy, gc, W_PIXEL(scr->gray));
 		XFillPolygon(dpy, canvas, gc, triangle, 3, Convex, CoordModeOrigin);
+		XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinMiter);
+		XSetForeground(dpy, gc, W_PIXEL(scr->white));
+		XDrawLine(dpy, canvas, gc, triangle[2].x, triangle[2].y, triangle[0].x, triangle[0].y);
+		XDrawLine(dpy, canvas, gc, triangle[0].x, triangle[0].y, triangle[1].x, triangle[1].y);
+		XSetForeground(dpy, gc, W_PIXEL(scr->black));
+		XDrawLine(dpy, canvas, gc, triangle[1].x, triangle[1].y, triangle[2].x, triangle[2].y);
 	}
 
 	image = RCreateImageFromDrawable(scr->rcontext, canvas, None);
