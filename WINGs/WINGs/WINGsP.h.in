@@ -518,6 +518,9 @@ void W_PaintText(W_View *view, Drawable d, WMFont *font,  int x, int y,
 
 int W_GetTextHeight(WMFont *font, const char *text, int width, int wrap);
 
+WMSize W_GetTextAndImageSize(WMFont *font, const char *text, WMPixmap *image,
+                           WMImagePosition position);
+
 
 /* ---[ wpixmap.c ]------------------------------------------------------- */
 

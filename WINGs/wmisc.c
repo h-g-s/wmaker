@@ -143,6 +143,46 @@ static int fitText(const char *text, WMFont * font, int width, int wrap)
 	return i;
 }
 
+WMSize W_GetTextAndImageSize(WMFont *font, const char *text, WMPixmap *image,
+			    WMImagePosition position)
+{
+	WMSize size = { 0, 0 };
+	const char *line, *end;
+
+	if (text && position != WIPImageOnly) {
+		for (line = text; ; line = end + 1) {
+			end = strchr(line, '\n');
+			size.width = WMAX(size.width, WMWidthOfString(font, line,
+							 end ? end - line : strlen(line)));
+			size.height += WMFontHeight(font);
+			if (!end)
+				break;
+		}
+		size.width += 8; /* W_PaintTextAndImage's horizontal text inset. */
+	}
+
+	if (image && position != WIPNoImage) {
+		switch (position) {
+		case WIPLeft:
+		case WIPRight:
+			size.width += image->width + 5;
+			size.height = WMAX(size.height, image->height);
+			break;
+		case WIPAbove:
+		case WIPBelow:
+			size.width = WMAX(size.width, image->width);
+			size.height += image->height;
+			break;
+		default:
+			size.width = WMAX(size.width, image->width);
+			size.height = WMAX(size.height, image->height);
+			break;
+		}
+	}
+
+	return size;
+}
+
 int W_GetTextHeight(WMFont * font, const char *text, int width, int wrap)
 {
 	const char *ptr = text;

@@ -102,6 +102,12 @@ static void handleEvents(XEvent * event, void *data);
 static void handleTextFieldActionEvents(XEvent * event, void *data);
 static void didResizeTextField(W_ViewDelegate * self, WMView * view);
 
+WMSize WMGetTextFieldPreferredSize(WMTextField *tPtr, unsigned int columns)
+{
+	return wmksize(columns * WMWidthOfString(tPtr->font, "M", 1) + 8,
+		       WMFontHeight(tPtr->font) + 8);
+}
+
 struct W_ViewDelegate _TextFieldViewDelegate = {
 	NULL,
 	NULL,

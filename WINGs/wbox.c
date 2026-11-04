@@ -4,6 +4,7 @@
 typedef struct {
 	WMView *view;
 	int minSize;
+	WMSize requestedSize;
 	int maxSize;
 	int space;
 	unsigned expand:1;
@@ -157,6 +158,22 @@ void WMSetBoxBorderWidth(WMBox * box, unsigned width)
 	}
 }
 
+WMSize WMGetBoxMinimumSize(WMBox *box)
+{
+	unsigned int length = 0, breadth = 0;
+	int i;
+
+	for (i = 0; i < WMGetArrayItemCount(box->subviews); i++) {
+		SubviewItem *item = WMGetFromArray(box->subviews, i);
+
+		length += item->minSize + item->space;
+		breadth = WMAX(breadth, box->horizontal ? item->requestedSize.height : item->requestedSize.width);
+	}
+	length += 2 * box->borderWidth;
+	breadth += 2 * box->borderWidth;
+	return box->horizontal ? wmksize(length, breadth) : wmksize(breadth, length);
+}
+
 void WMAddBoxSubview(WMBox * bPtr, WMView * view, Bool expand, Bool fill, int minSize, int maxSize, int space)
 {
 	SubviewItem *subView;
@@ -164,6 +181,7 @@ void WMAddBoxSubview(WMBox * bPtr, WMView * view, Bool expand, Bool fill, int mi
 	subView = wmalloc(sizeof(SubviewItem));
 	subView->view = view;
 	subView->minSize = minSize;
+	subView->requestedSize = view->size;
 	subView->maxSize = maxSize;
 	subView->expand = expand;
 	subView->fill = fill;
@@ -182,6 +200,7 @@ void WMAddBoxSubviewAtEnd(WMBox * bPtr, WMView * view, Bool expand, Bool fill, i
 	subView = wmalloc(sizeof(SubviewItem));
 	subView->view = view;
 	subView->minSize = minSize;
+	subView->requestedSize = view->size;
 	subView->maxSize = maxSize;
 	subView->expand = expand;
 	subView->fill = fill;

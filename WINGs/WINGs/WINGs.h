@@ -1078,6 +1078,8 @@ void WMSetButtonText(WMButton *bPtr, const char *text);
 /* Returns direct pointer to internal data, do not modify! */
 const char *WMGetButtonText(WMButton *bPtr);
 
+WMSize WMGetButtonPreferredSize(WMButton *bPtr);
+
 void WMSetButtonAltText(WMButton *bPtr, const char *text);
 
 void WMSetButtonTextColor(WMButton *bPtr, WMColor *color);
@@ -1130,6 +1132,9 @@ void WMSetLabelText(WMLabel *lPtr, const char *text);
 
 WMFont* WMGetLabelFont(WMLabel *lPtr);
 
+/* Unwrapped size, including the image and relief, if present. */
+WMSize WMGetLabelPreferredSize(WMLabel *lPtr);
+
 void WMSetLabelFont(WMLabel *lPtr, WMFont *font);
 
 void WMSetLabelTextColor(WMLabel *lPtr, WMColor *color);
@@ -1164,6 +1169,9 @@ void WMSetTextFieldAlignment(WMTextField *tPtr, WMAlignment alignment);
 void WMSetTextFieldFont(WMTextField *tPtr, WMFont *font);
 
 WMFont* WMGetTextFieldFont(WMTextField *tPtr);
+
+/* Width is based on columns of "M", not the current field contents. */
+WMSize WMGetTextFieldPreferredSize(WMTextField *tPtr, unsigned int columns);
 
 void WMSetTextFieldBordered(WMTextField *tPtr, Bool bordered);
 
@@ -1821,6 +1829,9 @@ void WMDestroyTabViewItem(WMTabViewItem *item);
 WMBox* WMCreateBox(WMWidget *parent);
 
 void WMSetBoxBorderWidth(WMBox *box, unsigned width);
+
+/* Uses the minimum lengths and initial cross-axis sizes of registered subviews. */
+WMSize WMGetBoxMinimumSize(WMBox *box);
 
 void WMAddBoxSubview(WMBox *bPtr, WMView *view, Bool expand, Bool fill,
                      int minSize, int maxSize, int space);

@@ -21,6 +21,13 @@ libWUtil_la_LIBADD = @LIBBSD@
 
 EXTRA_DIST = BUGS make-rgb Examples Extras Tests
 
+check_PROGRAMS = layout_test
+layout_test_SOURCES = layout_test.c
+layout_test_LDADD = $(LDADD) @XLIBS@
+
+check-local: layout_test
+	./layout_test || test $$? -eq 77
+
 
 # wbutton.c
 libWINGs_la_SOURCES = 	\

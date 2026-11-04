@@ -104,6 +104,22 @@ static void handleKeyPress(Button *bPtr, XEvent *event);
 
 static char *WMPushedRadioNotification = "WMPushedRadioNotification";
 
+WMSize WMGetButtonPreferredSize(WMButton *bPtr)
+{
+	WMFont *font = bPtr->font ? bPtr->font : bPtr->view->screen->normalFont;
+	WMSize size, alternate;
+	unsigned int padding = bPtr->flags.bordered ? 10 : 4;
+
+	size = W_GetTextAndImageSize(font, bPtr->caption, bPtr->image, bPtr->flags.imagePosition);
+	alternate = W_GetTextAndImageSize(font, bPtr->altCaption ? bPtr->altCaption : bPtr->caption,
+					bPtr->altImage ? bPtr->altImage : bPtr->image,
+					bPtr->flags.imagePosition);
+	size.width = WMAX(size.width, alternate.width) + padding;
+	size.height = WMAX(size.height, alternate.height) + padding;
+
+	return size;
+}
+
 
 WMButton *WMCreateCustomButton(WMWidget * parent, int behaviourMask)
 {

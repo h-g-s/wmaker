@@ -34,6 +34,18 @@ static void paintLabel(Label * lPtr);
 
 static void handleEvents(XEvent * event, void *data);
 
+WMSize WMGetLabelPreferredSize(WMLabel *lPtr)
+{
+	WMFont *font = lPtr->font ? lPtr->font : lPtr->view->screen->normalFont;
+	WMSize size = W_GetTextAndImageSize(font, lPtr->caption, lPtr->image, lPtr->flags.imagePosition);
+
+	if (lPtr->flags.relief != WRFlat) {
+		size.width += 3;
+		size.height += 3;
+	}
+	return size;
+}
+
 WMLabel *WMCreateLabel(WMWidget * parent)
 {
 	Label *lPtr;
