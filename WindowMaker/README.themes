@@ -23,6 +23,21 @@ You can also do this in your system-wide WindowMaker directory (usually
 your users. This will probably need to be done with root access.
 
 
+How To Customize a System Theme
+===============================
+
+System-wide themes cannot be edited without root access. To get editable
+copies of them, run:
+
+wmcopythemes
+
+This copies the system themes to ~/GNUstep/Library/WindowMaker/Themes
+(use "wmcopythemes ThemeName" to copy a single theme). When a theme with
+the same name exists both system-wide and in your themes directory, the
+Themes menu only shows your copy, so your edited version overrides the
+system one.
+
+
 How To Load a Theme
 ===================
 

@@ -1,0 +1,200 @@
+#!/bin/sh
+#
+# wmcopythemes - copy Window Maker system themes to the user's theme directory
+#
+# Window Maker lists a user theme in place of a system theme with the same
+# name, so the copies can be edited (fonts, colours, ...) without root access.
+#
+
+prog="`basename "$0"`"
+version="#version#"
+system_dirs=""
+user_dir=""
+force=""
+dry_run=""
+list_only=""
+
+print_help() {
+	cat <<EOF
+Usage: $prog [options] [theme...]
+Copy Window Maker system themes to your user theme directory, where they
+override the system themes of the same name and can be edited freely.
+With no theme arguments, all system themes are copied.
+
+  -f, --force           replace themes that already exist in the user directory
+  -l, --list            list the available system themes and exit
+  -n, --dry-run         only show what would be copied
+  -s, --system-dir DIR  read system themes from DIR (may be repeated;
+                        default: #pkgdatadir#/Themes)
+  -u, --user-dir DIR    copy themes into DIR (default:
+                        \$WMAKER_USER_ROOT/Library/WindowMaker/Themes or
+                        ~/GNUstep/Library/WindowMaker/Themes)
+  -h, --help            display this help and exit
+  -v, --version         output version information and exit
+EOF
+}
+
+die() {
+	echo "$prog: $*" >&2
+	exit 1
+}
+
+# Theme name as shown in the Themes menu: file name without its extension
+theme_label() {
+	case "$1" in
+	?*.*) echo "${1%.*}" ;;
+	*) echo "$1" ;;
+	esac
+}
+
+# List user themes whose menu name is $1
+user_themes_named() {
+	[ -d "$user_dir" ] || return 0
+	for path in "$user_dir"/*; do
+		is_theme "$path" || continue
+		name="`basename "$path"`"
+		[ "`theme_label "$name"`" = "$1" ] && printf '%s\n' "$path"
+	done
+	return 0
+}
+
+is_theme() {
+	[ -f "$1" ] || { [ -d "$1" ] && case "$1" in *.themed) true ;; *) false ;; esac; }
+}
+
+add_system_dir() {
+	if [ -z "$system_dirs" ]; then
+		system_dirs="$1"
+	else
+		system_dirs="$system_dirs
+$1"
+	fi
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-f|--force) force=1 ;;
+	-l|--list) list_only=1 ;;
+	-n|--dry-run) dry_run=1 ;;
+	-s|--system-dir)
+		[ $# -ge 2 ] || die "option '$1' requires an argument"
+		shift
+		add_system_dir "$1"
+		;;
+	--system-dir=*) add_system_dir "${1#*=}" ;;
+	-u|--user-dir)
+		[ $# -ge 2 ] || die "option '$1' requires an argument"
+		shift
+		user_dir="$1"
+		;;
+	--user-dir=*) user_dir="${1#*=}" ;;
+	-h|--help) print_help; exit 0 ;;
+	-v|--version) echo "$prog (Window Maker) $version"; exit 0 ;;
+	--) shift; break ;;
+	-*) die "unknown option '$1' (try '$prog --help')" ;;
+	*) break ;;
+	esac
+	shift
+done
+
+[ -n "$system_dirs" ] || system_dirs="#pkgdatadir#/Themes"
+
+if [ -z "$user_dir" ]; then
+	if [ -n "$WMAKER_USER_ROOT" ]; then
+		user_dir="$WMAKER_USER_ROOT/Library/WindowMaker/Themes"
+	else
+		[ -n "$HOME" ] || die "HOME is not set"
+		user_dir="$HOME/GNUstep/Library/WindowMaker/Themes"
+	fi
+fi
+
+# Collect system themes; later system directories override earlier ones,
+# matching how the Themes menu resolves duplicate names.
+themes=""
+old_ifs="$IFS"
+IFS='
+'
+for dir in $system_dirs; do
+	[ -d "$dir" ] || { echo "$prog: warning: '$dir' is not a directory" >&2; continue; }
+	for path in "$dir"/*; do
+		name="`basename "$path"`"
+		is_theme "$path" || continue
+		label="`theme_label "$name"`"
+		themes="`printf '%s\n' "$themes" | awk -F '\t' -v l="$label" 'NF && $1 != l'`"
+		themes="$themes
+$label	$path"
+	done
+done
+IFS="$old_ifs"
+themes="`printf '%s\n' "$themes" | awk 'NF' | sort`"
+
+[ -n "$themes" ] || die "no system themes found in: `echo $system_dirs`"
+
+if [ -n "$list_only" ]; then
+	printf '%s\n' "$themes" | cut -f1
+	exit 0
+fi
+
+# Validate requested theme names
+for want in "$@"; do
+	want="`theme_label "$want"`"
+	printf '%s\n' "$themes" | cut -f1 | grep -Fqx -- "$want" ||
+		die "system theme '$want' not found (try '$prog --list')"
+done
+
+if [ -z "$dry_run" ] && [ ! -d "$user_dir" ]; then
+	mkdir -p "$user_dir" || die "could not create '$user_dir'"
+fi
+
+copied=0
+skipped=0
+failed=0
+IFS='
+'
+for entry in $themes; do
+	IFS="$old_ifs"
+	label="`printf '%s' "$entry" | cut -f1`"
+	src="`printf '%s' "$entry" | cut -f2-`"
+	name="`basename "$src"`"
+
+	if [ $# -gt 0 ]; then
+		selected=""
+		for want in "$@"; do
+			[ "`theme_label "$want"`" = "$label" ] && selected=1
+		done
+		[ -n "$selected" ] || continue
+	fi
+
+	# Any user theme with the same menu name already overrides this one
+	existing="`user_themes_named "$label"`"
+
+	if [ -n "$existing" ] && [ -z "$force" ]; then
+		echo "skipping $label: already present in $user_dir (use --force to replace)"
+		skipped=`expr $skipped + 1`
+		continue
+	fi
+
+	if [ -n "$dry_run" ]; then
+		echo "would copy $src -> $user_dir/$name"
+		copied=`expr $copied + 1`
+		continue
+	fi
+
+	if [ -n "$existing" ]; then
+		user_themes_named "$label" | while IFS= read -r path; do
+			rm -rf "$path"
+		done
+	fi
+
+	if cp -R "$src" "$user_dir/$name" && chmod -R u+rw "$user_dir/$name"; then
+		echo "copied $label -> $user_dir/$name"
+		copied=`expr $copied + 1`
+	else
+		echo "$prog: failed to copy '$src'" >&2
+		failed=`expr $failed + 1`
+	fi
+done
+IFS="$old_ifs"
+
+echo "$copied copied, $skipped skipped, $failed failed"
+[ $failed -eq 0 ]

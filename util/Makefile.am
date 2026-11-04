@@ -7,9 +7,9 @@ pkgdatadir  = $(datadir)/@PACKAGE@
 bin_PROGRAMS = wxcopy wxpaste wdwrite wdread getstyle setstyle convertfonts \
 	seticons geticonset wmsetbg wmagnify wmgenmenu wmmenugen wmiv
 
-bin_SCRIPTS = wmaker.inst wm-oldmenu2new wkdemenu.pl
+bin_SCRIPTS = wmaker.inst wmcopythemes wm-oldmenu2new wkdemenu.pl
 
-EXTRA_DIST = wmaker.inst.in bughint wm-oldmenu2new wkdemenu.pl
+EXTRA_DIST = wmaker.inst.in wmcopythemes.in bughint wm-oldmenu2new wkdemenu.pl
 
 AM_CPPFLAGS = \
 	 $(DFLAGS) -I$(top_srcdir)/WINGs -I$(top_builddir)/wrlib \
@@ -88,7 +88,7 @@ wmiv_LDADD = \
 
 wmiv_SOURCES = wmiv.c wmiv.h xdnd.c xdnd.h
 
-CLEANFILES = wmaker.inst
+CLEANFILES = wmaker.inst wmcopythemes
 
 wmaker.inst: $(srcdir)/wmaker.inst.in ./Makefile
 	$(AM_V_GEN)sed -e "s|#pkgdatadir#|$(pkgdatadir)|" \
@@ -97,3 +97,9 @@ wmaker.inst: $(srcdir)/wmaker.inst.in ./Makefile
 		-e "s|#bindir#|$(bindir)|" \
 			$(srcdir)/wmaker.inst.in >wmaker.inst ; \
 	chmod 755 wmaker.inst
+
+wmcopythemes: $(srcdir)/wmcopythemes.in ./Makefile
+	$(AM_V_GEN)sed -e "s|#pkgdatadir#|$(pkgdatadir)|" \
+		-e "s|#version#|$(VERSION)|" \
+			$(srcdir)/wmcopythemes.in >wmcopythemes ; \
+	chmod 755 wmcopythemes

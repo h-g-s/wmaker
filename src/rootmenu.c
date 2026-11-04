@@ -1202,7 +1202,9 @@ static WMenu *readMenuPipe(WScreen * scr, char **file_name)
 
 typedef struct {
 	char *name;
+	char *label;
 	int index;
+	Bool user;
 } dir_data;
 
 static int myCompare(const void *d1, const void *d2)
@@ -1211,6 +1213,65 @@ static int myCompare(const void *d1, const void *d2)
 	dir_data *p2 = *(dir_data **) d2;
 
 	return strcmp(p1->name, p2->name);
+}
+
+static void freeDirData(dir_data *data)
+{
+	wfree(data->name);
+	if (data->label)
+		wfree(data->label);
+	wfree(data);
+}
+
+static Bool isUserMenuPath(const char *path)
+{
+	const char *user_path = wusergnusteppath();
+	size_t len;
+
+	if (!user_path || !*user_path)
+		return False;
+
+	len = strlen(user_path);
+	while (len > 1 && user_path[len - 1] == '/')
+		len--;
+
+	return strncmp(path, user_path, len) == 0 && (path[len] == '/' || path[len] == '\0');
+}
+
+/*
+ * Add a file entry to a directory menu, keeping a single entry per label.
+ * When several directories provide an entry with the same label (e.g. a theme
+ * installed system-wide and copied to the user's GNUstep directory), the one
+ * from the user's GNUstep directory wins; otherwise the later directory wins.
+ * Within a single directory the choice is made deterministic by file name.
+ */
+static void addDirectoryFileEntry(WMArray *files, dir_data *data)
+{
+	WMArrayIterator iter;
+	dir_data *old;
+	Bool replace;
+
+	WM_ITERATE_ARRAY(files, old, iter) {
+		if (strcmp(old->label, data->label) != 0)
+			continue;
+
+		if (old->user != data->user)
+			replace = data->user;
+		else if (old->index != data->index)
+			replace = data->index > old->index;
+		else
+			replace = strcmp(data->name, old->name) > 0;
+
+		if (replace) {
+			WMReplaceInArray(files, iter, data);
+			freeDirData(old);
+		} else {
+			freeDirData(data);
+		}
+		return;
+	}
+
+	WMAddToArray(files, data);
 }
 
 /***** Preset some macro for file parser *****/
@@ -1271,6 +1332,7 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 	int length, i, have_space = 0;
 	dir_data *data;
 	int stripExtension = 0;
+	Bool userPath;
 
 	dirs = WMCreateArray(16);
 	files = WMCreateArray(16);
@@ -1288,6 +1350,7 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 			i++;
 			continue;
 		}
+		userPath = isUserMenuPath(path[i]);
 
 		while ((dentry = readdir(dir))) {
 
@@ -1323,7 +1386,9 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 
 						data = (dir_data *) wmalloc(sizeof(dir_data));
 						data->name = wstrdup(dentry->d_name);
+						data->label = NULL;
 						data->index = i;
+						data->user = userPath;
 
 						WMAddToArray(dirs, data);
 					}
@@ -1336,9 +1401,16 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 
 						data = (dir_data *) wmalloc(sizeof(dir_data));
 						data->name = wstrdup(dentry->d_name);
+						data->label = wstrdup(dentry->d_name);
 						data->index = i;
+						data->user = userPath;
+						if (stripExtension) {
+							char *ptr = strrchr(data->label, '.');
+							if (ptr && ptr != data->label)
+								*ptr = 0;
+						}
 
-						WMAddToArray(files, data);
+						addDirectoryFileEntry(files, data);
 					}
 				}
 			}
@@ -1397,8 +1469,7 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 		addMenuEntry(menu, M_(data->name), NULL, "OPEN_MENU", buffer, path[data->index]);
 
 		wfree(buffer);
-		wfree(data->name);
-		wfree(data);
+		freeDirData(data);
 	}
 
 	WM_ITERATE_ARRAY(files, data, iter) {
@@ -1434,16 +1505,10 @@ static WMenu *readMenuDirectory(WScreen *scr, const char *title, char **path, co
 		if (have_space)
 			strcat(buffer, "\"");
 
-		if (stripExtension) {
-			char *ptr = strrchr(data->name, '.');
-			if (ptr && ptr != data->name)
-				*ptr = 0;
-		}
-		addMenuEntry(menu, M_(data->name), NULL, "SHEXEC", buffer, path[data->index]);
+		addMenuEntry(menu, M_(data->label), NULL, "SHEXEC", buffer, path[data->index]);
 
 		wfree(buffer);
-		wfree(data->name);
-		wfree(data);
+		freeDirData(data);
 	}
 
 	WMFreeArray(files);

@@ -56,6 +56,7 @@ util/wdread
 util/wdwrite
 util/wmagnify
 util/wmaker.inst
+util/wmcopythemes
 util/wmgenmenu
 util/wmiv
 util/wmmenugen

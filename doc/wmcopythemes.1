@@ -1,0 +1,57 @@
+.\" Hey, Emacs!  This is an -*- nroff -*- source file.
+.TH wmcopythemes 1 "November 2026"
+.SH NAME
+wmcopythemes \- copy Window Maker system themes to the user's theme directory
+.SH SYNOPSIS
+.B wmcopythemes
+.RI [ options ]
+.RI [ theme ...]
+.SH DESCRIPTION
+.B wmcopythemes
+copies the themes installed system-wide with Window Maker into the user's
+theme directory, so that they can be modified (for example to change font
+sizes) without administrator privileges.
+With no
+.I theme
+arguments all system themes are copied; otherwise only the named themes are
+copied.
+A theme can be named with or without its file extension.
+.PP
+When the same theme name exists both in a system theme directory and in the
+user's theme directory, the Themes menu of Window Maker only lists the user's
+copy, which therefore overrides the system theme.
+Existing user themes are not replaced unless
+.B \-\-force
+is given.
+.SH OPTIONS
+.TP
+.BR \-\-dry\-run | \-n
+only show what would be copied.
+.TP
+.BR \-\-force | \-f
+replace themes that already exist in the user's theme directory.
+.TP
+.BR \-\-help | \-h
+print a help message with the list of options.
+.TP
+.BR \-\-list | \-l
+list the available system themes and exit.
+.TP
+.BR \-\-system\-dir | \-s " \fIdir\fP"
+read system themes from \fIdir\fP instead of the default system theme
+directory. This option may be given several times.
+.TP
+.BR \-\-user\-dir | \-u " \fIdir\fP"
+copy themes into \fIdir\fP instead of the user's theme directory.
+.TP
+.BR \-\-version | \-v
+print the version of Window Maker from which the program comes.
+.SH ENVIRONMENT
+.IP WMAKER_USER_ROOT
+specifies the user's GNUstep directory. Themes are copied to
+"Library/WindowMaker/Themes" under it. If the variable is not set, it
+defaults to "~/GNUstep".
+.SH SEE ALSO
+.BR getstyle (1),
+.BR setstyle (1),
+.BR wmaker (1)
