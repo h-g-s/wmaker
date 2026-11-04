@@ -21,6 +21,10 @@ typedef struct W_Button {
 	W_Pixmap *altImage;
 	W_Pixmap *tsImage;
 
+	W_Pixmap *scaledImage;
+	W_Pixmap *scaledAltImage;
+	W_Pixmap *scaledTsImage;
+
 	W_Pixmap *dimage;
 
 	void *clientData;
@@ -101,6 +105,7 @@ static void paintButton(Button * bPtr);
 static void handleEvents(XEvent * event, void *data);
 static void handleActionEvents(XEvent * event, void *data);
 static void handleKeyPress(Button *bPtr, XEvent *event);
+static void updateButtonImages(Button *bPtr, Bool makeDisabled);
 
 static char *WMPushedRadioNotification = "WMPushedRadioNotification";
 
@@ -110,9 +115,9 @@ WMSize WMGetButtonPreferredSize(WMButton *bPtr)
 	WMSize size, alternate;
 	unsigned int padding = bPtr->flags.bordered ? 10 : 4;
 
-	size = W_GetTextAndImageSize(font, bPtr->caption, bPtr->image, bPtr->flags.imagePosition);
+	size = W_GetTextAndImageSize(font, bPtr->caption, bPtr->scaledImage, bPtr->flags.imagePosition);
 	alternate = W_GetTextAndImageSize(font, bPtr->altCaption ? bPtr->altCaption : bPtr->caption,
-					bPtr->altImage ? bPtr->altImage : bPtr->image,
+					bPtr->scaledAltImage ? bPtr->scaledAltImage : bPtr->scaledImage,
 					bPtr->flags.imagePosition);
 	size.width = WMAX(size.width, alternate.width) + padding;
 	size.height = WMAX(size.height, alternate.height) + padding;
@@ -236,6 +241,7 @@ WMButton *WMCreateButton(WMWidget * parent, WMButtonType type)
 		bPtr->flags.imagePosition = DEFAULT_SWITCH_IMAGE_POSITION;
 	}
 
+	updateButtonImages(bPtr, False);
 	return bPtr;
 }
 
@@ -244,7 +250,7 @@ static void updateDisabledMask(WMButton * bPtr)
 	WMScreen *scr = WMWidgetScreen(bPtr);
 	Display *dpy = scr->display;
 
-	if (bPtr->image) {
+	if (bPtr->scaledImage) {
 		XGCValues gcv;
 
 		if (bPtr->dimage->mask) {
@@ -264,7 +270,7 @@ static void updateDisabledMask(WMButton * bPtr)
 			gcv.background = 0;
 			gcv.stipple = scr->stipple;
 			gcv.fill_style = FillStippled;
-			gcv.clip_mask = bPtr->image->mask;
+			gcv.clip_mask = bPtr->scaledImage->mask;
 			gcv.clip_x_origin = 0;
 			gcv.clip_y_origin = 0;
 
@@ -281,6 +287,34 @@ static void updateDisabledMask(WMButton * bPtr)
 	}
 }
 
+static void updateButtonImages(Button *bPtr, Bool makeDisabled)
+{
+	WMScreen *scr = WMWidgetScreen(bPtr);
+	WMFont *font = bPtr->font ? bPtr->font : scr->normalFont;
+
+	if (bPtr->dimage) {
+		bPtr->dimage->pixmap = None;
+		WMReleasePixmap(bPtr->dimage);
+		bPtr->dimage = NULL;
+	}
+	if (bPtr->scaledImage)
+		WMReleasePixmap(bPtr->scaledImage);
+	if (bPtr->scaledAltImage)
+		WMReleasePixmap(bPtr->scaledAltImage);
+	if (bPtr->scaledTsImage)
+		WMReleasePixmap(bPtr->scaledTsImage);
+	bPtr->scaledImage = W_CreateButtonImage(scr, bPtr->image, font);
+	bPtr->scaledAltImage = W_CreateButtonImage(scr, bPtr->altImage, font);
+	bPtr->scaledTsImage = W_CreateButtonImage(scr, bPtr->tsImage, font);
+	if (bPtr->scaledImage && makeDisabled) {
+		WMPixmap *image = bPtr->scaledImage;
+
+		bPtr->dimage = WMCreatePixmapFromXPixmaps(scr, image->pixmap, None,
+						       image->width, image->height, image->depth);
+		updateDisabledMask(bPtr);
+	}
+}
+
 void WMSetButtonImageDefault(WMButton * bPtr)
 {
 	WMSetButtonImage(bPtr, WMWidgetScreen(bPtr)->buttonArrow);
@@ -289,22 +323,11 @@ void WMSetButtonImageDefault(WMButton * bPtr)
 
 void WMSetButtonImage(WMButton * bPtr, WMPixmap * image)
 {
+	WMRetainPixmap(image);
 	if (bPtr->image != NULL)
 		WMReleasePixmap(bPtr->image);
-	bPtr->image = WMRetainPixmap(image);
-
-	if (bPtr->dimage) {
-		bPtr->dimage->pixmap = None;
-		WMReleasePixmap(bPtr->dimage);
-		bPtr->dimage = NULL;
-	}
-
-	if (image) {
-		bPtr->dimage = WMCreatePixmapFromXPixmaps(WMWidgetScreen(bPtr),
-							  image->pixmap, None,
-							  image->width, image->height, image->depth);
-		updateDisabledMask(bPtr);
-	}
+	bPtr->image = image;
+	updateButtonImages(bPtr, True);
 
 	if (bPtr->view->flags.realized) {
 		paintButton(bPtr);
@@ -313,9 +336,11 @@ void WMSetButtonImage(WMButton * bPtr, WMPixmap * image)
 
 void WMSetButtonAltImage(WMButton * bPtr, WMPixmap * image)
 {
+	WMRetainPixmap(image);
 	if (bPtr->altImage != NULL)
 		WMReleasePixmap(bPtr->altImage);
-	bPtr->altImage = WMRetainPixmap(image);
+	bPtr->altImage = image;
+	updateButtonImages(bPtr, bPtr->dimage != NULL);
 
 	if (bPtr->view->flags.realized) {
 		paintButton(bPtr);
@@ -436,10 +461,14 @@ void WMSetButtonBordered(WMButton * bPtr, int isBordered)
 
 void WMSetButtonFont(WMButton * bPtr, WMFont * font)
 {
+	WMRetainFont(font);
 	if (bPtr->font)
 		WMReleaseFont(bPtr->font);
 
-	bPtr->font = WMRetainFont(font);
+	bPtr->font = font;
+	updateButtonImages(bPtr, bPtr->dimage != NULL);
+	if (bPtr->view->flags.realized)
+		paintButton(bPtr);
 }
 
 void WMSetButtonEnabled(WMButton * bPtr, Bool flag)
@@ -597,7 +626,7 @@ static void paintButton(Button * bPtr)
 	}
 
 	if (bPtr->flags.enabled || !bPtr->dimage)
-		image = bPtr->image;
+		image = bPtr->scaledImage;
 	else
 		image = bPtr->dimage;
 	offset = 0;
@@ -616,9 +645,9 @@ static void paintButton(Button * bPtr)
 			if (bPtr->altCaption)
 				caption = bPtr->altCaption;
 			if (bPtr->flags.selected == 2)
-				image = bPtr->tsImage;
-			else if (bPtr->altImage)
-				image = bPtr->altImage;
+				image = bPtr->scaledTsImage;
+			else if (bPtr->scaledAltImage)
+				image = bPtr->scaledAltImage;
 			if (bPtr->altTextColor)
 				textColor = bPtr->altTextColor;
 		}
@@ -642,8 +671,8 @@ static void paintButton(Button * bPtr)
 		if (bPtr->flags.pushChange) {
 			if (bPtr->altCaption)
 				caption = bPtr->altCaption;
-			if (bPtr->altImage)
-				image = bPtr->altImage;
+			if (bPtr->scaledAltImage)
+				image = bPtr->scaledAltImage;
 			if (bPtr->altTextColor)
 				textColor = bPtr->altTextColor;
 		}
@@ -942,6 +971,13 @@ static void destroyButton(Button * bPtr)
 
 	if (bPtr->tsImage)
 		WMReleasePixmap(bPtr->tsImage);
+
+	if (bPtr->scaledImage)
+		WMReleasePixmap(bPtr->scaledImage);
+	if (bPtr->scaledAltImage)
+		WMReleasePixmap(bPtr->scaledAltImage);
+	if (bPtr->scaledTsImage)
+		WMReleasePixmap(bPtr->scaledTsImage);
 
 	wfree(bPtr);
 }

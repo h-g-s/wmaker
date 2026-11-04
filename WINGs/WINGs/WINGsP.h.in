@@ -156,6 +156,8 @@ typedef struct W_Screen {
 
     struct W_Font *boldFont;
 
+    WMArray *scaledButtonImages;
+
     WMHashTable *fontCache;
 
     Bool antialiasedText;
@@ -517,6 +519,8 @@ void W_PaintText(W_View *view, Drawable d, WMFont *font,  int x, int y,
                  int wrap, const char *text, int length);
 
 int W_GetTextHeight(WMFont *font, const char *text, int width, int wrap);
+
+WMPixmap *W_CreateButtonImage(WMScreen *screen, WMPixmap *source, WMFont *font);
 
 WMSize W_GetTextAndImageSize(WMFont *font, const char *text, WMPixmap *image,
                            WMImagePosition position);

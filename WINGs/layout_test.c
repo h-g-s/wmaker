@@ -258,6 +258,113 @@ static void testNestedListKeys(WMScreen *screen)
 	WMDestroyWidget(window);
 }
 
+static Bool samePixmapPixels(WMPixmap *first, WMPixmap *second)
+{
+	Display *display = first->screen->display;
+	XImage *a, *b;
+	Bool same = True;
+	int x, y;
+
+	assert(first->width == second->width && first->height == second->height);
+	a = XGetImage(display, first->pixmap, 0, 0, first->width, first->height, AllPlanes, ZPixmap);
+	b = XGetImage(display, second->pixmap, 0, 0, second->width, second->height, AllPlanes, ZPixmap);
+	assert(a && b);
+	for (y = 0; y < first->height; y++)
+		for (x = 0; x < first->width; x++)
+			if (XGetPixel(a, x, y) != XGetPixel(b, x, y))
+				same = False;
+	XDestroyImage(a);
+	XDestroyImage(b);
+	return same;
+}
+
+static void testSymbolImages(WMScreen *screen)
+{
+	WMPixmap *sources[] = {
+		screen->checkButtonImageOff, screen->checkButtonImageOn,
+		screen->radioButtonImageOff, screen->radioButtonImageOn,
+		screen->tristateButtonImageOff, screen->tristateButtonImageOn, screen->tristateButtonImageTri,
+		screen->buttonArrow, screen->pushedButtonArrow, screen->popUpIndicator, screen->pullDownIndicator
+	};
+	WMFont *small = WMSystemFontOfSize(screen, 1);
+	WMFont *large = WMSystemFontOfSize(screen, 24);
+	WMFont *larger = WMSystemFontOfSize(screen, 32);
+	unsigned int i;
+
+	for (i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+		WMPixmap *base = W_CreateButtonImage(screen, sources[i], small);
+		WMPixmap *scaled = W_CreateButtonImage(screen, sources[i], large);
+		WMPixmap *bigger = W_CreateButtonImage(screen, sources[i], larger);
+
+		assert(base == sources[i]);
+		assert(scaled->width > base->width && scaled->height > base->height);
+		assert(bigger->width > scaled->width && bigger->height > scaled->height);
+		if (i == 0 || i == 2 || i == 4 || i == 7) {
+			WMPixmap *alternate = W_CreateButtonImage(screen, sources[i + 1], large);
+
+			assert(!samePixmapPixels(scaled, alternate));
+			WMReleasePixmap(alternate);
+		}
+		WMReleasePixmap(base);
+		WMReleasePixmap(scaled);
+		WMReleasePixmap(bigger);
+	}
+	WMReleaseFont(small);
+	WMReleaseFont(large);
+	WMReleaseFont(larger);
+}
+
+static void testSymbolWidgets(WMWindow *window)
+{
+	WMScreen *screen = WMWidgetScreen(window);
+	WMButton *button = WMCreateSwitchButton(window);
+	WMPopUpButton *popup = WMCreatePopUpButton(window);
+	WMPixmap *custom = WMCreatePixmap(screen, 20, 10, screen->depth, False);
+	WMFont *normal = WMSystemFontOfSize(screen, 12);
+	WMFont *large = WMSystemFontOfSize(screen, 32);
+	WMSize small, big;
+
+	WMSetButtonText(button, NULL);
+	WMSetButtonImagePosition(button, WIPImageOnly);
+	WMSetButtonFont(button, normal);
+	small = WMGetButtonPreferredSize(button);
+	WMSetButtonFont(button, large);
+	big = WMGetButtonPreferredSize(button);
+	assert(big.width > small.width && big.height > small.height);
+	WMSetButtonFont(button, normal);
+	assert(WMGetButtonPreferredSize(button).width == small.width);
+	WMSetButtonImageDefault(button);
+	WMSetButtonFont(button, large);
+	big = WMGetButtonPreferredSize(button);
+	assert(big.width > screen->buttonArrow->width + 4);
+	WMSetButtonAltImage(button, NULL);
+	WMSetButtonImage(button, custom);
+	assert(WMGetButtonPreferredSize(button).width == 24);
+	WMSetButtonFont(button, normal);
+	assert(WMGetButtonPreferredSize(button).width == 24);
+
+	WMAddPopUpButtonItem(popup, "A longer choice");
+	WMAddPopUpButtonItem(popup, "Short");
+	WMSetPopUpButtonSelectedItem(popup, 1);
+	WMSetPopUpButtonFont(popup, normal);
+	small = WMGetPopUpButtonPreferredSize(popup);
+	WMSetPopUpButtonFont(popup, large);
+	big = WMGetPopUpButtonPreferredSize(popup);
+	assert(big.width > small.width && big.height > small.height);
+	assert(big.width > WMWidthOfString(large, "A longer choice", 15) + screen->popUpIndicator->width);
+	assert(WMGetPopUpButtonSelectedItem(popup) == 1);
+	WMSetPopUpButtonPullsDown(popup, True);
+	big = WMGetPopUpButtonPreferredSize(popup);
+	assert(big.height > small.height);
+	WMSetPopUpButtonFont(popup, normal);
+	WMSetPopUpButtonPullsDown(popup, False);
+	assert(WMGetPopUpButtonPreferredSize(popup).width == small.width);
+
+	WMReleaseFont(normal);
+	WMReleaseFont(large);
+	WMReleasePixmap(custom);
+}
+
 int main(int argc, char **argv)
 {
 	Display *display;
@@ -281,6 +388,8 @@ int main(int argc, char **argv)
 	testInputPanels(screen);
 	testContentOverflow(screen);
 	testNestedListKeys(screen);
+	testSymbolImages(screen);
+	testSymbolWidgets(window);
 	WMDestroyWidget(window);
 	WMReleaseApplication();
 	XCloseDisplay(display);

@@ -423,6 +423,165 @@ static WMPixmap *makePixmap(W_Screen * sPtr, char **data, int width, int height,
 	return WMCreatePixmapFromXPixmaps(sPtr, pixmap, mask, width, height, sPtr->depth);
 }
 
+typedef struct {
+	WMPixmap *source;
+	WMPixmap *image;
+} ScaledButtonImage;
+
+WMPixmap *W_CreateButtonImage(WMScreen *scr, WMPixmap *source, WMFont *font)
+{
+	enum { Check, Radio, TriState, Return, PopUp, PullDown } kind;
+	/* Keep the original artwork through the usual 11-12 point system fonts. */
+	const int referenceHeight = 17;
+	Bool selected = False, mixed = False, pushed = False;
+	int width, height, w, h, line, inset, i;
+	Pixmap canvas;
+	GC gc;
+	RImage *image, *scaled;
+	WMPixmap *result;
+	ScaledButtonImage *cached;
+	Display *dpy = scr->display;
+
+	if (!source)
+		return NULL;
+	if (source == scr->checkButtonImageOff || source == scr->checkButtonImageOn) {
+		kind = Check;
+		selected = source == scr->checkButtonImageOn;
+	} else if (source == scr->radioButtonImageOff || source == scr->radioButtonImageOn) {
+		kind = Radio;
+		selected = source == scr->radioButtonImageOn;
+	} else if (source == scr->tristateButtonImageOff || source == scr->tristateButtonImageOn ||
+		   source == scr->tristateButtonImageTri) {
+		kind = TriState;
+		selected = source == scr->tristateButtonImageOn;
+		mixed = source == scr->tristateButtonImageTri;
+	} else if (source == scr->buttonArrow || source == scr->pushedButtonArrow) {
+		kind = Return;
+		pushed = source == scr->pushedButtonArrow;
+	} else if (source == scr->popUpIndicator) {
+		kind = PopUp;
+	} else if (source == scr->pullDownIndicator) {
+		kind = PullDown;
+	} else {
+		return WMRetainPixmap(source);
+	}
+
+	height = WMFontHeight(font);
+	if (height <= referenceHeight)
+		return WMRetainPixmap(source);
+	width = (source->width * height + referenceHeight / 2) / referenceHeight;
+	height = (source->height * height + referenceHeight / 2) / referenceHeight;
+	if (!scr->scaledButtonImages)
+		scr->scaledButtonImages = WMCreateArray(16);
+	for (i = 0; i < WMGetArrayItemCount(scr->scaledButtonImages); i++) {
+		cached = WMGetFromArray(scr->scaledButtonImages, i);
+		if (cached->source == source && cached->image->width == width && cached->image->height == height)
+			return WMRetainPixmap(cached->image);
+	}
+
+	/* Draw at four times the final resolution, then antialias the geometry. */
+	w = width * 4;
+	h = height * 4;
+	line = WMAX(4, h / source->height);
+	inset = line;
+	canvas = XCreatePixmap(dpy, W_DRAWABLE(scr), w, h, scr->depth);
+	gc = XCreateGC(dpy, canvas, 0, NULL);
+	XSetForeground(dpy, gc, W_PIXEL(pushed ? scr->white : scr->gray));
+	XFillRectangle(dpy, canvas, gc, 0, 0, w, h);
+
+	if (kind == Check || kind == TriState || kind == PopUp) {
+		XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinMiter);
+		XSetForeground(dpy, gc, W_PIXEL(kind == PopUp ? scr->white : scr->darkGray));
+		XDrawLine(dpy, canvas, gc, inset, h - inset, inset, inset);
+		XDrawLine(dpy, canvas, gc, inset, inset, w - inset, inset);
+		XSetForeground(dpy, gc, W_PIXEL(kind == PopUp ? scr->black : scr->white));
+		XDrawLine(dpy, canvas, gc, inset, h - inset, w - inset, h - inset);
+		XDrawLine(dpy, canvas, gc, w - inset, h - inset, w - inset, inset);
+		if (selected) {
+			XPoint tick[] = { { w / 4, h / 2 }, { 7 * w / 16, 3 * h / 4 },
+					 { 3 * w / 4, h / 4 } };
+
+			XSetForeground(dpy, gc, W_PIXEL(scr->black));
+			XSetLineAttributes(dpy, gc, 2 * line, LineSolid, CapRound, JoinRound);
+			if (kind == TriState) {
+				XDrawLine(dpy, canvas, gc, w / 3, h / 3, 2 * w / 3, 2 * h / 3);
+				XDrawLine(dpy, canvas, gc, w / 3, 2 * h / 3, 2 * w / 3, h / 3);
+			} else {
+				XDrawLines(dpy, canvas, gc, tick, 3, CoordModeOrigin);
+			}
+		} else if (mixed) {
+			int x, y;
+
+			XSetForeground(dpy, gc, W_PIXEL(scr->black));
+			for (y = 0; y < 5; y++)
+				for (x = 0; x < 5; x++)
+					if ((x + y) % 2 == 0)
+						XFillRectangle(dpy, canvas, gc, w / 4 + x * line,
+							       h / 4 + y * line, line, line);
+		}
+	} else if (kind == Radio) {
+		XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinRound);
+		XSetForeground(dpy, gc, W_PIXEL(scr->darkGray));
+		XDrawArc(dpy, canvas, gc, inset, inset, w - 2 * inset, h - 2 * inset, 45 * 64, 180 * 64);
+		XSetForeground(dpy, gc, W_PIXEL(scr->white));
+		XDrawArc(dpy, canvas, gc, inset, inset, w - 2 * inset, h - 2 * inset, 225 * 64, 180 * 64);
+		if (selected) {
+			XSetForeground(dpy, gc, W_PIXEL(scr->black));
+			XFillArc(dpy, canvas, gc, w / 4, h / 4, w / 2, h / 2, 0, 360 * 64);
+		}
+	} else if (kind == Return) {
+		XPoint arrow[] = { { w / 3, h / 5 }, { w / 9, h / 2 }, { w / 3, 4 * h / 5 } };
+		XPoint stem[] = { { w / 9, h / 2 }, { 3 * w / 4, h / 2 }, { 3 * w / 4, h / 5 } };
+
+		XSetLineAttributes(dpy, gc, line, LineSolid, CapRound, JoinRound);
+		XSetForeground(dpy, gc, W_PIXEL(pushed ? scr->gray : scr->white));
+		for (i = 0; i < 3; i++) {
+			arrow[i].x += line;
+			arrow[i].y += line;
+			stem[i].x += line;
+			stem[i].y += line;
+		}
+		XDrawLines(dpy, canvas, gc, arrow, 3, CoordModeOrigin);
+		XDrawLines(dpy, canvas, gc, stem, 3, CoordModeOrigin);
+		for (i = 0; i < 3; i++) {
+			arrow[i].x -= line;
+			arrow[i].y -= line;
+			stem[i].x -= line;
+			stem[i].y -= line;
+		}
+		XSetForeground(dpy, gc, W_PIXEL(scr->black));
+		XDrawLines(dpy, canvas, gc, arrow, 3, CoordModeOrigin);
+		XDrawLines(dpy, canvas, gc, stem, 3, CoordModeOrigin);
+	} else {
+		XPoint triangle[] = { { w / 6, h / 4 }, { 5 * w / 6, h / 4 }, { w / 2, 3 * h / 4 } };
+
+		XSetForeground(dpy, gc, W_PIXEL(scr->black));
+		XFillPolygon(dpy, canvas, gc, triangle, 3, Convex, CoordModeOrigin);
+	}
+
+	image = RCreateImageFromDrawable(scr->rcontext, canvas, None);
+	XFreeGC(dpy, gc);
+	XFreePixmap(dpy, canvas);
+	if (!image)
+		goto failed;
+	scaled = RSmoothScaleImage(image, width, height);
+	RReleaseImage(image);
+	if (!scaled)
+		goto failed;
+	result = WMCreatePixmapFromRImage(scr, scaled, 127);
+	RReleaseImage(scaled);
+	if (result) {
+		cached = wmalloc(sizeof(*cached));
+		cached->source = source;
+		cached->image = WMRetainPixmap(result);
+		WMAddToArray(scr->scaledButtonImages, cached);
+		return result;
+	}
+failed:
+	wwarning(_("could not render scaled widget symbol: %s"), RMessageForError(RErrorCode));
+	return WMRetainPixmap(source);
+}
+
 #define T_WINGS_IMAGES_FILE  RESOURCE_PATH"/Images.tiff"
 #define X_WINGS_IMAGES_FILE  RESOURCE_PATH"/Images.xpm"
 

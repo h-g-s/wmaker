@@ -1442,6 +1442,10 @@ Bool WMGetMenuItemHasSubmenu(WMMenuItem *item);
 
 WMPopUpButton* WMCreatePopUpButton(WMWidget *parent);
 
+void WMSetPopUpButtonFont(WMPopUpButton *bPtr, WMFont *font);
+
+WMSize WMGetPopUpButtonPreferredSize(WMPopUpButton *bPtr);
+
 void WMSetPopUpButtonAction(WMPopUpButton *sPtr, WMAction *action,
                             void *clientData);
 
