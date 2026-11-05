@@ -6,12 +6,15 @@ dist_tiffdata_DATA = \
 	animations.tiff \
 	appearance.tiff \
 	clip.tiff \
+	clip-preview.tiff \
 	configs.tiff \
 	cycleworkspaces.tiff \
 	dock.tiff \
+	dock-preview.tiff \
 	dockclipdrawersection.tiff \
 	dontlinkworkspaces.tiff \
 	drawer.tiff \
+	drawer-preview.tiff \
 	ergonomic.tiff \
 	expert.tiff \
 	fonts.tiff \

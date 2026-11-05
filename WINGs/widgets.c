@@ -507,17 +507,37 @@ WMPixmap *W_CreateButtonImage(WMScreen *scr, WMPixmap *source, WMFont *font)
 				XDrawLine(dpy, canvas, gc, w / 3, h / 3, 2 * w / 3, 2 * h / 3);
 				XDrawLine(dpy, canvas, gc, w / 3, 2 * h / 3, 2 * w / 3, h / 3);
 			} else {
+				for (i = 0; i < 3; i++) {
+					tick[i].x += line / 2;
+					tick[i].y += line / 2;
+				}
+				XSetLineAttributes(dpy, gc, 2 * line, LineSolid, CapButt, JoinMiter);
+				XDrawLines(dpy, canvas, gc, tick, 3, CoordModeOrigin);
+				for (i = 0; i < 3; i++) {
+					tick[i].x -= line;
+					tick[i].y -= line;
+				}
+				XSetForeground(dpy, gc, W_PIXEL(scr->white));
+				XDrawLines(dpy, canvas, gc, tick, 3, CoordModeOrigin);
+				for (i = 0; i < 3; i++) {
+					tick[i].x += line / 2;
+					tick[i].y += line / 2;
+				}
+				XSetForeground(dpy, gc, W_PIXEL(scr->darkGray));
+				XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinMiter);
 				XDrawLines(dpy, canvas, gc, tick, 3, CoordModeOrigin);
 			}
 		} else if (mixed) {
 			int x, y;
 
 			XSetForeground(dpy, gc, W_PIXEL(scr->black));
-			for (y = 0; y < 5; y++)
-				for (x = 0; x < 5; x++)
+			for (y = 0; y < 9; y++)
+				for (x = 0; x < 9; x++)
 					if ((x + y) % 2 == 0)
-						XFillRectangle(dpy, canvas, gc, w / 4 + x * line,
-							       h / 4 + y * line, line, line);
+						XFillRectangle(dpy, canvas, gc, (x + 3) * w / 15,
+							       (y + 3) * h / 15,
+							       (x + 4) * w / 15 - (x + 3) * w / 15,
+							       (y + 4) * h / 15 - (y + 3) * h / 15);
 		}
 	} else if (kind == Radio) {
 		XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinRound);
@@ -526,7 +546,7 @@ WMPixmap *W_CreateButtonImage(WMScreen *scr, WMPixmap *source, WMFont *font)
 		XSetForeground(dpy, gc, W_PIXEL(scr->white));
 		XDrawArc(dpy, canvas, gc, inset, inset, w - 2 * inset, h - 2 * inset, 225 * 64, 180 * 64);
 		if (selected) {
-			XSetForeground(dpy, gc, W_PIXEL(scr->black));
+			XSetForeground(dpy, gc, W_PIXEL(scr->white));
 			XFillArc(dpy, canvas, gc, w / 4, h / 4, w / 2, h / 2, 0, 360 * 64);
 		}
 	} else if (kind == Return) {

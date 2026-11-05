@@ -15,6 +15,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/Expert.c \
 	$(top_srcdir)/WPrefs.app/Focus.c \
 	$(top_srcdir)/WPrefs.app/FontSimple.c \
+	$(top_srcdir)/WPrefs.app/FontControls.c \
 	$(top_srcdir)/WPrefs.app/HotCornerShortcuts.c \
 	$(top_srcdir)/WPrefs.app/Icons.c \
 	$(top_srcdir)/WPrefs.app/KeyboardShortcuts.c \
@@ -22,6 +23,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/MenuPreferences.c \
 	$(top_srcdir)/WPrefs.app/MouseSettings.c \
 	$(top_srcdir)/WPrefs.app/Paths.c \
+	$(top_srcdir)/WPrefs.app/PanelLayout.c \
 	$(top_srcdir)/WPrefs.app/Preferences.c \
 	$(top_srcdir)/WPrefs.app/TexturePanel.c \
 	$(top_srcdir)/WPrefs.app/WPrefs.c \
@@ -90,4 +92,4 @@ am__v_CHKTRANS_1 =
 # 'make check' will make sure the tranlation sources are in line with the compiled source
 check-local:
 	$(AM_V_CHKTRANS)$(top_srcdir)/script/check-translation-sources.sh \
-		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am"
+		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am" -v WPrefs_SOURCES

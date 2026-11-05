@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
 #include <assert.h>
 #include <X11/Xatom.h>
 
@@ -48,6 +49,7 @@ typedef struct _WPrefs {
 	WMButton *balloonBtn;
 
 	WMFrame *banner;
+	WMScrollView *panelScroll;
 	WMLabel *nameL;
 	WMLabel *versionL;
 	WMLabel *statusL;
@@ -66,6 +68,7 @@ static char *WindowMakerDBPath = NULL;
 static Bool TIFFOK = False;
 
 #define INITIALIZED_PANEL	(1<<0)
+#define VISITED_PANEL		(1<<1)
 
 static void loadConfigurations(WMScreen * scr, WMWindow * mainw);
 
@@ -99,7 +102,7 @@ static void save(WMWidget * w, void *data)
 	/*    puts("gathering data"); */
 	for (i = 0; i < WPrefs.sectionCount; i++) {
 		PanelRec *rec = WMGetHangedData(WPrefs.sectionB[i]);
-		if ((rec->callbacks.flags & INITIALIZED_PANEL))
+		if ((rec->callbacks.flags & VISITED_PANEL))
 			savePanelData((Panel *) rec);
 	}
 	/*    puts("compressing data"); */
@@ -168,7 +171,7 @@ static void undoAll(WMWidget * w, void *data)
 	for (i = 0; i < WPrefs.sectionCount; i++) {
 		PanelRec *rec = WMGetHangedData(WPrefs.sectionB[i]);
 
-		if (rec->callbacks.undoChanges && (rec->callbacks.flags & INITIALIZED_PANEL))
+		if (rec->callbacks.undoChanges && (rec->callbacks.flags & VISITED_PANEL))
 			(*rec->callbacks.undoChanges) ((Panel *) rec);
 	}
 }
@@ -211,8 +214,6 @@ static void createMainWindow(WMScreen * scr)
 	WMResizeWidget(WPrefs.win, 520, 390);
 	WMSetWindowTitle(WPrefs.win, _("Window Maker Preferences"));
 	WMSetWindowCloseAction(WPrefs.win, quit, NULL);
-	WMSetWindowMaxSize(WPrefs.win, 520, 390);
-	WMSetWindowMinSize(WPrefs.win, 520, 390);
 	WMSetWindowMiniwindowTitle(WPrefs.win, _("Preferences"));
 
 	WPrefs.scrollV = WMCreateScrollView(WPrefs.win);
@@ -267,9 +268,13 @@ static void createMainWindow(WMScreen * scr)
 	}
 
 	/* banner */
+	WPrefs.panelScroll = WMCreateScrollView(WPrefs.win);
+	WMResizeWidget(WPrefs.panelScroll, 520, FRAME_HEIGHT);
+	WMMoveWidget(WPrefs.panelScroll, 0, FRAME_TOP);
+	WMSetScrollViewRelief(WPrefs.panelScroll, WRFlat);
 	WPrefs.banner = WMCreateFrame(WPrefs.win);
 	WMResizeWidget(WPrefs.banner, FRAME_WIDTH, FRAME_HEIGHT);
-	WMMoveWidget(WPrefs.banner, FRAME_LEFT, FRAME_TOP);
+	WMSetScrollViewContentView(WPrefs.panelScroll, WMWidgetView(WPrefs.banner));
 	WMSetFrameRelief(WPrefs.banner, WRFlat);
 
 	font = WMCreateFont(scr, "Lucida Sans,URW Gothic L,Times New Roman,serif"
@@ -310,6 +315,7 @@ static void showPanel(Panel * panel)
 		(*rec->callbacks.createWidgets) (panel);
 		rec->callbacks.flags |= INITIALIZED_PANEL;
 	}
+	rec->callbacks.flags |= VISITED_PANEL;
 
 	WMSetWindowTitle(WPrefs.win, rec->sectionName);
 
@@ -511,6 +517,33 @@ void AddSection(Panel * panel, const char *iconFile)
 	WMResizeWidget(WPrefs.buttonF, WPrefs.sectionCount * 64, 64);
 }
 
+static void arrangePanels(void)
+{
+	WMSize content = wmksize(FRAME_WIDTH, FRAME_HEIGHT);
+	WPrefsWindowLayout layout = {
+		WPrefs.win, WPrefs.scrollV, WPrefs.panelScroll, WPrefs.banner,
+		WPrefs.balloonBtn, WPrefs.saveBtn, WPrefs.closeBtn
+	};
+	int i;
+
+	for (i = 0; i < WPrefs.sectionCount; i++) {
+		PanelRec *rec = WMGetHangedData(WPrefs.sectionB[i]);
+
+		if (rec->callbacks.automaticLayout) {
+			WMSize size;
+
+			rec->callbacks.createWidgets((Panel *)rec);
+			rec->callbacks.flags |= INITIALIZED_PANEL;
+			WMUnmapWidget(rec->box);
+			size = WMGetBoxMinimumSize(rec->box);
+			content.width = WMAX(content.width, size.width + 4);
+			content.height = WMAX(content.height, size.height + 4);
+		}
+	}
+	WPrefsArrangeWindow(&layout, content);
+	WMUnmapWidget(WPrefs.saveBtn);
+}
+
 void Initialize(WMScreen * scr)
 {
 	char **list;
@@ -598,6 +631,7 @@ void Initialize(WMScreen * scr)
 	WMRealizeWidget(WPrefs.scrollV);
 
 	WMSetLabelText(WPrefs.statusL, "");
+	arrangePanels();
 }
 
 WMWindow *GetWindow(void)

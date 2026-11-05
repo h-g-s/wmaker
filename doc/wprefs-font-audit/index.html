@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WPrefs font scaling: panel comparison</title>
+<style>
+body { margin: 2rem; background: #f5f5f5; color: #202020; font: 16px/1.5 system-ui, sans-serif; }
+main { max-width: 1680px; margin: auto; }
+h1, h2 { line-height: 1.2; }
+a { color: #164b8b; }
+nav { columns: 2; }
+section { background: white; padding: 1.25rem; margin: 2rem 0; border: 1px solid #ccc; }
+.comparisons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+figure { margin: 0; }
+figcaption { font-weight: bold; margin-bottom: .5rem; }
+img { display: block; width: 100%; height: auto; border: 1px solid #888; box-sizing: border-box; }
+.hint { color: #555; }
+.priority { font-weight: bold; }
+dt { font-weight: bold; }
+dd { margin: 0 0 .75rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: .5rem; border: 1px solid #ccc; text-align: left; vertical-align: top; }
+@media (max-width: 1000px) { .comparisons { min-width: 1580px; } .scroll { overflow-x: auto; } }
+@media print { section { break-inside: avoid; } nav { display: none; } body { margin: 0; } }
+</style>
+</head>
+<body>
+<main>
+<h1>WPrefs font scaling: panel comparison</h1>
+<p>Captured on 2026-11-04 from commit <code>89df8885</code>.
+All 16 enabled top-level preference panels are compared at the original font default
+(<code>DefaultFontSize = 11</code>), size 18, and size 24.</p>
+<p><strong>Result:</strong> WPrefs is not yet generally font-size-aware. Its fixed
+520 &times; 390 window and mostly fixed inner control dimensions do not accommodate
+the larger text and symbols. Many pages already clip at size 18; size 24 makes
+the failures more pronounced. Growing the outer window alone will not fix fixed-height
+checkbox rows, labels, or fields.</p>
+<h2>Capture conditions and limits</h2>
+<ul>
+<li>Separate Xvfb desktops at 1920 &times; 1080, 24-bit color; identical English locale,
+repository defaults, and isolated temporary user homes. Only DefaultFontSize changes
+for sizes 18 and 24. No real user preferences were changed.</li>
+<li>The repository WPrefs and WINGs builds were used. The recent scalable symbols and
+button bevels are included. Explicitly sized fonts and image previews may stay small
+even when the default font grows; this is visible in the comparisons.</li>
+<li>Every panel was activated through its existing section-button callback and verified
+by its window title before capture. The icon strip remains at its initial scroll position,
+so the selected icon for later panels may be off-screen.</li>
+<li>Each image is an unscaled 520 &times; 390 client-area screenshot, without the window
+manager frame. The page scales images to fit your browser; click one to inspect it at
+native resolution.</li>
+<li>These are initial views, not an exhaustive audit of every nested tab, popup menu,
+scroll position, dialog, or setting combination. Search Paths opens on Icon Search Paths;
+Appearance opens on Texture. Scrollable content beyond the initial viewport needs a
+separate pass. No saving or preference changes were performed.</li>
+<li>Red search-path entries refer to directories absent from the isolated home; they
+are not font-rendering failures. The menu editor's instructions contain the temporary
+menu-file path, which differs between captures.</li>
+</ul>
+<h2>Suggested implementation order</h2>
+<table>
+<thead><tr><th>Priority</th><th>Work</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>First</td><td>Shared WPrefs shell: measured action buttons, panel area, and a
+screen-bounded content/scrolling strategy.</td><td>The hard-coded outer size and bottom
+button heights constrain every panel. Close is visibly cramped at large sizes.</td></tr>
+<tr><td>Next</td><td>Measured checkbox/radio rows and wrapped labels in Focus, Icons,
+Ergonomic, Workspace, Hot Corners, and Expert.</td><td>These suffer unreadable overlapping
+or vertically clipped text; a scrollbar alone does not fix a row's height.</td></tr>
+<tr><td>Then</td><td>Measured popup/field heights and font-relative group layouts in
+Window Handling, Docks, Mouse, and Other Configurations.</td><td>Text collides with frame
+titles, icons, and neighboring controls.</td></tr>
+<tr><td>Then</td><td>Search Paths, shortcut editor, Appearance, font editor, and menu
+editor refinements.</td><td>Mixed fixed/default fonts, constrained tabs, and narrow
+columns need panel-specific treatment.</td></tr>
+</tbody>
+</table>
+<h2>Panels</h2>
+<nav id="contents" aria-label="Panel index"></nav>
+<div id="panels"></div>
+<noscript>This comparison document needs JavaScript to assemble its local screenshot
+gallery. All 48 PNG files are also available directly in the images directory.</noscript>
+<p class="hint">Observations below describe the visible captures, not automated
+pixel-based pass/fail results. Screenshot capture and panel activation were verified;
+no WPrefs layout fixes are part of this document.</p>
+</main>
+<script>
+const panels = [
+  {
+    name: "Window Focus Preferences",
+    source: "Focus.c",
+    normal: "Readable two-column layout; wrapped radio captions fit their original areas.",
+    medium: "Focus-mode captions and frame titles overlap or clip. Colormap and extra-option rows are too short for wrapped text.",
+    large: "Severe truncation in both columns: sentences lose their beginnings or endings and several checkbox captions overlap.",
+    next: "Measure radio and checkbox rows at their allocated width; grow groups and the overall content area."
+  },
+  {
+    name: "Window Handling Preferences",
+    source: "WindowHandling.c",
+    normal: "Placement preview, resistance controls, maximize options, and dragging popup are readable.",
+    medium: "Frame titles crowd controls. The keyboard checkbox wraps and clips; the dragging popup text fills its fixed-height field.",
+    large: "Group headings and maximize/keyboard options are heavily clipped. Numeric origin and placement controls collide.",
+    next: "Reflow the group grid and measure popup, label, and field dimensions rather than expanding only the outer window."
+  },
+  {
+    name: "Menu Preferences",
+    source: "MenuPreferences.c",
+    normal: "Readable speed/alignment groups and three checkbox options.",
+    medium: "Relatively legible compared with other panels, but option lines are tightly packed and the longest caption is constrained.",
+    large: "Option captions wrap into neighboring rows and are vertically truncated; group titles are cramped.",
+    next: "Use a measured vertical options box with wrapping-aware heights; retain the icon-based choices."
+  },
+  {
+    name: "Icon Preferences",
+    source: "Icons.c",
+    normal: "Readable position diagram, animation/size popups, preview slider, and options.",
+    medium: "Right-hand checkbox labels clip and wrap into other rows. Size/preview group titles and popup text are cramped.",
+    large: "Right-hand option text becomes largely unreadable; popup and frame-title clipping is severe.",
+    next: "Measure option rows and popup heights; let the preview and options groups take their own minimum sizes."
+  },
+  {
+    name: "Miscellaneous Ergonomic Preferences",
+    source: "Preferences.c",
+    normal: "Readable display-position selectors, help options, bounce options, and workspace-border controls.",
+    medium: "Bounce/help captions and border-axis labels wrap into insufficient heights; some lines collide with frame titles.",
+    large: "Most checkbox text is clipped or overlapping. Border-axis labels and selector titles are heavily constrained.",
+    next: "Replace fixed checkbox rows with measured wrapping rows and reflow the four groups."
+  },
+  {
+    name: "Search Path Configuration",
+    source: "Paths.c",
+    normal: "Paths and Add/Remove controls fit. Red paths are expected missing directories in the test home.",
+    medium: "Tab labels grow and list rows become taller, but path text stays small. Add/Remove buttons are vertically clipped.",
+    large: "The list shows fewer entries while their text remains small. The bottom buttons are almost completely clipped.",
+    next: "Use consistent list font/row metrics and measured action buttons inside a tab content layout."
+  },
+  {
+    name: "Dock Preferences",
+    source: "Docks.c",
+    normal: "Delay labels, clock choices, values, units, and Dock/Clip/Drawer buttons fit.",
+    medium: "Delay captions extend into clock choices; frame titles overflow their allocated width and fields remain shallow.",
+    large: "Long delay labels collide with icons; headings and numeric fields are clipped. Icons remain at their original size.",
+    next: "Measure caption columns and numeric fields; allocate clock controls a separate row when necessary."
+  },
+  {
+    name: "Workspace Preferences",
+    source: "Workspace.c",
+    normal: "Navigation options and workspace-name position selector are readable.",
+    medium: "The first checkbox wraps and clips. The position explanation runs into its popup.",
+    large: "Several checkbox captions are vertically truncated; the position explanation and popup overlap substantially.",
+    next: "Measure the navigation rows and split the explanation/selector into a flexible row or separate rows."
+  },
+  {
+    name: "Other Configurations",
+    source: "Configurations.c",
+    normal: "Animation icons, style previews, speed controls, and dithering options are readable.",
+    medium: "Frame headings are cut off and the dithering checkbox wraps beyond its available height. Some labels remain small.",
+    large: "Headings and dithering text are severely clipped; fixed-size previews remain small relative to the surrounding font.",
+    next: "Separate measured headings/options from preview imagery and allow the group layout to expand."
+  },
+  {
+    name: "Applications Menu Definition",
+    source: "Menu.c",
+    normal: "The initial item palette and instructions are readable; the long temporary file path is constrained.",
+    medium: "Palette captions are horizontally clipped and instructions extend beyond the right edge. The introduction is vertically clipped.",
+    large: "More palette entries disappear below the viewport; large instruction text is heavily truncated.",
+    next: "Give the palette an appropriate minimum width and scrolling; wrap instructions with measured height."
+  },
+  {
+    name: "Keyboard Shortcut Preferences",
+    source: "KeyboardShortcuts.c",
+    normal: "Action list, shortcut field, Clear/Capture buttons, and explanation fit.",
+    medium: "Capture text is clipped; the explanation is too tall for its label. Action names stay small despite taller list rows.",
+    large: "Capture and explanation are substantially clipped; the shortcut field remains shallow and action list text remains small.",
+    next: "Use consistent action-list metrics and a measured right-hand field/button/explanation layout."
+  },
+  {
+    name: "Hot Corner Shortcut Preferences",
+    source: "HotCornerShortcuts.c",
+    normal: "Enable control, delay/edge groups, four command fields, and instructions fit.",
+    medium: "Enable text wraps and clips. Frame titles and instruction text collide with their boundaries.",
+    large: "Enable and instructions are severely truncated; enlarged labels overrun fixed delay/edge controls and command fields stay shallow.",
+    next: "Measure the enable row and instruction area; grow command fields and delay controls with the font."
+  },
+  {
+    name: "Mouse Preferences",
+    source: "MouseSettings.c",
+    normal: "Mouse speed/delay controls and workspace action selectors fit.",
+    medium: "Mouse-action captions collide with popups. Speed labels and the disable checkbox clip; popups remain shallow.",
+    large: "Labels, group titles, checkbox text, and numeric fields are heavily clipped throughout both columns.",
+    next: "Measure label/popup columns and field heights; use wrapping-aware group layouts."
+  },
+  {
+    name: "Appearance Preferences",
+    source: "Appearance.c",
+    normal: "Texture tab and preview are usable, although some long texture descriptions already truncate in their list.",
+    medium: "Nested tab captions consume the available width; Options is reduced to an ellipsis. The texture selector clips while previews retain small text.",
+    large: "Texture selector and tabs are constrained; preview/list text remains at its explicitly assigned small size.",
+    next: "Audit nested tabs and mixed font policies; let the editor/preview split and texture selector use measured sizes."
+  },
+  {
+    name: "Font Configuration",
+    source: "FontSimple.c",
+    normal: "Family/style/size lists and top preview row are usable.",
+    medium: "Lists scale more coherently than many panels, but the font-role popup clips and Sample Text is cut off.",
+    large: "Lists remain readable with fewer visible rows, but the role popup and preview-row label overlap or truncate.",
+    next: "Keep the existing list layout; measure and reflow the role selector, sample label, and preview row."
+  },
+  {
+    name: "Expert User Preferences",
+    source: "Expert.c",
+    normal: "Scrollable options are readable in the initial viewport.",
+    medium: "Long captions wrap into neighboring rows; several rows lose their first or last line despite the outer scrollbar.",
+    large: "Many options are vertically truncated or overlapping. A taller checkbox symbol does not make the fixed row tall enough.",
+    next: "Measure every option's wrapped height and update the scroll content extent; preserve scrollability for the full option set."
+  }
+];
+const contents = document.getElementById("contents");
+const container = document.getElementById("panels");
+panels.forEach((panel, index) => {
+  const number = String(index + 1).padStart(2, "0");
+  const link = document.createElement("a");
+  link.href = "#panel-" + number;
+  link.textContent = number + ". " + panel.name;
+  const entry = document.createElement("div");
+  entry.append(link);
+  contents.append(entry);
+  const section = document.createElement("section");
+  section.id = "panel-" + number;
+  const heading = document.createElement("h2");
+  heading.textContent = number + ". " + panel.name;
+  section.append(heading);
+  const source = document.createElement("p");
+  const codeLink = document.createElement("a");
+  codeLink.href = "../../WPrefs.app/" + panel.source;
+  codeLink.textContent = "WPrefs.app/" + panel.source;
+  source.append("Primary implementation: ", codeLink);
+  section.append(source);
+  const scroll = document.createElement("div");
+  scroll.className = "scroll";
+  const comparisons = document.createElement("div");
+  comparisons.className = "comparisons";
+  [11, 18, 24].forEach(size => {
+    const figure = document.createElement("figure");
+    const caption = document.createElement("figcaption");
+    caption.textContent = size === 11 ? "Original default (11)" : "Scaled font (" + size + ")";
+    const anchor = document.createElement("a");
+    anchor.href = "images/" + number + "-font-" + size + ".png";
+    const image = document.createElement("img");
+    image.src = anchor.href;
+    image.alt = panel.name + " at font size " + size;
+    image.width = 520;
+    image.height = 390;
+    anchor.append(image);
+    figure.append(caption, anchor);
+    comparisons.append(figure);
+  });
+  scroll.append(comparisons);
+  section.append(scroll);
+  const observations = document.createElement("dl");
+  [["Original", panel.normal], ["Size 18", panel.medium], ["Size 24", panel.large],
+   ["Suggested follow-up", panel.next]].forEach(([label, text]) => {
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = text;
+    observations.append(term, description);
+  });
+  section.append(observations);
+  container.append(section);
+});
+</script>
+</body>
+</html>

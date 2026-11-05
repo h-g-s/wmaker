@@ -19,6 +19,7 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
 
 
 /* Possible choices to display window information during a resize */
@@ -82,19 +83,14 @@ typedef struct _Panel {
 
 	WMWidget *parent;
 
-	WMFrame *sizeF;
 	WMPopUpButton *sizeP;
 
-	WMFrame *posiF;
 	WMPopUpButton *posiP;
 
-	WMFrame *ballF;
 	WMButton *ballB[wlengthof_nocheck(balloon_choices)];
 
-	WMFrame *optF;
 	WMButton *bounceB[wlengthof_nocheck(appicon_bouncing)];
 
-	WMFrame *borderF;
 	WMSlider *borderS;
 	WMLabel *borderL;
 	WMButton *lrB;
@@ -227,110 +223,99 @@ static void storeData(_Panel * panel)
 static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
+	WMScreen *screen = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(screen);
+	WMBox *columns, *left, *right, *row;
+	WPrefsGroup size, position, balloons, bouncing, border;
+	WMSize labelSize = wmksize(0, 0), current;
 	int i;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
-    /***************** Size Display ****************/
-	panel->sizeF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->sizeF, 255, 52);
-	WMMoveWidget(panel->sizeF, 15, 7);
-	WMSetFrameTitle(panel->sizeF, _("Size Display"));
-
+	size = WPrefsCreateGroup(left, _("Size Display"));
 	WMSetBalloonTextForView(_("The position or style of the window size\n"
-				  "display that's shown when a window is resized."), WMWidgetView(panel->sizeF));
+				  "display that's shown when a window is resized."), WMWidgetView(size.frame));
 
-	panel->sizeP = WMCreatePopUpButton(panel->sizeF);
-	WMResizeWidget(panel->sizeP, 227, 20);
-	WMMoveWidget(panel->sizeP, 14, 20);
+	panel->sizeP = WMCreatePopUpButton(size.content);
 	for (i = 0; i < wlengthof(resize_display); i++)
 		WMAddPopUpButtonItem(panel->sizeP, _(resize_display[i].label));
+	WMPackBoxSubview(size.content, panel->sizeP, WMGetPopUpButtonPreferredSize(panel->sizeP), False, 0);
+	WPrefsPackGroup(left, &size, False, 12);
 
-	WMMapSubwidgets(panel->sizeF);
-
-    /***************** Position Display ****************/
-	panel->posiF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->posiF, 255, 52);
-	WMMoveWidget(panel->posiF, 15, 66);
-	WMSetFrameTitle(panel->posiF, _("Position Display"));
-
+	position = WPrefsCreateGroup(left, _("Position Display"));
 	WMSetBalloonTextForView(_("The position or style of the window position\n"
-				  "display that's shown when a window is moved."), WMWidgetView(panel->posiF));
+				  "display that's shown when a window is moved."), WMWidgetView(position.frame));
 
-	panel->posiP = WMCreatePopUpButton(panel->posiF);
-	WMResizeWidget(panel->posiP, 227, 20);
-	WMMoveWidget(panel->posiP, 14, 20);
+	panel->posiP = WMCreatePopUpButton(position.content);
 	for (i = 0; i < wlengthof(move_display); i++)
 		WMAddPopUpButtonItem(panel->posiP, _(move_display[i].label));
+	WMPackBoxSubview(position.content, panel->posiP, WMGetPopUpButtonPreferredSize(panel->posiP), False, 0);
+	WPrefsPackGroup(left, &position, False, 12);
 
-	WMMapSubwidgets(panel->posiF);
-
-    /***************** Balloon Text ****************/
-	panel->ballF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->ballF, 220, 130);
-	WMMoveWidget(panel->ballF, 285, 7);
-	WMSetFrameTitle(panel->ballF, _("Show balloon for..."));
-
+	balloons = WPrefsCreateGroup(right, _("Show balloon for..."));
 	for (i = 0; i < wlengthof(balloon_choices); i++) {
-		panel->ballB[i] = WMCreateSwitchButton(panel->ballF);
-		WMResizeWidget(panel->ballB[i], 198, 20);
-		WMMoveWidget(panel->ballB[i], 11, 20 + i * 26);
+		panel->ballB[i] = WMCreateSwitchButton(balloons.content);
 		WMSetButtonText(panel->ballB[i], _(balloon_choices[i].label));
+		WPrefsPackButton(balloons.content, panel->ballB[i], i + 1 == wlengthof(balloon_choices) ? 0 : 8);
 	}
+	WPrefsPackGroup(right, &balloons, False, 12);
 
-	WMMapSubwidgets(panel->ballF);
-
-    /***************** Options ****************/
-	panel->optF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->optF, 255, 96);
-	WMMoveWidget(panel->optF, 15, 125);
-	WMSetFrameTitle(panel->optF, _("AppIcon bouncing"));
-
+	bouncing = WPrefsCreateGroup(left, _("AppIcon bouncing"));
 	for (i = 0; i < wlengthof(appicon_bouncing); i++) {
-		panel->bounceB[i] = WMCreateSwitchButton(panel->optF);
-		WMResizeWidget(panel->bounceB[i], 237, 26);
-		WMMoveWidget(panel->bounceB[i], 9, 16 + i * 26);
+		panel->bounceB[i] = WMCreateSwitchButton(bouncing.content);
 		WMSetButtonText(panel->bounceB[i], _(appicon_bouncing[i].label));
-
 		if (appicon_bouncing[i].default_value)
 			WMSetButtonSelected(panel->bounceB[i], True);
-
 		if (appicon_bouncing[i].balloon_msg)
 			WMSetBalloonTextForView(_(appicon_bouncing[i].balloon_msg),
 			                        WMWidgetView(panel->bounceB[i]));
+		WPrefsPackButton(bouncing.content, panel->bounceB[i], i + 1 == wlengthof(appicon_bouncing) ? 0 : 8);
 	}
+	WPrefsPackGroup(left, &bouncing, True, 0);
 
-	WMMapSubwidgets(panel->optF);
-
-    /***************** Workspace border ****************/
-	panel->borderF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->borderF, 220, 77);
-	WMMoveWidget(panel->borderF, 285, 144);
-	WMSetFrameTitle(panel->borderF, _("Workspace border"));
-
-	panel->borderS = WMCreateSlider(panel->borderF);
-	WMResizeWidget(panel->borderS, 80, 15);
-	WMMoveWidget(panel->borderS, 11, 22);
+	border = WPrefsCreateGroup(right, _("Workspace border"));
+	row = WMCreateBox(border.content);
+	WMSetBoxHorizontal(row, True);
+	panel->borderS = WMCreateSlider(row);
+	WMSetSliderFont(panel->borderS, font);
 	WMSetSliderMinValue(panel->borderS, 0);
 	WMSetSliderMaxValue(panel->borderS, 5);
 	WMSetSliderAction(panel->borderS, borderCallback, panel);
+	WMPackBoxSubview(row, panel->borderS, WMGetSliderPreferredSize(panel->borderS), True, 12);
 
-	panel->borderL = WMCreateLabel(panel->borderF);
-	WMResizeWidget(panel->borderL, 100, 15);
-	WMMoveWidget(panel->borderL, 105, 22);
-
-	panel->lrB = WMCreateSwitchButton(panel->borderF);
-	WMMoveWidget(panel->lrB, 11, 40);
-	WMResizeWidget(panel->lrB, 95, 30);
+	panel->borderL = WMCreateLabel(row);
+	for (i = 0; i <= 5; i++) {
+		WMSetSliderValue(panel->borderS, i);
+		borderCallback(NULL, panel);
+		current = WMGetLabelPreferredSize(panel->borderL);
+		labelSize.width = WMAX(labelSize.width, current.width);
+		labelSize.height = WMAX(labelSize.height, current.height);
+	}
+	WMPackBoxSubview(row, panel->borderL, labelSize, False, 0);
+	WMPackBoxSubview(border.content, row, WMGetBoxMinimumSize(row), False, 8);
+	WMMapSubwidgets(row);
+	row = WMCreateBox(border.content);
+	WMSetBoxHorizontal(row, True);
+	panel->lrB = WMCreateSwitchButton(row);
 	WMSetButtonText(panel->lrB, _("Left/Right"));
-
-	panel->tbB = WMCreateSwitchButton(panel->borderF);
-	WMMoveWidget(panel->tbB, 110, 40);
-	WMResizeWidget(panel->tbB, 105, 30);
+	WPrefsPackButton(row, panel->lrB, 12);
+	panel->tbB = WMCreateSwitchButton(row);
 	WMSetButtonText(panel->tbB, _("Top/Bottom"));
-
-	WMMapSubwidgets(panel->borderF);
+	WPrefsPackButton(row, panel->tbB, 0);
+	WMPackBoxSubview(border.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(right, &border, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
+	WMReleaseFont(font);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -350,6 +335,7 @@ Panel *InitPreferences(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

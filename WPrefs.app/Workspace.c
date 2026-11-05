@@ -19,6 +19,7 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
 
 typedef struct _Panel {
 	WMBox *box;
@@ -31,23 +32,14 @@ typedef struct _Panel {
 
 	WMWidget *parent;
 
-	WMFrame *navF;
-
 	WMButton *linkB;
 	WMButton *cyclB;
 	WMButton *newB;
-	WMLabel *linkL;
-	WMLabel *cyclL;
-	WMLabel *newL;
-
-	WMLabel *posiL;
-	WMLabel *posL;
 	WMPopUpButton *posP;
 } _Panel;
 
 #define ICON_FILE	"workspace"
 
-#define ARQUIVO_XIS	"xis"
 #define DONT_LINK_FILE	"dontlinkworkspaces"
 #define CYCLE_FILE	"cycleworkspaces"
 #define ADVANCE_FILE	"advancetonewworkspace"
@@ -93,110 +85,62 @@ static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
-	WMPixmap *icon1;
-	RImage *xis = NULL;
-	RContext *rc = WMScreenRContext(scr);
-	char *path;
+	WPrefsGroup navigation;
+	struct {
+		const char *image;
+		const char *text;
+		WMButton **button;
+	} options[] = {
+		{ CYCLE_FILE, _("Wrap to the first workspace from the last workspace"), &panel->cyclB },
+		{ DONT_LINK_FILE, _("Switch workspaces while dragging windows"), &panel->linkB },
+		{ ADVANCE_FILE, _("Automatically create new workspaces"), &panel->newB },
+		{ WSNAME_FILE, _("Position of workspace name display"), NULL }
+	};
+	const char *positions[] = {
+		_("Disable"), _("Center"), _("Top"), _("Bottom"), _("Top/Left"),
+		_("Top/Right"), _("Bottom/Left"), _("Bottom/Right")
+	};
+	int i, j;
 
-	path = LocateImage(ARQUIVO_XIS);
-	if (path) {
-		xis = RLoadImage(rc, path, 0);
-		if (!xis) {
-			wwarning(_("could not load image file %s"), path);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	navigation = WPrefsCreateGroup(panel->box, _("Workspace Navigation"));
+	for (i = 0; i < wlengthof(options); i++) {
+		WMBox *row = WMCreateBox(navigation.content);
+		WMLabel *icon = WMCreateLabel(row);
+		WMPixmap *image;
+		WMSize iconSize;
+
+		WMSetBoxHorizontal(row, True);
+		WMSetLabelImagePosition(icon, WIPImageOnly);
+		CreateImages(scr, WMScreenRContext(scr), NULL, options[i].image, &image, NULL);
+		if (image) {
+			WMSetLabelImage(icon, image);
+			WMReleasePixmap(image);
 		}
-		wfree(path);
+		iconSize = WMGetLabelPreferredSize(icon);
+		iconSize.width = WMAX(60, iconSize.width);
+		WMPackBoxSubview(row, icon, iconSize, False, 8);
+		if (options[i].button) {
+			WMButton *button = WMCreateSwitchButton(row);
+
+			*options[i].button = button;
+			WMSetButtonText(button, options[i].text);
+			WPrefsPackButton(row, button, 0);
+		} else {
+			WMLabel *label = WMCreateLabel(row);
+
+			WMSetLabelText(label, options[i].text);
+			WPrefsPackLabel(row, label, 12);
+			panel->posP = WMCreatePopUpButton(row);
+			for (j = 0; j < wlengthof(positions); j++)
+				WMAddPopUpButtonItem(panel->posP, positions[j]);
+			WMPackBoxSubview(row, panel->posP, WMGetPopUpButtonPreferredSize(panel->posP), False, 0);
+		}
+		WMPackBoxSubview(navigation.content, row, WMGetBoxMinimumSize(row), False,
+				 i == wlengthof(options) - 1 ? 0 : 10);
+		WMMapSubwidgets(row);
 	}
-
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
-
-    /***************** Workspace Navigation *****************/
-	panel->navF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->navF, 490, 210);
-	WMMoveWidget(panel->navF, 15, 8);
-	WMSetFrameTitle(panel->navF, _("Workspace Navigation"));
-
-	panel->cyclB = WMCreateSwitchButton(panel->navF);
-	WMResizeWidget(panel->cyclB, 410, 34);
-	WMMoveWidget(panel->cyclB, 75, 26);
-	WMSetButtonText(panel->cyclB, _("Wrap to the first workspace from the last workspace"));
-
-	panel->cyclL = WMCreateLabel(panel->navF);
-	WMResizeWidget(panel->cyclL, 60, 60);
-	WMMoveWidget(panel->cyclL, 10, 12);
-	WMSetLabelImagePosition(panel->cyclL, WIPImageOnly);
-	CreateImages(scr, rc, xis, CYCLE_FILE, &icon1, NULL);
-	if (icon1)
-	{
-		WMSetLabelImage(panel->cyclL, icon1);
-		WMReleasePixmap(icon1);
-	}
-
-	/**/ panel->linkB = WMCreateSwitchButton(panel->navF);
-	WMResizeWidget(panel->linkB, 410, 34);
-	WMMoveWidget(panel->linkB, 75, 73);
-	WMSetButtonText(panel->linkB, _("Switch workspaces while dragging windows"));
-
-	panel->linkL = WMCreateLabel(panel->navF);
-	WMResizeWidget(panel->linkL, 60, 40);
-	WMMoveWidget(panel->linkL, 10, 77);
-	WMSetLabelImagePosition(panel->linkL, WIPImageOnly);
-	CreateImages(scr, rc, xis, DONT_LINK_FILE, &icon1, NULL);
-	if (icon1)
-	{
-		WMSetLabelImage(panel->linkL, icon1);
-		WMReleasePixmap(icon1);
-	}
-
-	/**/ panel->newB = WMCreateSwitchButton(panel->navF);
-	WMResizeWidget(panel->newB, 410, 34);
-	WMMoveWidget(panel->newB, 75, 115);
-	WMSetButtonText(panel->newB, _("Automatically create new workspaces"));
-
-	panel->newL = WMCreateLabel(panel->navF);
-	WMResizeWidget(panel->newL, 60, 20);
-	WMMoveWidget(panel->newL, 10, 123);
-	WMSetLabelImagePosition(panel->newL, WIPImageOnly);
-	CreateImages(scr, rc, xis, ADVANCE_FILE, &icon1, NULL);
-	if (icon1)
-	{
-		WMSetLabelImage(panel->newL, icon1);
-		WMReleasePixmap(icon1);
-	}
-
-	/**/ panel->posL = WMCreateLabel(panel->navF);
-	WMResizeWidget(panel->posL, 275, 30);
-	WMMoveWidget(panel->posL, 75, 161);
-	// WMSetLabelTextAlignment(panel->posL, WARight);
-	WMSetLabelText(panel->posL, _("Position of workspace name display"));
-
-	panel->posiL = WMCreateLabel(panel->navF);
-	WMResizeWidget(panel->posiL, 60, 40);
-	WMMoveWidget(panel->posiL, 10, 156);
-	WMSetLabelImagePosition(panel->posiL, WIPImageOnly);
-	CreateImages(scr, rc, xis, WSNAME_FILE, &icon1, NULL);
-	if (icon1)
-	{
-		WMSetLabelImage(panel->posiL, icon1);
-		WMReleasePixmap(icon1);
-	}
-
-	panel->posP = WMCreatePopUpButton(panel->navF);
-	WMResizeWidget(panel->posP, 125, 20);
-	WMMoveWidget(panel->posP, 350, 166);
-	WMAddPopUpButtonItem(panel->posP, _("Disable"));
-	WMAddPopUpButtonItem(panel->posP, _("Center"));
-	WMAddPopUpButtonItem(panel->posP, _("Top"));
-	WMAddPopUpButtonItem(panel->posP, _("Bottom"));
-	WMAddPopUpButtonItem(panel->posP, _("Top/Left"));
-	WMAddPopUpButtonItem(panel->posP, _("Top/Right"));
-	WMAddPopUpButtonItem(panel->posP, _("Bottom/Left"));
-	WMAddPopUpButtonItem(panel->posP, _("Bottom/Right"));
-
-	WMMapSubwidgets(panel->navF);
-
-	if (xis)
-		RReleaseImage(xis);
+	WPrefsPackGroup(panel->box, &navigation, True, 0);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -231,6 +175,7 @@ Panel *InitWorkspace(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

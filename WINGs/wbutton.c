@@ -546,7 +546,8 @@ static void radioPushObserver(void *observerData, WMNotification * notification)
 	if (bPtr != pushedButton && pushedButton->groupIndex == bPtr->groupIndex && bPtr->groupIndex != 0) {
 		if (bPtr->flags.selected) {
 			bPtr->flags.selected = 0;
-			paintButton(bPtr);
+			if (bPtr->view->flags.realized)
+				paintButton(bPtr);
 		}
 	}
 }

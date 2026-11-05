@@ -1564,6 +1564,12 @@ void WMSetScrollViewPageScroll(WMScrollView *sPtr, int amount);
 
 WMSlider* WMCreateSlider(WMWidget *parent);
 
+/* Opts into font-relative metrics; resize to the preferred size separately.
+ * An explicitly set knob thickness remains an absolute pixel value. */
+void WMSetSliderFont(WMSlider *slider, WMFont *font);
+
+WMSize WMGetSliderPreferredSize(WMSlider *slider);
+
 int WMGetSliderMinValue(WMSlider *slider);
 
 int WMGetSliderMaxValue(WMSlider *slider);

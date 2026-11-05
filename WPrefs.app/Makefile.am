@@ -35,6 +35,8 @@ WPrefs_SOURCES = \
 	Expert.c \
 	Focus.c \
 	FontSimple.c \
+	FontControls.c \
+	FontControls.h \
 	HotCornerShortcuts.c \
 	Icons.c \
 	KeyboardShortcuts.c \
@@ -42,6 +44,8 @@ WPrefs_SOURCES = \
 	MenuPreferences.c \
 	MouseSettings.c \
 	Paths.c \
+	PanelLayout.c \
+	PanelLayout.h \
 	Preferences.c \
 	TexturePanel.c \
 	TexturePanel.h \
@@ -73,3 +77,11 @@ WPrefs_LDADD = \
 	@LIBM@ \
 	@FCLIBS@ \
 	@INTLIBS@
+
+check_PROGRAMS = font_controls_test
+font_controls_test_SOURCES = font_controls_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
+font_controls_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
+font_controls_test_LDADD = $(WPrefs_LDADD)
+
+check-local: font_controls_test
+	./font_controls_test || test $$? -eq 77

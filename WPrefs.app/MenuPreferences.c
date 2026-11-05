@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 typedef struct _Panel {
 	WMBox *box;
@@ -31,14 +33,11 @@ typedef struct _Panel {
 
 	WMWidget *parent;
 
-	WMFrame *scrF;
-	WMButton *scrB[5];
+	WPrefsSpeedControl speed;
 
-	WMFrame *aliF;
 	WMButton *aliyB;
 	WMButton *alinB;
 
-	WMFrame *optF;
 	WMButton *autoB;
 	WMButton *autoC;
 	WMButton *wrapB;
@@ -46,15 +45,10 @@ typedef struct _Panel {
 } _Panel;
 
 #define ICON_FILE	"menuprefs"
-#define SPEED_IMAGE "speed%i"
-#define SPEED_IMAGE_S "speed%is"
-
-#define MENU_ALIGN1 "menualign1"
-#define MENU_ALIGN2 "menualign2"
 
 static void showData(_Panel * panel)
 {
-	WMPerformButtonClick(panel->scrB[GetSpeedForKey("MenuScrollSpeed")]);
+	WPrefsSetSpeedControlValue(&panel->speed, GetSpeedForKey("MenuScrollSpeed"));
 
 	if (GetBoolForKey("AlignSubmenus"))
 		WMPerformButtonClick(panel->aliyB);
@@ -70,13 +64,7 @@ static void showData(_Panel * panel)
 
 static void storeData(_Panel * panel)
 {
-	int i;
-
-	for (i = 0; i < wlengthof(panel->scrB); i++) {
-		if (WMGetButtonSelected(panel->scrB[i]))
-			break;
-	}
-	SetSpeedForKey(i, "MenuScrollSpeed");
+	SetSpeedForKey(WPrefsGetSpeedControlValue(&panel->speed), "MenuScrollSpeed");
 
 	SetBoolForKey(WMGetButtonSelected(panel->aliyB), "AlignSubmenus");
 
@@ -89,122 +77,50 @@ static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
-	WMPixmap *icon;
-	int i;
-	char *buf1, *buf2;
-	char *path;
+	WMFont *font = WMDefaultSystemFont(scr);
+	WPrefsGroup scrolling, alignment, options;
+	WMBox *top, *choices;
+	WMSize size;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	top = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(top, True);
+	scrolling = WPrefsCreateGroup(top, _("Menu Scrolling Speed"));
+	WPrefsCreateSpeedControl(&panel->speed, scrolling.content, font);
+	size = WMGetViewSize(WMWidgetView(panel->speed.box));
+	WMPackBoxSubview(scrolling.content, panel->speed.box, size, False, 0);
+	WPrefsPackGroup(top, &scrolling, True, 12);
 
-    /***************** Menu Scroll Speed ****************/
-	panel->scrF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->scrF, 235, 90);
-	WMMoveWidget(panel->scrF, 25, 20);
-	WMSetFrameTitle(panel->scrF, _("Menu Scrolling Speed"));
-
-	buf1 = wmalloc(strlen(SPEED_IMAGE) + 1);
-	buf2 = wmalloc(strlen(SPEED_IMAGE_S) + 1);
-	for (i = 0; i < wlengthof(panel->scrB); i++) {
-		panel->scrB[i] = WMCreateCustomButton(panel->scrF, WBBStateChangeMask);
-		WMResizeWidget(panel->scrB[i], 40, 40);
-		WMMoveWidget(panel->scrB[i], 15 + (40 * i), 30);
-		WMSetButtonBordered(panel->scrB[i], False);
-		WMSetButtonImagePosition(panel->scrB[i], WIPImageOnly);
-		if (i > 0) {
-			WMGroupButtons(panel->scrB[0], panel->scrB[i]);
-		}
-		sprintf(buf1, SPEED_IMAGE, i);
-		sprintf(buf2, SPEED_IMAGE_S, i);
-		path = LocateImage(buf1);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonImage(panel->scrB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-		path = LocateImage(buf2);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonAltImage(panel->scrB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-	}
-	wfree(buf1);
-	wfree(buf2);
-
-	WMMapSubwidgets(panel->scrF);
-
-    /***************** Submenu Alignment ****************/
-
-	panel->aliF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->aliF, 220, 90);
-	WMMoveWidget(panel->aliF, 280, 20);
-	WMSetFrameTitle(panel->aliF, _("Submenu Alignment"));
-
-	panel->alinB = WMCreateButton(panel->aliF, WBTOnOff);
-	WMResizeWidget(panel->alinB, 48, 48);
-	WMMoveWidget(panel->alinB, 56, 25);
-	WMSetButtonImagePosition(panel->alinB, WIPImageOnly);
-	path = LocateImage(MENU_ALIGN1);
-	if (path) {
-		icon = WMCreatePixmapFromFile(scr, path);
-		if (icon) {
-			WMSetButtonImage(panel->alinB, icon);
-			WMReleasePixmap(icon);
-		} else {
-			wwarning(_("could not load icon file %s"), path);
-		}
-		wfree(path);
-	}
-	panel->aliyB = WMCreateButton(panel->aliF, WBTOnOff);
-	WMResizeWidget(panel->aliyB, 48, 48);
-	WMMoveWidget(panel->aliyB, 120, 25);
-	WMSetButtonImagePosition(panel->aliyB, WIPImageOnly);
-	path = LocateImage(MENU_ALIGN2);
-	if (path) {
-		icon = WMCreatePixmapFromFile(scr, path);
-		if (icon) {
-			WMSetButtonImage(panel->aliyB, icon);
-			WMReleasePixmap(icon);
-		} else {
-			wwarning(_("could not load icon file %s"), path);
-		}
-		wfree(path);
-	}
+	alignment = WPrefsCreateGroup(top, _("Submenu Alignment"));
+	choices = WMCreateBox(alignment.content);
+	WMSetBoxHorizontal(choices, True);
+	panel->alinB = WMCreateButton(choices, WBTOnOff);
+	WPrefsSetMenuAlignmentButtonFont(panel->alinB, font, False);
+	panel->aliyB = WMCreateButton(choices, WBTOnOff);
+	WPrefsSetMenuAlignmentButtonFont(panel->aliyB, font, True);
 	WMGroupButtons(panel->alinB, panel->aliyB);
+	WPrefsPackButton(choices, panel->alinB, 12);
+	WPrefsPackButton(choices, panel->aliyB, 0);
+	WMPackBoxSubview(alignment.content, choices, WMGetBoxMinimumSize(choices), False, 0);
+	WPrefsPackGroup(top, &alignment, True, 0);
+	WMPackBoxSubview(panel->box, top, WMGetBoxMinimumSize(top), False, 12);
+	WMMapSubwidgets(choices);
+	WMMapSubwidgets(top);
 
-	WMMapSubwidgets(panel->aliF);
-
-    /***************** Options ****************/
-	panel->optF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->optF, 475, 96);
-	WMMoveWidget(panel->optF, 25, 120);
-
-	panel->wrapB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->wrapB, 440, 32);
-	WMMoveWidget(panel->wrapB, 25, 8);
+	options = WPrefsCreateGroup(panel->box, _("Options"));
+	panel->wrapB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->wrapB, _("Always open submenus inside the screen, instead of scrolling."));
 
-	panel->autoB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->autoB, 440, 32);
-	WMMoveWidget(panel->autoB, 25, 34);
+	panel->autoB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->autoB, _("Scroll off-screen menus when pointer is moved over them."));
-	panel->autoC = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->autoC, 440, 32);
-	WMMoveWidget(panel->autoC, 25, 58);
+	panel->autoC = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->autoC, _("Use h/j/k/l keys to select menu options."));
 
-	WMMapSubwidgets(panel->optF);
+	WPrefsPackButton(options.content, panel->wrapB, 8);
+	WPrefsPackButton(options.content, panel->autoB, 8);
+	WPrefsPackButton(options.content, panel->autoC, 0);
+	WPrefsPackGroup(panel->box, &options, True, 0);
+	WMReleaseFont(font);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -225,6 +141,7 @@ Panel *InitMenuPreferences(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

@@ -19,12 +19,15 @@ typedef struct W_Slider {
 	void *clientData;
 
 	int knobThickness;
+	WMFont *font;
 
 	struct {
 		unsigned int continuous:1;
 
 		unsigned int vertical:1;
 		unsigned int dragging:1;
+		unsigned int customKnobThickness:1;
+		unsigned int fontMetrics:1;
 	} flags;
 
 } Slider;
@@ -83,12 +86,37 @@ WMSlider *WMCreateSlider(WMWidget * parent)
 	sPtr->value = 50;
 
 	sPtr->knobThickness = 20;
+	sPtr->font = WMDefaultSystemFont(sPtr->view->screen);
 
 	sPtr->flags.continuous = 1;
 
 	WMAddNotificationObserver(realizeObserver, sPtr, WMViewRealizedNotification, sPtr->view);
 
 	return sPtr;
+}
+
+WMSize WMGetSliderPreferredSize(WMSlider *sPtr)
+{
+	int height = sPtr->flags.fontMetrics ? WMAX(17, WMFontHeight(sPtr->font)) : 17;
+	int border = sPtr->flags.fontMetrics ? W_ButtonBorderWidth(sPtr->font) : 1;
+	int length = WMAX(100 * height / 17, sPtr->knobThickness + 4 * border);
+	int thickness = 16 * height / 17;
+
+	return sPtr->flags.vertical ? wmksize(thickness, length) : wmksize(length, thickness);
+}
+
+void WMSetSliderFont(WMSlider *sPtr, WMFont *font)
+{
+	WMRetainFont(font);
+	WMReleaseFont(sPtr->font);
+	sPtr->font = font;
+	sPtr->flags.fontMetrics = 1;
+	if (!sPtr->flags.customKnobThickness)
+		sPtr->knobThickness = 20 * WMAX(17, WMFontHeight(font)) / 17;
+	if (sPtr->view->flags.realized)
+		makeKnobPixmap(sPtr);
+	if (sPtr->view->flags.mapped)
+		paintSlider(sPtr);
 }
 
 void WMSetSliderImage(WMSlider * sPtr, WMPixmap * pixmap)
@@ -108,6 +136,7 @@ void WMSetSliderKnobThickness(WMSlider * sPtr, int thickness)
 	assert(thickness > 0);
 
 	sPtr->knobThickness = thickness;
+	sPtr->flags.customKnobThickness = 1;
 
 	if (sPtr->knobPixmap) {
 		makeKnobPixmap(sPtr);
@@ -193,24 +222,54 @@ void WMSetSliderAction(WMSlider * slider, WMAction * action, void *data)
 	slider->clientData = data;
 }
 
+static int sliderInset(Slider *sPtr)
+{
+	return sPtr->flags.fontMetrics ? W_ButtonBorderWidth(sPtr->font) : 1;
+}
+
+static int knobLength(Slider *sPtr)
+{
+	int length = sPtr->flags.vertical ? sPtr->view->size.height : sPtr->view->size.width;
+
+	return WMIN(sPtr->knobThickness, WMAX(1, length - 2 * sliderInset(sPtr)));
+}
+
 static void makeKnobPixmap(Slider * sPtr)
 {
 	Pixmap pix;
 	WMScreen *scr = sPtr->view->screen;
 	int w, h;
+	int inset = sliderInset(sPtr);
 
 	if (sPtr->flags.vertical) {
-		w = sPtr->view->size.width - 2;
-		h = sPtr->knobThickness;
+		w = WMAX(1, (int)sPtr->view->size.width - 2 * inset);
+		h = knobLength(sPtr);
 	} else {
-		w = sPtr->knobThickness;
-		h = sPtr->view->size.height - 2;
+		w = knobLength(sPtr);
+		h = WMAX(1, (int)sPtr->view->size.height - 2 * inset);
 	}
 
 	pix = XCreatePixmap(scr->display, sPtr->view->window, w, h, scr->depth);
 	XFillRectangle(scr->display, pix, WMColorGC(scr->gray), 0, 0, w, h);
 
-	if (sPtr->knobThickness < 10) {
+	if (inset > 1) {
+		int border = WMIN(W_ButtonBorderWidth(sPtr->font), WMIN(w, h) / 2);
+
+		W_DrawButtonRelief(scr, pix, 0, 0, w, h, WRRaised, sPtr->font);
+		if (sPtr->knobThickness >= 10 && border > 0) {
+			if (sPtr->flags.vertical) {
+				XFillRectangle(scr->display, pix, WMColorGC(scr->darkGray),
+					       border, h / 2 - border, WMAX(1, w - 2 * border), border);
+				XFillRectangle(scr->display, pix, WMColorGC(scr->white),
+					       border, h / 2, WMAX(1, w - 2 * border), border);
+			} else {
+				XFillRectangle(scr->display, pix, WMColorGC(scr->darkGray),
+					       w / 2 - border, border, border, WMAX(1, h - 2 * border));
+				XFillRectangle(scr->display, pix, WMColorGC(scr->white),
+					       w / 2, border, border, WMAX(1, h - 2 * border));
+			}
+		}
+	} else if (w < 4 || h < 4 || sPtr->knobThickness < 10) {
 		W_DrawRelief(scr, pix, 0, 0, w, h, WRRaised);
 	} else if (sPtr->flags.vertical) {
 		XDrawLine(scr->display, pix, WMColorGC(scr->white), 0, 0, 0, h - 3);
@@ -264,19 +323,9 @@ static void didResizeSlider(W_ViewDelegate * self, WMView * view)
 	assert(width > 0);
 	assert(height > 0);
 
-	if (width > height) {
-		if (sPtr->flags.vertical) {
-			sPtr->flags.vertical = 0;
-			if (sPtr->view->flags.realized)
-				makeKnobPixmap(sPtr);
-		}
-	} else {
-		if (!sPtr->flags.vertical) {
-			sPtr->flags.vertical = 1;
-			if (sPtr->view->flags.realized)
-				makeKnobPixmap(sPtr);
-		}
-	}
+	sPtr->flags.vertical = width <= height;
+	if (sPtr->view->flags.realized)
+		makeKnobPixmap(sPtr);
 }
 
 static void paintSlider(Slider * sPtr)
@@ -287,6 +336,8 @@ static void paintSlider(Slider * sPtr)
 	GC lgc;
 	WMSize size = sPtr->view->size;
 	int pos;
+	int knob = knobLength(sPtr);
+	int inset = sliderInset(sPtr);
 	Pixmap buffer;
 
 #define MINV sPtr->minValue
@@ -310,22 +361,26 @@ static void paintSlider(Slider * sPtr)
 	}
 
 	if (sPtr->flags.vertical) {
-		pos = (size.height - 2 - sPtr->knobThickness) * (POSV - MINV) / (MAXV - MINV) + 1;
+		pos = WMAX(0, (int)size.height - 2 * inset - knob) * (POSV - MINV) / (MAXV - MINV) + inset;
 		/* draw knob */
 		XCopyArea(scr->display, sPtr->knobPixmap, buffer,
-			  scr->copyGC, 0, 0, size.width - 2, sPtr->knobThickness, 1, pos);
+			  scr->copyGC, 0, 0, WMAX(1, (int)size.width - 2 * inset), knob, inset, pos);
 	} else {
-		pos = (size.width - 2 - sPtr->knobThickness) * (POSV - MINV) / (MAXV - MINV) + 1;
+		pos = WMAX(0, (int)size.width - 2 * inset - knob) * (POSV - MINV) / (MAXV - MINV) + inset;
 		/* draw knob */
 		XCopyArea(scr->display, sPtr->knobPixmap, buffer,
-			  scr->copyGC, 0, 0, sPtr->knobThickness, size.height, pos, 1);
+			  scr->copyGC, 0, 0, knob, WMAX(1, (int)size.height - 2 * inset), pos, inset);
 	}
 
-	XDrawLine(scr->display, buffer, bgc, 0, 0, 0, size.height - 1);
-	XDrawLine(scr->display, buffer, bgc, 0, 0, size.width, 0);
+	if (inset > 1) {
+		W_DrawButtonRelief(scr, buffer, 0, 0, size.width, size.height, WRSunken, sPtr->font);
+	} else {
+		XDrawLine(scr->display, buffer, bgc, 0, 0, 0, size.height - 1);
+		XDrawLine(scr->display, buffer, bgc, 0, 0, size.width, 0);
 
-	XDrawLine(scr->display, buffer, wgc, size.width - 1, 0, size.width - 1, size.height - 1);
-	XDrawLine(scr->display, buffer, wgc, 0, size.height - 1, size.width - 1, size.height - 1);
+		XDrawLine(scr->display, buffer, wgc, size.width - 1, 0, size.width - 1, size.height - 1);
+		XDrawLine(scr->display, buffer, wgc, 0, size.height - 1, size.width - 1, size.height - 1);
+	}
 
 	XCopyArea(scr->display, buffer, sPtr->view->window, scr->copyGC, 0, 0, size.width, size.height, 0, 0);
 	XFreePixmap(scr->display, buffer);
@@ -363,18 +418,24 @@ static int getSliderPart(Slider * sPtr, int x, int y)
 
 	if (sPtr->flags.vertical) {
 		p = y;
-		pos = (size.height - 2 - sPtr->knobThickness) * (POSV - MINV) / (MAXV - MINV);
+		pos = WMAX(0, (int)size.height - 2 * sliderInset(sPtr) - knobLength(sPtr))
+			* (POSV - MINV) / (MAXV - MINV);
+		if (sPtr->flags.fontMetrics)
+			pos += sliderInset(sPtr);
 		if (p < pos)
 			return INCR_PART;
-		if (p > pos + sPtr->knobThickness)
+		if (p > pos + knobLength(sPtr))
 			return DECR_PART;
 		return KNOB_PART;
 	} else {
 		p = x;
-		pos = (size.width - 2 - sPtr->knobThickness) * (POSV - MINV) / (MAXV - MINV);
+		pos = WMAX(0, (int)size.width - 2 * sliderInset(sPtr) - knobLength(sPtr))
+			* (POSV - MINV) / (MAXV - MINV);
+		if (sPtr->flags.fontMetrics)
+			pos += sliderInset(sPtr);
 		if (p < pos)
 			return DECR_PART;
-		if (p > pos + sPtr->knobThickness)
+		if (p > pos + knobLength(sPtr))
 			return INCR_PART;
 		return KNOB_PART;
 	}
@@ -384,13 +445,20 @@ static int valueForMousePoint(Slider * sPtr, int x, int y)
 {
 	WMSize size = sPtr->view->size;
 	int f;
+	int travel = (sPtr->flags.vertical ? (int)size.height : (int)size.width)
+		- 2 * sliderInset(sPtr) - knobLength(sPtr);
 
+	if (travel <= 0)
+		return sPtr->value;
+
+	if (sPtr->flags.fontMetrics) {
+		x -= sliderInset(sPtr);
+		y -= sliderInset(sPtr);
+	}
 	if (sPtr->flags.vertical) {
-		f = (y - sPtr->knobThickness / 2) * (MAXV - MINV)
-		    / ((int)size.height - 2 - sPtr->knobThickness);
+		f = (y - knobLength(sPtr) / 2) * (MAXV - MINV) / travel;
 	} else {
-		f = (x - sPtr->knobThickness / 2) * (MAXV - MINV)
-		    / ((int)size.width - 2 - sPtr->knobThickness);
+		f = (x - knobLength(sPtr) / 2) * (MAXV - MINV) / travel;
 	}
 
 	f += sPtr->minValue;
@@ -489,5 +557,6 @@ static void destroySlider(Slider * sPtr)
 
 	WMRemoveNotificationObserver(sPtr);
 
+	WMReleaseFont(sPtr->font);
 	wfree(sPtr);
 }

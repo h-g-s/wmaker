@@ -60,7 +60,10 @@ typedef struct _Panel Panel;
 typedef struct {
     unsigned flags;		       /* reserved for WPrefs.c Don't access it */
 
-    void (*createWidgets)(Panel*);     /* called when showing for first time */
+    /* Safe to construct before visiting; box minimum is the pane's requested size. */
+    Bool automaticLayout;
+
+    void (*createWidgets)(Panel*);     /* first visit, or initial automatic layout */
     void (*updateDomain)(Panel*);      /* save the changes to the dictionary */
     Bool (*requiresRestart)(Panel*);   /* return True if some static option was changed */
     void (*undoChanges)(Panel*);       /* reset values to those in the dictionary */
@@ -171,4 +174,3 @@ Panel *InitWorkspace(WMWidget *parent);
 #define FRAME_WIDTH	524
 #define FRAME_HEIGHT	235
 #endif /* WPREFS_H_ */
-

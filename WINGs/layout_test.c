@@ -81,6 +81,13 @@ static void testNestedBoxes(WMWindow *window)
 	WMButton *second = WMCreateCommandButton(row);
 	WMSize size, after;
 	WMPoint firstPosition, secondPosition;
+	WMBox *small = WMCreateBox(window);
+	WMButton *expanding = WMCreateCommandButton(small);
+
+	WMPackBoxSubview(small, expanding, wmksize(80, 60), True, 0);
+	assert(WMWidgetHeight(expanding) == 60);
+	WMResizeWidget(small, 100, 100);
+	assert(WMWidgetHeight(expanding) == 100);
 
 	WMSetBoxHorizontal(row, True);
 	WMSetBoxBorderWidth(row, 5);
@@ -278,6 +285,25 @@ static Bool samePixmapPixels(WMPixmap *first, WMPixmap *second)
 	return same;
 }
 
+static int interiorWhitePixels(WMPixmap *pixmap)
+{
+	RImage *image = RCreateImageFromDrawable(pixmap->screen->rcontext, pixmap->pixmap, None);
+	int x, y, count = 0;
+	int stride;
+
+	assert(image);
+	stride = image->format == RRGBAFormat ? 4 : 3;
+	for (y = image->height / 5; y < 4 * image->height / 5; y++)
+		for (x = image->width / 5; x < 4 * image->width / 5; x++) {
+			unsigned char *pixel = image->data + stride * (y * image->width + x);
+
+			if (pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240)
+				count++;
+		}
+	RReleaseImage(image);
+	return count;
+}
+
 static void testSymbolImages(WMScreen *screen)
 {
 	WMPixmap *sources[] = {
@@ -299,6 +325,39 @@ static void testSymbolImages(WMScreen *screen)
 		assert(base == sources[i]);
 		assert(scaled->width > base->width && scaled->height > base->height);
 		assert(bigger->width > scaled->width && bigger->height > scaled->height);
+		if (i == 1 || i == 3) {
+			assert(interiorWhitePixels(scaled) > scaled->height / 2);
+			assert(interiorWhitePixels(bigger) > interiorWhitePixels(scaled));
+		}
+		if (i == 6) {
+			WMPixmap *patterns[] = { scaled, bigger };
+			unsigned int j;
+
+			for (j = 0; j < sizeof(patterns) / sizeof(patterns[0]); j++) {
+				WMPixmap *pattern = patterns[j];
+				RImage *image = RCreateImageFromDrawable(screen->rcontext, pattern->pixmap, None);
+				int x, y, left = image ? image->width : 0, right = 0;
+				int top = image ? image->height : 0, bottom = 0;
+				int stride;
+
+				assert(image);
+				stride = image->format == RRGBAFormat ? 4 : 3;
+				for (y = image->height / 6; y < 5 * image->height / 6; y++)
+					for (x = image->width / 6; x < 5 * image->width / 6; x++) {
+						unsigned char *pixel = image->data + stride * (y * image->width + x);
+
+						if (pixel[0] < 60 && pixel[1] < 60 && pixel[2] < 60) {
+							left = WMIN(left, x);
+							right = WMAX(right, x);
+							top = WMIN(top, y);
+							bottom = WMAX(bottom, y);
+						}
+					}
+				assert(right - left >= image->width / 2);
+				assert(bottom - top >= image->height / 2);
+				RReleaseImage(image);
+			}
+		}
 		if (i == 0 || i == 2 || i == 4 || i == 7) {
 			WMPixmap *alternate = W_CreateButtonImage(screen, sources[i + 1], large);
 
@@ -397,6 +456,78 @@ static void testButtonBorders(WMScreen *screen)
 	WMReleaseFont(large);
 }
 
+static void testSliders(WMScreen *screen)
+{
+	WMWindow *window = WMCreateWindow(screen, "sliders");
+	WMSlider *slider = WMCreateSlider(window);
+	WMSlider *original = WMCreateSlider(window);
+	WMFont *normal = WMSystemFontOfSize(screen, 1);
+	WMFont *large = WMSystemFontOfSize(screen, 32);
+	WMSize small = WMGetSliderPreferredSize(slider), big;
+	XEvent event = { 0 };
+	XImage *image, *baseline;
+	int x, y, orientation;
+
+	WMResizeWidget(window, 500, 300);
+	WMMoveWidget(original, 0, 200);
+	WMRealizeWidget(window);
+	WMMapSubwidgets(window);
+	WMMapWidget(window);
+	WMSetSliderFont(slider, normal);
+	WMSetSliderValue(slider, 50);
+	WMSetSliderValue(original, 50);
+	XSync(screen->display, False);
+	image = XGetImage(screen->display, WMWidgetXID(slider), 0, 0, 100, 16, AllPlanes, ZPixmap);
+	baseline = XGetImage(screen->display, WMWidgetXID(original), 0, 0, 100, 16, AllPlanes, ZPixmap);
+	assert(image && baseline);
+	for (y = 0; y < 16; y++)
+		for (x = 0; x < 100; x++)
+			assert(XGetPixel(image, x, y) == XGetPixel(baseline, x, y));
+	XDestroyImage(image);
+	XDestroyImage(baseline);
+	WMSetSliderFont(slider, large);
+	big = WMGetSliderPreferredSize(slider);
+	assert(big.width > small.width && big.height > small.height);
+	WMResizeWidget(window, big.width + 20, big.height + 250);
+	WMResizeWidget(slider, big.width, big.height);
+	WMSetSliderValue(slider, 50);
+	/* Resizing in the same orientation must regenerate the knob's pixmap too. */
+	WMResizeWidget(slider, big.width, big.height + 20);
+	WMSetSliderValue(slider, 50);
+	XSync(screen->display, False);
+	image = XGetImage(screen->display, WMWidgetXID(slider), 0, 0,
+			  big.width, big.height + 20, AllPlanes, ZPixmap);
+	assert(image);
+	assert(XGetPixel(image, big.width / 2 - 10, big.height - 2) == W_PIXEL(screen->gray));
+	XDestroyImage(image);
+	event.xbutton.display = screen->display;
+	event.xbutton.window = WMWidgetXID(slider);
+	event.xbutton.button = Button2;
+	for (orientation = 0; orientation < 2; orientation++) {
+		WMResizeWidget(slider, orientation ? big.height : big.width,
+			       orientation ? big.width : big.height);
+		for (x = 0; x < 2; x++) {
+			event.type = ButtonPress;
+			event.xbutton.x = orientation ? big.height / 2 : (x ? big.width - 1 : 0);
+			event.xbutton.y = orientation ? (x ? big.width - 1 : 0) : big.height / 2;
+			WMHandleEvent(&event);
+			assert(WMGetSliderValue(slider) == (x ? 100 : 0));
+			event.type = ButtonRelease;
+			WMHandleEvent(&event);
+		}
+	}
+	WMResizeWidget(slider, 100, 16);
+	WMSetSliderFont(slider, normal);
+	assert(WMGetSliderPreferredSize(slider).width == small.width);
+	WMSetSliderKnobThickness(slider, 8);
+	WMSetSliderFont(slider, large);
+	WMResizeWidget(slider, 4, 4);
+	WMSetSliderValue(slider, 50);
+	WMReleaseFont(normal);
+	WMReleaseFont(large);
+	WMDestroyWidget(window);
+}
+
 int main(int argc, char **argv)
 {
 	Display *display;
@@ -423,6 +554,7 @@ int main(int argc, char **argv)
 	testSymbolImages(screen);
 	testSymbolWidgets(window);
 	testButtonBorders(screen);
+	testSliders(screen);
 	WMDestroyWidget(window);
 	WMReleaseApplication();
 	XCloseDisplay(display);

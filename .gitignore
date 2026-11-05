@@ -83,6 +83,7 @@ WINGs/Tests/wtest
 WINGs/layout_test
 
 WPrefs.app/WPrefs
+WPrefs.app/font_controls_test
 
 # These files are generated from make rules
 wrlib/wrlib.pc

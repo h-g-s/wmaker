@@ -147,6 +147,8 @@ static void rearrange(WMBox * box)
 	}
 
 	WMMapArray(box->subviews, computeExpansion, &eData);
+	/* During construction the box can still be smaller than its minimum. */
+	eData.total = WMAX(0, eData.total);
 	WMMapArray(box->subviews, doRearrange, &eData);
 }
 

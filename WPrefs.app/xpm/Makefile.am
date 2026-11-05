@@ -6,12 +6,15 @@ dist_xpmdata_DATA = \
 	animations.xpm \
 	appearance.xpm \
 	clip.xpm \
+	clip-preview.xpm \
 	configs.xpm \
 	cycleworkspaces.xpm \
 	dock.xpm \
+	dock-preview.xpm \
 	dockclipdrawersection.xpm \
 	dontlinkworkspaces.xpm \
 	drawer.xpm \
+	drawer-preview.xpm \
 	ergonomic.xpm \
 	expert.xpm \
 	fonts.xpm \

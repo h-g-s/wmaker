@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 
 static const char *const clip_delay_frame_titles[] = {
@@ -41,13 +43,14 @@ static char *autoDelayPresetValues[5] = { "0", "100", "250", "600", "1000" };
 static const struct {
 	const char *disable_key;
 	const char *icon_file;
+	const char *preview_file;
 	const char *balloon_text;
 } dock_config[] = {
-	{ "DisableDock", "dock",
+	{ "DisableDock", "dock", "dock-preview",
 	  N_("Disable/enable the application Dock (the\nvertical icon bar in the side of the screen).") },
-	{ "DisableClip", "clip",
+	{ "DisableClip", "clip", "clip-preview",
 	  N_("Disable/enable the Clip (that thing with\na paper clip icon).") },
-	{ "DisableDrawers", "drawer",
+	{ "DisableDrawers", "drawer", "drawer-preview",
 	  N_("Disable/enable Drawers (a dock that stores\napplication icons horizontally). The dock is required.") }
 };
 
@@ -62,21 +65,17 @@ typedef struct _Panel {
 
 	WMWidget *parent;
 
-	WMFrame *autoDelayF[wlengthof_nocheck(clip_delay_frame_titles)];
 	WMLabel *autoDelayL[wlengthof_nocheck(auto_delay)];
 	WMButton *autoDelayB[wlengthof_nocheck(auto_delay)][wlengthof_nocheck(autoDelayPresetValues)];
 	WMTextField *autoDelayT[wlengthof_nocheck(auto_delay)];
 	WMLabel *autoDelayMsL[wlengthof_nocheck(auto_delay)];
 
-	WMFrame *dockF;
 	WMButton *docksB[wlengthof_nocheck(dock_config)];
 } _Panel;
 
 #define ICON_FILE	"dockclipdrawersection"
 
 #define ARQUIVO_XIS	"xis"
-#define DELAY_ICON "timer%i"
-#define DELAY_ICON_S "timer%is"
 
 static void showData(_Panel *panel);
 static void storeData(_Panel *panel);
@@ -158,9 +157,10 @@ static void createPanel(Panel *p)
 	RContext *rc = WMScreenRContext(scr);
 	char *path;
 	int i, j, k;
-	char *buf1, *buf2;
-	WMColor *color;
-	WMFont *font;
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMColor *color = WMDarkGrayColor(scr);
+	WMBox *columns, *delays;
+	WPrefsGroup dock;
 
 	path = LocateImage(ARQUIVO_XIS);
 	if (path) {
@@ -170,104 +170,107 @@ static void createPanel(Panel *p)
 		}
 		wfree(path);
 	}
+	if (xis && WMFontHeight(font) > 17) {
+		RImage *scaled = RSmoothScaleImage(xis, 192, 192);
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+		if (!scaled)
+			wwarning(_("could not scale disabled preview overlay: %s"), RMessageForError(RErrorCode));
+		RReleaseImage(xis);
+		xis = scaled;
+	}
 
-	/***************** Auto-delays *****************/
-	buf1 = wmalloc(strlen(DELAY_ICON) + 1);
-	buf2 = wmalloc(strlen(DELAY_ICON_S) + 1);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	delays = WMCreateBox(columns);
 
 	for (k = 0; k < wlengthof(clip_delay_frame_titles); k++)
 	{
-		panel->autoDelayF[k] = WMCreateFrame(panel->box);
-		WMResizeWidget(panel->autoDelayF[k], 372, 100);
-		WMMoveWidget(panel->autoDelayF[k], 11, 10 + k * 110);
-		WMSetFrameTitle(panel->autoDelayF[k], _(clip_delay_frame_titles[k]));
+		WPrefsGroup group = WPrefsCreateGroup(delays, _(clip_delay_frame_titles[k]));
+		WMBox *rows[2];
+		WMSize labelSize = wmksize(0, 0);
 
+		for (i = 0; i < 2; i++) {
+			WMSize size;
+			int index = i + k * 2;
+
+			rows[i] = WMCreateBox(group.content);
+			WMSetBoxHorizontal(rows[i], True);
+			panel->autoDelayL[index] = WMCreateLabel(rows[i]);
+			WMSetLabelText(panel->autoDelayL[index], _(auto_delay[index].string));
+			size = WMGetLabelPreferredSize(panel->autoDelayL[index]);
+			labelSize.width = WMAX(labelSize.width, size.width);
+			labelSize.height = WMAX(labelSize.height, size.height);
+		}
 		for (i = 0; i < 2; i++)
 		{
-			panel->autoDelayL[i + k * 2] = WMCreateLabel(panel->autoDelayF[k]);
-			WMResizeWidget(panel->autoDelayL[i + k * 2], 152, 20);
-			WMMoveWidget(panel->autoDelayL[i + k * 2], 8, 27 + 40 * i);
-			WMSetLabelText(panel->autoDelayL[i + k * 2], _(auto_delay[i + k * 2].string));
+			int index = i + k * 2;
+			WMBox *row = rows[i];
 
+			WMPackBoxSubview(row, panel->autoDelayL[index], labelSize, False, 12);
 			for (j = 0; j < wlengthof(autoDelayPresetValues); j++)
 			{
-				panel->autoDelayB[i + k * 2][j] = WMCreateCustomButton(panel->autoDelayF[k], WBBStateChangeMask);
-				WMResizeWidget(panel->autoDelayB[i + k * 2][j], 25, 25);
-				WMMoveWidget(panel->autoDelayB[i + k * 2][j], 160 + (26 * j), 25 + 40 * i);
-				WMSetButtonBordered(panel->autoDelayB[i + k * 2][j], False);
-				WMSetButtonImagePosition(panel->autoDelayB[i + k * 2][j], WIPImageOnly);
-				WMSetButtonAction(panel->autoDelayB[i + k * 2][j], pushAutoDelayButton, panel);
+				WMButton *button = WMCreateCustomButton(row, WBBStateChangeMask);
+
+				panel->autoDelayB[index][j] = button;
+				WPrefsSetClockButtonFont(button, font, j);
+				WMSetButtonAction(button, pushAutoDelayButton, panel);
 				if (j > 0)
-					WMGroupButtons(panel->autoDelayB[i + k * 2][0], panel->autoDelayB[i + k * 2][j]);
-				sprintf(buf1, DELAY_ICON, j);
-				CreateImages(scr, rc, NULL, buf1, &icon1, NULL);
-				if (icon1) {
-					WMSetButtonImage(panel->autoDelayB[i + k * 2][j], icon1);
-					WMReleasePixmap(icon1);
-				} else {
-					wwarning(_("could not load icon file %s"), buf1);
-				}
-				sprintf(buf2, DELAY_ICON_S, j);
-				CreateImages(scr, rc, NULL, buf2, &icon2, NULL);
-				if (icon2) {
-					WMSetButtonAltImage(panel->autoDelayB[i + k * 2][j], icon2);
-					WMReleasePixmap(icon2);
-				} else {
-					wwarning(_("could not load icon file %s"), buf2);
-				}
+					WMGroupButtons(panel->autoDelayB[index][0], button);
+				WMPackBoxSubview(row, button, WMGetViewSize(WMWidgetView(button)), False,
+						 j + 1 == wlengthof(autoDelayPresetValues) ? 12 : 2);
 			}
 
-			panel->autoDelayT[i + k * 2] = WMCreateTextField(panel->autoDelayF[k]);
-			WMResizeWidget(panel->autoDelayT[i + k * 2], 41, 20);
-			WMMoveWidget(panel->autoDelayT[i + k * 2], 293, 27 + 40 * i);
-			WMAddNotificationObserver(autoDelayChanged, panel, WMTextDidChangeNotification, panel->autoDelayT[i + k * 2]);
-
-			color = WMDarkGrayColor(scr);
-			font = WMSystemFontOfSize(scr, 10);
-			panel->autoDelayMsL[i + k * 2] = WMCreateLabel(panel->autoDelayF[k]);
-			WMResizeWidget(panel->autoDelayMsL[i + k * 2], 26, 16);
-			WMMoveWidget(panel->autoDelayMsL[i + k * 2], 337, 30 + 40 * i);
-			WMSetLabelText(panel->autoDelayMsL[i + k * 2], _("ms"));
-			WMSetLabelTextColor(panel->autoDelayMsL[i + k * 2], color);
-			WMSetLabelFont(panel->autoDelayMsL[i + k * 2], font);
-			WMReleaseColor(color);
-			WMReleaseFont(font);
+			panel->autoDelayT[index] = WMCreateTextField(row);
+			WMPackBoxSubview(row, panel->autoDelayT[index],
+					 WMGetTextFieldPreferredSize(panel->autoDelayT[index], 5), False, 8);
+			WMAddNotificationObserver(autoDelayChanged, panel, WMTextDidChangeNotification,
+						  panel->autoDelayT[index]);
+			panel->autoDelayMsL[index] = WMCreateLabel(row);
+			WMSetLabelText(panel->autoDelayMsL[index], _("ms"));
+			WMSetLabelTextColor(panel->autoDelayMsL[index], color);
+			WPrefsPackLabel(row, panel->autoDelayMsL[index], 0);
+			WMPackBoxSubview(group.content, row, WMGetBoxMinimumSize(row), False, i ? 0 : 10);
+			WMMapSubwidgets(row);
 		}
-
-		WMMapSubwidgets(panel->autoDelayF[k]);
+		WPrefsPackGroup(delays, &group, True, k + 1 == wlengthof(clip_delay_frame_titles) ? 0 : 12);
 	}
-	wfree(buf1);
-	wfree(buf2);
 
-	/***************** Enable/disable clip/dock/drawers *****************/
-	panel->dockF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->dockF, 115, 210);
-	WMMoveWidget(panel->dockF, 394, 10);
-	WMSetFrameTitle(panel->dockF, _("Dock/Clip/Drawer"));
+	WMPackBoxSubview(columns, delays, WMGetBoxMinimumSize(delays), True, 12);
+	dock = WPrefsCreateGroup(columns, _("Dock/Clip/Drawer"));
 
 	for (i = 0; i < wlengthof(dock_config); i++)
 	{
-		panel->docksB[i] = WMCreateButton(panel->dockF, WBTToggle);
-		WMResizeWidget(panel->docksB[i], 56, 56);
-		WMMoveWidget(panel->docksB[i], 30, 20 + 62 * i);
+		WMBox *row = WMCreateBox(dock.content);
+		WMBox *before = WMCreateBox(row);
+		WMBox *after = WMCreateBox(row);
+
+		WMSetBoxHorizontal(row, True);
+		panel->docksB[i] = WMCreateButton(row, WBTToggle);
 		WMSetButtonImagePosition(panel->docksB[i], WIPImageOnly);
-		CreateImages(scr, rc, xis, dock_config[i].icon_file, &icon1, &icon2);
-		if (icon2) {
-			WMSetButtonImage(panel->docksB[i], icon2);
+		CreateImages(scr, rc, xis, WMFontHeight(font) > 17 ? dock_config[i].preview_file :
+			     dock_config[i].icon_file, &icon1, &icon2);
+		WPrefsSetPreviewButtonFont(panel->docksB[i], font, icon2, icon1);
+		if (icon2)
 			WMReleasePixmap(icon2);
-		}
-		if (icon1) {
-			WMSetButtonAltImage(panel->docksB[i], icon1);
+		if (icon1)
 			WMReleasePixmap(icon1);
-		}
 		WMSetBalloonTextForView(_(dock_config[i].balloon_text), WMWidgetView(panel->docksB[i]));
 		WMSetButtonAction(panel->docksB[i], pushDockButton, panel);
+		WMPackBoxSubview(row, before, wmksize(1, 1), True, 0);
+		WPrefsPackButton(row, panel->docksB[i], 0);
+		WMPackBoxSubview(row, after, wmksize(1, 1), True, 0);
+		WMPackBoxSubview(dock.content, row, WMGetBoxMinimumSize(row), False,
+				 i + 1 == wlengthof(dock_config) ? 0 : 8);
+		WMMapSubwidgets(row);
 	}
 
-	WMMapSubwidgets(panel->dockF);
+	WPrefsPackGroup(columns, &dock, False, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(delays);
+	WMMapSubwidgets(columns);
+	WMReleaseFont(font);
+	WMReleaseColor(color);
 
 	if (xis)
 		RReleaseImage(xis);
@@ -326,6 +329,7 @@ Panel *InitDocks(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);
