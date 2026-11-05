@@ -491,10 +491,10 @@ WMPixmap *W_CreateButtonImage(WMScreen *scr, WMPixmap *source, WMFont *font)
 
 	if (kind == Check || kind == TriState || kind == PopUp) {
 		XSetLineAttributes(dpy, gc, line, LineSolid, CapButt, JoinMiter);
-		XSetForeground(dpy, gc, W_PIXEL(kind == PopUp ? scr->white : scr->darkGray));
+		XSetForeground(dpy, gc, W_PIXEL(kind == TriState ? scr->darkGray : scr->white));
 		XDrawLine(dpy, canvas, gc, inset, h - inset, inset, inset);
 		XDrawLine(dpy, canvas, gc, inset, inset, w - inset, inset);
-		XSetForeground(dpy, gc, W_PIXEL(kind == PopUp ? scr->black : scr->white));
+		XSetForeground(dpy, gc, W_PIXEL(kind == TriState ? scr->white : scr->black));
 		XDrawLine(dpy, canvas, gc, inset, h - inset, w - inset, h - inset);
 		XDrawLine(dpy, canvas, gc, w - inset, h - inset, w - inset, inset);
 		if (selected) {

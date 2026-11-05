@@ -304,6 +304,35 @@ static int interiorWhitePixels(WMPixmap *pixmap)
 	return count;
 }
 
+static void checkSquareLighting(WMPixmap *pixmap, Bool raised)
+{
+	RImage *image = RCreateImageFromDrawable(pixmap->screen->rcontext, pixmap->pixmap, None);
+	long top = 0, bottom = 0, left = 0, right = 0;
+	int x, y, stride;
+
+	assert(image);
+	stride = image->format == RRGBAFormat ? 4 : 3;
+	for (y = 0; y < image->height / 5; y++)
+		for (x = image->width / 3; x < 2 * image->width / 3; x++) {
+			unsigned char *a = image->data + stride * (y * image->width + x);
+			unsigned char *b = image->data + stride * ((image->height - y - 1) * image->width + x);
+
+			top += a[0] + a[1] + a[2];
+			bottom += b[0] + b[1] + b[2];
+		}
+	for (x = 0; x < image->width / 5; x++)
+		for (y = image->height / 3; y < 2 * image->height / 3; y++) {
+			unsigned char *a = image->data + stride * (y * image->width + x);
+			unsigned char *b = image->data + stride * (y * image->width + image->width - x - 1);
+
+			left += a[0] + a[1] + a[2];
+			right += b[0] + b[1] + b[2];
+		}
+	assert(raised ? top > bottom : top < bottom);
+	assert(raised ? left > right : left < right);
+	RReleaseImage(image);
+}
+
 static void testSymbolImages(WMScreen *screen)
 {
 	WMPixmap *sources[] = {
@@ -325,6 +354,13 @@ static void testSymbolImages(WMScreen *screen)
 		assert(base == sources[i]);
 		assert(scaled->width > base->width && scaled->height > base->height);
 		assert(bigger->width > scaled->width && bigger->height > scaled->height);
+		if (i <= 1 || (i >= 4 && i <= 6) || i == 9) {
+			Bool raised = i <= 1 || i == 9;
+
+			checkSquareLighting(base, raised);
+			checkSquareLighting(scaled, raised);
+			checkSquareLighting(bigger, raised);
+		}
 		if (i == 1 || i == 3) {
 			assert(interiorWhitePixels(scaled) > scaled->height / 2);
 			assert(interiorWhitePixels(bigger) > interiorWhitePixels(scaled));
