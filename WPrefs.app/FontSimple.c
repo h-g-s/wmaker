@@ -19,6 +19,7 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
 #include <unistd.h>
 #include <fontconfig/fontconfig.h>
 #include <math.h>
@@ -87,6 +88,7 @@ typedef struct _Panel {
 	WMTextField *sampleT;
 
 	FontList *fonts;
+	Bool loading;
 } _Panel;
 
 #define ICON_FILE	"fonts"
@@ -197,6 +199,7 @@ static void lookup_available_fonts(_Panel * panel)
 	FcFontSet *fonts;
 	FontFamily *family;
 
+	panel->fonts = wmalloc(sizeof(FontList));
 	os = FcObjectSetBuild(FC_FAMILY, FC_WEIGHT, FC_WIDTH, FC_SLANT, NULL);
 
 	fonts = FcFontList(0, pat, os);
@@ -204,9 +207,7 @@ static void lookup_available_fonts(_Panel * panel)
 	if (fonts) {
 		int i;
 
-		panel->fonts = wmalloc(sizeof(FontList));
-		panel->fonts->familyn = 0;
-		panel->fonts->families = wmalloc(sizeof(FontFamily) * fonts->nfont);
+		panel->fonts->families = wmalloc(sizeof(FontFamily) * (fonts->nfont + 2));
 
 		for (i = 0; i < fonts->nfont; i++) {
 			char *name;
@@ -258,6 +259,10 @@ static void lookup_available_fonts(_Panel * panel)
 		FcObjectSetDestroy(os);
 	if (pat)
 		FcPatternDestroy(pat);
+	if (!panel->fonts->families) {
+		wwarning(_("could not enumerate available fonts"));
+		panel->fonts->families = wmalloc(sizeof(FontFamily) * 2);
+	}
 
 	panel->fonts->families[panel->fonts->familyn++].name = wstrdup("sans serif");
 	family = panel->fonts->families + panel->fonts->familyn - 1;
@@ -340,6 +345,25 @@ static void updateSampleFont(_Panel * panel)
 	}
 }
 
+static void styleName(FontStyle *style, char *buffer)
+{
+	const char *weight = "", *slant = "", *width = "";
+
+	for (int j = 0; j < wlengthof(fontWeights); j++)
+		if (fontWeights[j].weight == style->weight)
+			weight = fontWeights[j].name;
+	for (int j = 0; j < wlengthof(fontWidths); j++)
+		if (fontWidths[j].width == style->width)
+			width = fontWidths[j].name;
+	for (int j = 0; j < wlengthof(fontSlants); j++)
+		if (fontSlants[j].slant == style->slant)
+			slant = fontSlants[j].name;
+	sprintf(buffer, "%s%s%s%s%s",
+		weight, *weight ? " " : "", slant, (*slant || *weight) ? " " : "", width);
+	if (!buffer[0])
+		strcpy(buffer, "Roman");
+}
+
 static void selectedFamily(WMWidget * w, void *data)
 {
 	_Panel *panel = (_Panel *) data;
@@ -362,29 +386,9 @@ static void selectedFamily(WMWidget * w, void *data)
 
 		WMClearList(panel->styleL);
 		for (i = 0; i < family->stylen; i++) {
-			int j;
-			const char *weight = "", *slant = "", *width = "";
 			WMListItem *item;
 
-			for (j = 0; j < wlengthof(fontWeights); j++)
-				if (fontWeights[j].weight == family->styles[i].weight) {
-					weight = fontWeights[j].name;
-					break;
-				}
-			for (j = 0; j < wlengthof(fontWidths); j++)
-				if (fontWidths[j].width == family->styles[i].width) {
-					width = fontWidths[j].name;
-					break;
-				}
-			for (j = 0; j < wlengthof(fontSlants); j++)
-				if (fontSlants[j].slant == family->styles[i].slant) {
-					slant = fontSlants[j].name;
-					break;
-				}
-			sprintf(buffer, "%s%s%s%s%s",
-				weight, *weight ? " " : "", slant, (*slant || *weight) ? " " : "", width);
-			if (!buffer[0])
-				strcpy(buffer, "Roman");
+			styleName(family->styles + i, buffer);
 
 			item = WMAddListItem(panel->styleL, buffer);
 			item->clientData = family->styles + i;
@@ -407,7 +411,7 @@ static void selectedFamily(WMWidget * w, void *data)
 		}
 		WMSelectListItem(panel->styleL, oldi);
 
-		{
+		if (!panel->loading) {
 			int index = WMGetPopUpButtonSelectedItem(panel->optionP);
 			WMMenuItem *item = WMGetPopUpButtonMenuItem(panel->optionP, index);
 			FcChar8 *ofont;
@@ -419,7 +423,8 @@ static void selectedFamily(WMWidget * w, void *data)
 				wfree(ofont);
 			WMSetMenuItemRepresentedObject(item, nfont);
 		}
-		updateSampleFont(panel);
+		if (!panel->loading)
+			updateSampleFont(panel);
 	}
 }
 
@@ -455,6 +460,10 @@ static void selectedOption(WMWidget * w, void *data)
 	(void) w;
 
 	font = (char *)WMGetMenuItemRepresentedObject(item);
+	panel->loading = True;
+	WMClearList(panel->styleL);
+	WMSelectListItem(panel->familyL, -1);
+	WMSelectListItem(panel->sizeL, -1);
 	if (font) {
 		FcPattern *pat;
 
@@ -534,11 +543,12 @@ static void selectedOption(WMWidget * w, void *data)
 			WMSelectListItem(panel->sizeL, found);
 			WMSetListPosition(panel->sizeL, found);
 
-			selected(NULL, panel);
+			FcPatternDestroy(pat);
 		} else
 			wwarning("Can't parse font '%s'", font);
 	}
 
+	panel->loading = False;
 	updateSampleFont(panel);
 }
 
@@ -546,7 +556,8 @@ static WMLabel *createListLabel(WMScreen * scr, WMWidget * parent, const char *t
 {
 	WMLabel *label;
 	WMColor *color;
-	WMFont *boldFont = WMBoldSystemFontOfSize(scr, 12);
+	WMFont *normalFont = WMDefaultSystemFont(scr);
+	WMFont *boldFont = WMBoldSystemFontOfSize(scr, WMAX(12, WMFontHeight(normalFont) * 12 / 17));
 
 	label = WMCreateLabel(parent);
 	WMSetLabelFont(label, boldFont);
@@ -561,6 +572,7 @@ static WMLabel *createListLabel(WMScreen * scr, WMWidget * parent, const char *t
 	WMReleaseColor(color);
 
 	WMReleaseFont(boldFont);
+	WMReleaseFont(normalFont);
 
 	return label;
 }
@@ -582,14 +594,18 @@ static void showData(_Panel * panel)
 		if (ofont)
 			wfree(ofont);
 
-		if (strcmp(fontOptions[i].option, "SystemFont") == 0)
-			font = WMGetFontName(WMDefaultSystemFont(scr));
-		else if (strcmp(fontOptions[i].option, "BoldSystemFont") == 0)
-			font = WMGetFontName(WMDefaultBoldSystemFont(scr));
-		else
+		if (strcmp(fontOptions[i].option, "SystemFont") == 0 ||
+		    strcmp(fontOptions[i].option, "BoldSystemFont") == 0) {
+			WMFont *system = strcmp(fontOptions[i].option, "SystemFont") == 0 ?
+				WMDefaultSystemFont(scr) : WMDefaultBoldSystemFont(scr);
+
+			font = wstrdup(WMGetFontName(system));
+			WMReleaseFont(system);
+		} else {
 			font = GetStringForKey(fontOptions[i].option);
-		if (font)
-			font = wstrdup(font);
+			if (font)
+				font = wstrdup(font);
+		}
 		WMSetMenuItemRepresentedObject(item, font);
 	}
 
@@ -631,102 +647,122 @@ static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(scr);
 	WMLabel *label;
-	WMBox *hbox, *vbox;
+	WMBox *row, *column;
+	WMSize size;
+	int widths[3] = { 0, 0, 0 };
+	int rowHeight = WMFontHeight(font) + 4;
+	WMList *lists[3];
+	const char *titles[] = { _("Family"), _("Style"), _("Size") };
 	int i;
 
 	lookup_available_fonts(panel);
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 5, 2, 5, 5);
-	WMSetBoxHorizontal(panel->box, False);
-	WMSetBoxBorderWidth(panel->box, 8);
-	WMMapWidget(panel->box);
-
-	hbox = WMCreateBox(panel->box);
-	WMSetBoxHorizontal(hbox, True);
-	WMAddBoxSubview(panel->box, WMWidgetView(hbox), False, True, 40, 22, 8);
-
-	vbox = WMCreateBox(hbox);
-	WMAddBoxSubview(hbox, WMWidgetView(vbox), False, True, 130, 0, 10);
-	WMSetBoxHorizontal(vbox, False);
-	panel->optionP = WMCreatePopUpButton(vbox);
-	WMAddBoxSubviewAtEnd(vbox, WMWidgetView(panel->optionP), False, True, 20, 0, 8);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	panel->optionP = WMCreatePopUpButton(panel->box);
 	for (i = 0; i < wlengthof(fontOptions); i++)
 		WMAddPopUpButtonItem(panel->optionP, _(fontOptions[i].label));
 	WMSetPopUpButtonAction(panel->optionP, selectedOption, panel);
+	WMPackBoxSubview(panel->box, panel->optionP, WMGetPopUpButtonPreferredSize(panel->optionP), False, 10);
 
-	label = WMCreateLabel(hbox);
+	row = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(row, True);
+	label = WMCreateLabel(row);
 	WMSetLabelText(label, _("Sample Text"));
 	WMSetLabelTextAlignment(label, WARight);
-	WMAddBoxSubview(hbox, WMWidgetView(label), False, True, 80, 0, 2);
-
-	panel->sampleT = WMCreateTextField(hbox);
-	WMSetViewExpandsToParent(WMWidgetView(panel->sampleT), 10, 18, 10, 10);
+	WPrefsPackLabel(row, label, 10);
+	panel->sampleT = WMCreateTextField(row);
 	WMSetTextFieldText(panel->sampleT, SAMPLE_TEXT);
-	WMAddBoxSubview(hbox, WMWidgetView(panel->sampleT), True, True, 60, 0, 0);
-
-	hbox = WMCreateBox(panel->box);
-	WMSetBoxHorizontal(hbox, True);
-	WMAddBoxSubview(panel->box, WMWidgetView(hbox), True, True, 100, 0, 2);
-
-	vbox = WMCreateBox(hbox);
-	WMSetBoxHorizontal(vbox, False);
-	WMAddBoxSubview(hbox, WMWidgetView(vbox), False, True, 240, 20, 4);
-
-	label = createListLabel(scr, vbox, _("Family"));
-	WMAddBoxSubview(vbox, WMWidgetView(label), False, True, 20, 0, 2);
-
-	/* family */
-	panel->familyL = WMCreateList(vbox);
-	WMAddBoxSubview(vbox, WMWidgetView(panel->familyL), True, True, 0, 0, 0);
-	if (panel->fonts) {
-		WMListItem *item;
-		for (i = 0; i < panel->fonts->familyn; i++) {
-			item = WMAddListItem(panel->familyL, panel->fonts->families[i].name);
-			item->clientData = panel->fonts->families + i;
-		}
-	} else
-		WMAddListItem(panel->familyL, "sans serif");
-
-	WMSetListAction(panel->familyL, selectedFamily, panel);
-
-	vbox = WMCreateBox(hbox);
-	WMSetBoxHorizontal(vbox, False);
-	WMAddBoxSubview(hbox, WMWidgetView(vbox), True, True, 10, 0, 0);
-
 	{
-		WMBox *box = WMCreateBox(vbox);
-		WMSetBoxHorizontal(box, True);
-		WMAddBoxSubview(vbox, WMWidgetView(box), False, True, 20, 0, 2);
+		WMFont *largest = WMSystemFontOfSize(scr, 72);
 
-		label = createListLabel(scr, box, _("Style"));
-		WMAddBoxSubview(box, WMWidgetView(label), True, True, 20, 0, 4);
+		size = WMGetTextFieldPreferredSize(panel->sampleT, 26);
+		size.height = WMAX(size.height, WMFontHeight(largest) + 8);
+		WMReleaseFont(largest);
+		for (i = 0; i < wlengthof(fontOptions); i++) {
+			char *name = GetStringForKey(fontOptions[i].option);
+			WMFont *preview = name ? WMCreateFont(scr, name) : NULL;
 
-		label = createListLabel(scr, box, _("Size"));
-		WMAddBoxSubview(box, WMWidgetView(label), False, True, 60, 0, 0);
-
-		box = WMCreateBox(vbox);
-		WMSetBoxHorizontal(box, True);
-		WMAddBoxSubview(vbox, WMWidgetView(box), True, True, 20, 0, 0);
-
-		panel->styleL = WMCreateList(box);
-		WMAddBoxSubview(box, WMWidgetView(panel->styleL), True, True, 0, 0, 4);
-		WMSetListAction(panel->styleL, selected, panel);
-
-		panel->sizeL = WMCreateList(box);
-		WMAddBoxSubview(box, WMWidgetView(panel->sizeL), False, True, 60, 0, 0);
-		for (i = 0; standardSizes[i]; i++) {
-			WMAddListItem(panel->sizeL, standardSizes[i]);
+			if (preview) {
+				size.height = WMAX(size.height, WMFontHeight(preview) + 8);
+				WMReleaseFont(preview);
+			}
 		}
-		WMSetListAction(panel->sizeL, selected, panel);
+		WMPackBoxSubview(row, panel->sampleT, size, True, 0);
 	}
+	WMPackBoxSubview(panel->box, row, WMGetBoxMinimumSize(row), False, 10);
+	WMMapSubwidgets(row);
 
+	row = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(row, True);
+	for (i = 0; i < 3; i++) {
+		column = WMCreateBox(row);
+		label = createListLabel(scr, column, titles[i]);
+		WPrefsPackLabel(column, label, 2);
+		lists[i] = WMCreateList(column);
+		WMSetListUserDrawItemHeight(lists[i], rowHeight);
+		widths[i] = WMGetLabelPreferredSize(label).width;
+		for (int f = 0; f < panel->fonts->familyn; f++) {
+			FontFamily *family = panel->fonts->families + f;
+
+			if (i == 0) {
+				WMListItem *item = WMAddListItem(lists[i], family->name);
+
+				item->clientData = family;
+				widths[i] = WMAX(widths[i], WMWidthOfString(font, family->name, strlen(family->name)));
+			} else if (i == 1) {
+				for (int s = 0; s < family->stylen; s++) {
+					char text[1024];
+
+					styleName(family->styles + s, text);
+					widths[i] = WMAX(widths[i], WMWidthOfString(font, text, strlen(text)));
+				}
+			}
+		}
+		if (i == 2)
+			for (int s = 0; standardSizes[s]; s++) {
+				WMAddListItem(lists[i], standardSizes[s]);
+				widths[i] = WMAX(widths[i], WMWidthOfString(font, standardSizes[s], strlen(standardSizes[s])));
+			}
+		WMPackBoxSubview(column, lists[i],
+				 wmksize(widths[i] + WMGetScrollerWidth(WMGetListScroller(lists[i])) + 10,
+					 rowHeight * 10 + 4), True, 0);
+		WMPackBoxSubview(row, column, WMGetBoxMinimumSize(column), i != 2, i == 2 ? 0 : 10);
+		WMMapSubwidgets(column);
+	}
+	panel->familyL = lists[0];
+	panel->styleL = lists[1];
+	panel->sizeL = lists[2];
+	WMSetListAction(panel->familyL, selectedFamily, panel);
+	WMSetListAction(panel->styleL, selected, panel);
+	WMSetListAction(panel->sizeL, selected, panel);
+	WMPackBoxSubview(panel->box, row, WMGetBoxMinimumSize(row), True, 0);
+	WMMapSubwidgets(row);
 	WMMapSubwidgets(panel->box);
-	WMMapWidget(panel->box);
 	WMRealizeWidget(panel->box);
-
 	showData(panel);
+	WMReleaseFont(font);
+}
+
+static void prepareForClose(Panel *p)
+{
+	_Panel *panel = (_Panel *)p;
+
+	for (int i = 0; i < wlengthof(fontOptions); i++) {
+		WMMenuItem *item = WMGetPopUpButtonMenuItem(panel->optionP, i);
+		char *name = WMGetMenuItemRepresentedObject(item);
+
+		if (name)
+			wfree(name);
+		WMSetMenuItemRepresentedObject(item, NULL);
+	}
+	for (int i = 0; i < panel->fonts->familyn; i++) {
+		wfree(panel->fonts->families[i].name);
+		wfree(panel->fonts->families[i].styles);
+	}
+	wfree(panel->fonts->families);
+	wfree(panel->fonts);
 }
 
 Panel *InitFontSimple(WMWidget *parent)
@@ -743,6 +779,8 @@ Panel *InitFontSimple(WMWidget *parent)
 
 	panel->callbacks.createWidgets = createPanel;
 	panel->callbacks.updateDomain = storeData;
+	panel->callbacks.prepareForClose = prepareForClose;
+	panel->callbacks.automaticLayout = True;
 
 	AddSection(panel, ICON_FILE);
 
