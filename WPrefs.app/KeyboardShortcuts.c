@@ -21,6 +21,7 @@
 #include "config.h"		/* for HAVE_XCONVERTCASE */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
 #include <ctype.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -53,6 +54,7 @@ typedef struct _Panel {
 	WMColor *black;
 	WMColor *gray;
 	WMFont *font;
+	int indicatorWidth;
 
 	Bool capturing;
 	char **shortcuts;
@@ -60,6 +62,9 @@ typedef struct _Panel {
 } _Panel;
 
 #define ICON_FILE	"keyshortcuts"
+
+static const char *shortcutInstructions = N_("Click on Capture to interactively define the shortcut key(s).");
+static const char *captureInstructions = N_("Press the desired shortcut key(s) or click Cancel to stop capturing.");
 
 /*
  * List of user definable shortcut keys
@@ -483,8 +488,7 @@ static void captureClick(WMWidget * w, void *data)
 	if (!panel->capturing) {
 		panel->capturing = 1;
 		WMSetButtonText(w, _("Cancel"));
-		WMSetLabelText(panel->instructionsL,
-			       _("Press the desired shortcut key(s) or click Cancel to stop capturing."));
+		WMSetLabelText(panel->instructionsL, _(captureInstructions));
 		XGrabKeyboard(dpy, WMWidgetXID(panel->parent), True, GrabModeAsync, GrabModeAsync, CurrentTime);
 		shortcut = capture_shortcut(dpy, &panel->capturing, 1);
 		if (shortcut) {
@@ -518,7 +522,7 @@ static void captureClick(WMWidget * w, void *data)
 	}
 	panel->capturing = 0;
 	WMSetButtonText(w, _("Capture"));
-	WMSetLabelText(panel->instructionsL, _("Click on Capture to interactively define the shortcut key(s)."));
+	WMSetLabelText(panel->instructionsL, _(shortcutInstructions));
 	XUngrabKeyboard(dpy, CurrentTime);
 }
 
@@ -615,11 +619,12 @@ static void paintItem(WMList * lPtr, int index, Drawable d, char *text, int stat
 		WMPixmap *pix = WMGetSystemPixmap(scr, WSICheckMark);
 		WMSize size = WMGetPixmapSize(pix);
 
-		WMDrawPixmap(pix, d, x + (20 - size.width) / 2, (height - size.height) / 2 + y);
+		WMDrawPixmap(pix, d, x + (panel->indicatorWidth - size.width) / 2, (height - size.height) / 2 + y);
 		WMReleasePixmap(pix);
 	}
 
-	WMDrawString(scr, d, panel->black, panel->font, x + 20, y, text, strlen(text));
+	WMDrawString(scr, d, panel->black, panel->font, x + panel->indicatorWidth,
+		     y + (height - WMFontHeight(panel->font)) / 2, text, strlen(text));
 }
 
 static int cmpKeyOptions(const void *v1, const void *v2)
@@ -642,24 +647,28 @@ static void createPanel(Panel * p)
 	WMScreen *scr = WMWidgetScreen(panel->parent);
 	WMColor *color;
 	WMFont *boldFont;
-	int i;
+	WMBox *actions, *buttons, *spacer;
+	WPrefsGroup shortcut;
+	WMSize fieldSize, clearSize, captureSize, cancelSize, instructionsSize, activeSize;
+	int i, listWidth = 0, rowHeight, editorWidth;
 
 	panel->capturing = 0;
 
 	panel->white = WMWhiteColor(scr);
 	panel->black = WMBlackColor(scr);
 	panel->gray = WMGrayColor(scr);
-	panel->font = WMSystemFontOfSize(scr, 12);
+	panel->font = WMDefaultSystemFont(scr);
+	panel->indicatorWidth = WMAX(20, WMFontHeight(panel->font));
+	rowHeight = WMFontHeight(panel->font) + 4;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	WMSetBoxHorizontal(panel->box, True);
+	actions = WMCreateBox(panel->box);
 
-	boldFont = WMBoldSystemFontOfSize(scr, 12);
+	boldFont = WMDefaultBoldSystemFont(scr);
 
 	/* **************** Actions **************** */
-	panel->actL = WMCreateLabel(panel->box);
-	WMResizeWidget(panel->actL, 314, 20);
-	WMMoveWidget(panel->actL, 9, 9);
+	panel->actL = WMCreateLabel(actions);
 	WMSetLabelFont(panel->actL, boldFont);
 	WMSetLabelText(panel->actL, _("Actions"));
 	WMSetLabelRelief(panel->actL, WRSunken);
@@ -669,53 +678,70 @@ static void createPanel(Panel * p)
 	WMReleaseColor(color);
 	WMSetLabelTextColor(panel->actL, panel->white);
 
-	panel->actLs = WMCreateList(panel->box);
-	WMResizeWidget(panel->actLs, 314, 191);
-	WMMoveWidget(panel->actLs, 9, 31);
+	panel->actLs = WMCreateList(actions);
 	WMSetListUserDrawProc(panel->actLs, paintItem);
+	WMSetListUserDrawItemHeight(panel->actLs, rowHeight);
 	WMHangData(panel->actLs, panel);
 
 	qsort(keyOptions, wlengthof(keyOptions), sizeof(keyOptions[0]), cmpKeyOptions);
 	for (i = 0; i < wlengthof(keyOptions); i++) {
 		WMAddListItem(panel->actLs, _(keyOptions[i].title));
+		listWidth = WMAX(listWidth, WMWidthOfString(panel->font, _(keyOptions[i].title),
+							  strlen(_(keyOptions[i].title))));
 	}
 	WMSetListAction(panel->actLs, listClick, panel);
 
 	panel->actionCount = WMGetListNumberOfRows(panel->actLs);
 	panel->shortcuts = wmalloc(sizeof(char *) * panel->actionCount);
+	WPrefsPackLabel(actions, panel->actL, 2);
+	WMPackBoxSubview(actions, panel->actLs,
+			 wmksize(listWidth + panel->indicatorWidth + 24, rowHeight * 10 + 4), True, 0);
+	WMPackBoxSubview(panel->box, actions, WMGetBoxMinimumSize(actions), True, 12);
 
     /***************** Shortcut ****************/
 
-	panel->shoF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->shoF, 178, 214);
-	WMMoveWidget(panel->shoF, 333, 8);
-	WMSetFrameTitle(panel->shoF, _("Shortcut"));
+	shortcut = WPrefsCreateGroup(panel->box, _("Shortcut"));
+	panel->shoF = shortcut.frame;
 
-	panel->shoT = WMCreateTextField(panel->shoF);
-	WMResizeWidget(panel->shoT, 160, 20);
-	WMMoveWidget(panel->shoT, 9, 65);
+	panel->shoT = WMCreateTextField(shortcut.content);
+	fieldSize = WMGetTextFieldPreferredSize(panel->shoT, 20);
 	WMAddNotificationObserver(typedKeys, panel, WMTextDidChangeNotification, panel->shoT);
 
-	panel->cleB = WMCreateCommandButton(panel->shoF);
-	WMResizeWidget(panel->cleB, 75, 24);
-	WMMoveWidget(panel->cleB, 9, 95);
+	buttons = WMCreateBox(shortcut.content);
+	WMSetBoxHorizontal(buttons, True);
+	panel->cleB = WMCreateCommandButton(buttons);
 	WMSetButtonText(panel->cleB, _("Clear"));
 	WMSetButtonAction(panel->cleB, clearShortcut, panel);
+	clearSize = WMGetButtonPreferredSize(panel->cleB);
 
-	panel->defB = WMCreateCommandButton(panel->shoF);
-	WMResizeWidget(panel->defB, 75, 24);
-	WMMoveWidget(panel->defB, 94, 95);
+	panel->defB = WMCreateCommandButton(buttons);
+	WMSetButtonText(panel->defB, _("Cancel"));
+	cancelSize = WMGetButtonPreferredSize(panel->defB);
 	WMSetButtonText(panel->defB, _("Capture"));
+	captureSize = WMGetButtonPreferredSize(panel->defB);
+	captureSize.width = WMAX(captureSize.width, cancelSize.width);
+	captureSize.height = WMAX(captureSize.height, cancelSize.height);
 	WMSetButtonAction(panel->defB, captureClick, panel);
+	WMPackBoxSubview(buttons, panel->cleB, clearSize, True, 8);
+	WMPackBoxSubview(buttons, panel->defB, captureSize, True, 0);
+	editorWidth = WMAX(fieldSize.width, WMGetBoxMinimumSize(buttons).width);
+	WMPackBoxSubview(shortcut.content, panel->shoT, wmksize(editorWidth, fieldSize.height), False, 10);
+	WMPackBoxSubview(shortcut.content, buttons, WMGetBoxMinimumSize(buttons), False, 12);
 
-	panel->instructionsL = WMCreateLabel(panel->shoF);
-	WMResizeWidget(panel->instructionsL, 160, 55);
-	WMMoveWidget(panel->instructionsL, 9, 140);
+	panel->instructionsL = WMCreateLabel(shortcut.content);
 	WMSetLabelTextAlignment(panel->instructionsL, WACenter);
 	WMSetLabelWraps(panel->instructionsL, True);
-	WMSetLabelText(panel->instructionsL, _("Click on Capture to interactively define the shortcut key."));
-
-	WMMapSubwidgets(panel->shoF);
+	WMSetLabelText(panel->instructionsL, _(captureInstructions));
+	activeSize = WMGetLabelPreferredSizeForWidth(panel->instructionsL, editorWidth);
+	WMSetLabelText(panel->instructionsL, _(shortcutInstructions));
+	instructionsSize = WMGetLabelPreferredSizeForWidth(panel->instructionsL, editorWidth);
+	instructionsSize.height = WMAX(instructionsSize.height, activeSize.height);
+	WMPackBoxSubview(shortcut.content, panel->instructionsL, instructionsSize, False, 0);
+	spacer = WMCreateBox(shortcut.content);
+	WMPackBoxSubview(shortcut.content, spacer, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(panel->box, &shortcut, False, 0);
+	WMMapSubwidgets(buttons);
+	WMMapSubwidgets(actions);
 
 	WMReleaseFont(boldFont);
 
@@ -762,6 +788,7 @@ Panel *InitKeyboardShortcuts(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);
