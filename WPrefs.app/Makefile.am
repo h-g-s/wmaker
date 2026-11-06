@@ -78,7 +78,7 @@ WPrefs_LDADD = \
 	@FCLIBS@ \
 	@INTLIBS@
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test
 font_controls_test_SOURCES = font_controls_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 font_controls_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 font_controls_test_LDADD = $(WPrefs_LDADD)
@@ -97,11 +97,15 @@ configurations_test_LDADD = $(WPrefs_LDADD)
 keyboard_shortcuts_test_SOURCES = keyboard_shortcuts_test.c PanelLayout.c PanelLayout.h
 keyboard_shortcuts_test_CPPFLAGS = $(AM_CPPFLAGS)
 keyboard_shortcuts_test_LDADD = $(WPrefs_LDADD)
+hot_corner_test_SOURCES = hot_corner_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
+hot_corner_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
+hot_corner_test_LDADD = $(WPrefs_LDADD)
 
-check-local: font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test
+check-local: font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test
 	./font_controls_test || test $$? -eq 77
 	./window_handling_test || test $$? -eq 77
 	./icons_test || test $$? -eq 77
 	./paths_test || test $$? -eq 77
 	./configurations_test || test $$? -eq 77
 	./keyboard_shortcuts_test || test $$? -eq 77
+	./hot_corner_test || test $$? -eq 77

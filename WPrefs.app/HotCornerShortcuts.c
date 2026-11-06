@@ -19,19 +19,15 @@
  */
 
 #include "WPrefs.h"
+#include "FontControls.h"
+#include "PanelLayout.h"
 
 typedef struct _Panel {
 	WMBox *box;
-
 	char *sectionName;
-
 	char *description;
-
 	CallbackRec callbacks;
-
 	WMWidget *parent;
-	WMPixmap *icon;
-	Pixmap quarter[4];
 
 	WMFrame *hcF;
 	WMButton *hcB;
@@ -45,420 +41,300 @@ typedef struct _Panel {
 	WMButton *hcdelayB[5];
 	WMTextField *hcdelayT;
 	WMLabel *hcdelayL;
-	WMLabel *icornerL;
+	WMLabel *icornerL[4];
 
 	WMFrame *hcactionsF;
 	WMTextField *hcactionsT[4];
-
-	char hotcornerDelaySelected;
+	Bool hotcornerDelaySelected;
 } _Panel;
 
-#define ICON_FILE	"hotcorners"
+#define ICON_FILE "hotcorners"
 
-#define DELAY_ICON "timer%i"
-#define DELAY_ICON_S "timer%is"
+static const int delayValues[] = { 0, 250, 500, 750, 1000 };
 
-static void edgeCallback(WMWidget * w, void *data)
+static void edgeCallback(WMWidget *w, void *data)
 {
-	_Panel *panel = (_Panel *) data;
+	_Panel *panel = data;
 	char buffer[64];
-	int i;
+	int value = WMGetSliderValue(panel->hceS);
 
-	/* Parameter not used, but tell the compiler that it is ok */
-	(void) w;
-
-	i = WMGetSliderValue(panel->hceS);
-
-	if (i == 0)
-		sprintf(buffer, _("OFF"));
-	else if (i == 1)
-		sprintf(buffer, _("1 pixel"));
-	else if (i <= 4)
-		/* 2-4 */
-		sprintf(buffer, _("%i pixels"), i);
+	(void)w;
+	if (value == 0)
+		snprintf(buffer, sizeof(buffer), "%s", _("OFF"));
+	else if (value == 1)
+		snprintf(buffer, sizeof(buffer), "%s", _("1 pixel"));
 	else
-		/* >4 */
-		sprintf(buffer, _("%i pixels "), i);	/* note space! */
+		snprintf(buffer, sizeof(buffer), _("%i pixels"), value);
 	WMSetLabelText(panel->hceL, buffer);
 }
 
-static void showData(_Panel * panel)
+static void showData(_Panel *panel)
 {
-	int i;
+	int value = GetObjectForKey("HotCornerDelay") ? GetIntegerForKey("HotCornerDelay") : 250;
 	char buffer[32];
 	WMPropList *array;
 
-	if (!GetObjectForKey("HotCornerDelay"))
-		i = 250;
-	else
-		i = GetIntegerForKey("HotCornerDelay");
-	sprintf(buffer, "%i", i);
+	snprintf(buffer, sizeof(buffer), "%i", value);
 	WMSetTextFieldText(panel->hcdelayT, buffer);
-
-	switch (i) {
-	case 0:
-		WMPerformButtonClick(panel->hcdelayB[0]);
-		break;
-	case 250:
-		WMPerformButtonClick(panel->hcdelayB[1]);
-		break;
-	case 500:
-		WMPerformButtonClick(panel->hcdelayB[2]);
-		break;
-	case 750:
-		WMPerformButtonClick(panel->hcdelayB[3]);
-		break;
-	case 1000:
-		WMPerformButtonClick(panel->hcdelayB[4]);
-		break;
+	panel->hotcornerDelaySelected = False;
+	for (int i = 0; i < wlengthof(panel->hcdelayB); i++)
+		WMSetButtonSelected(panel->hcdelayB[i], False);
+	for (int i = 0; i < wlengthof(delayValues); i++) {
+		if (value == delayValues[i]) {
+			WMSetButtonSelected(panel->hcdelayB[i], True);
+			panel->hotcornerDelaySelected = True;
+		}
 	}
 
-	i = GetIntegerForKey("HotCornerEdge");
-	i = i < 0 ? 2 : i;
-	i = i > 10 ? 10 : i;
-	WMSetSliderValue(panel->hceS, i);
+	value = GetIntegerForKey("HotCornerEdge");
+	WMSetSliderValue(panel->hceS, value < 0 ? 2 : WMIN(value, 10));
 	edgeCallback(NULL, panel);
-
 	WMSetButtonSelected(panel->hcB, GetBoolForKey("HotCorners"));
 
-        array = GetObjectForKey("HotCornerActions");
-	if (array && (!WMIsPLArray(array) || WMGetPropListItemCount(array) != sizeof(panel->hcactionsT) / sizeof(WMTextField *))) {
-		wwarning(_("invalid data in option HotCornerActions."));
-	} else {
-		if (array) {
-			for (i = 0; i < sizeof(panel->hcactionsT) / sizeof(WMTextField *); i++)
-				if (strcasecmp(WMGetFromPLString(WMGetFromPLArray(array, i)), "None") != 0)
-					WMSetTextFieldText(panel->hcactionsT[i], WMGetFromPLString(WMGetFromPLArray(array, i)));
+	for (int i = 0; i < wlengthof(panel->hcactionsT); i++)
+		WMSetTextFieldText(panel->hcactionsT[i], NULL);
+	array = GetObjectForKey("HotCornerActions");
+	if (array) {
+		if (!WMIsPLArray(array) || WMGetPropListItemCount(array) != wlengthof(panel->hcactionsT)) {
+			wwarning(_("invalid data in option HotCornerActions."));
+			return;
+		}
+		for (int i = 0; i < wlengthof(panel->hcactionsT); i++)
+			if (!WMIsPLString(WMGetFromPLArray(array, i))) {
+				wwarning(_("invalid data in option HotCornerActions."));
+				return;
+			}
+		for (int i = 0; i < wlengthof(panel->hcactionsT); i++) {
+			char *action = WMGetFromPLString(WMGetFromPLArray(array, i));
+
+			if (strcasecmp(action, "None") != 0)
+				WMSetTextFieldText(panel->hcactionsT[i], action);
 		}
 	}
 }
 
-static void storeData(_Panel * panel)
+static void storeData(_Panel *panel)
 {
-	WMPropList *list;
-	WMPropList *tmp;
-	char *str;
-	int i;
+	WMPropList *list, *item;
+	char *text;
+	int value;
 
 	SetBoolForKey(WMGetButtonSelected(panel->hcB), "HotCorners");
-
-	str = WMGetTextFieldText(panel->hcdelayT);
-	if (sscanf(str, "%i", &i) != 1)
-		i = 0;
-	SetIntegerForKey(i, "HotCornerDelay");
-	free(str);
-
-	SetIntegerForKey(WMGetSliderValue(panel->hceS), "HotCornerEdge");	
+	text = WMGetTextFieldText(panel->hcdelayT);
+	if (sscanf(text, "%i", &value) != 1)
+		value = 0;
+	SetIntegerForKey(value, "HotCornerDelay");
+	wfree(text);
+	SetIntegerForKey(WMGetSliderValue(panel->hceS), "HotCornerEdge");
 
 	list = WMCreatePLArray(NULL, NULL);
-	for (i = 0; i < sizeof(panel->hcactionsT) / sizeof(WMTextField *); i++) {
-		str = WMGetTextFieldText(panel->hcactionsT[i]);
-		if (strlen(str) == 0)
-			str = "None";
-		tmp = WMCreatePLString(str);
-		WMAddToPLArray(list, tmp);
+	for (int i = 0; i < wlengthof(panel->hcactionsT); i++) {
+		text = WMGetTextFieldText(panel->hcactionsT[i]);
+		item = WMCreatePLString(*text ? text : "None");
+		wfree(text);
+		WMAddToPLArray(list, item);
+		WMReleasePropList(item);
 	}
 	SetObjectForKey(list, "HotCornerActions");
+	WMReleasePropList(list);
 }
 
-static void pushDelayButton(WMWidget * w, void *data)
+static void pushDelayButton(WMWidget *w, void *data)
 {
-	_Panel *panel = (_Panel *) data;
+	_Panel *panel = data;
+	char buffer[32];
 
-	panel->hotcornerDelaySelected = 1;
-	if (w == panel->hcdelayB[0]) {
-		WMSetTextFieldText(panel->hcdelayT, "0");
-	} else if (w == panel->hcdelayB[1]) {
-		WMSetTextFieldText(panel->hcdelayT, "250");
-	} else if (w == panel->hcdelayB[2]) {
-		WMSetTextFieldText(panel->hcdelayT, "500");
-	} else if (w == panel->hcdelayB[3]) {
-		WMSetTextFieldText(panel->hcdelayT, "700");
-	} else if (w == panel->hcdelayB[4]) {
-		WMSetTextFieldText(panel->hcdelayT, "1000");
-	}
+	for (int i = 0; i < wlengthof(delayValues); i++)
+		if (w == panel->hcdelayB[i]) {
+			snprintf(buffer, sizeof(buffer), "%i", delayValues[i]);
+			WMSetTextFieldText(panel->hcdelayT, buffer);
+			panel->hotcornerDelaySelected = True;
+			break;
+		}
 }
 
-static void delayTextChanged(void *observerData, WMNotification * notification)
+static void delayTextChanged(void *observerData, WMNotification *notification)
 {
-	_Panel *panel = (_Panel *) observerData;
-	int i;
+	_Panel *panel = observerData;
 
-	/* Parameter not used, but tell the compiler that it is ok */
-	(void) notification;
-
+	(void)notification;
 	if (panel->hotcornerDelaySelected) {
-		for (i = 0; i < 5; i++) {
+		for (int i = 0; i < wlengthof(panel->hcdelayB); i++)
 			WMSetButtonSelected(panel->hcdelayB[i], False);
-		}
-		panel->hotcornerDelaySelected = 0;
+		panel->hotcornerDelaySelected = False;
 	}
 }
 
-static void createPanel(Panel * p)
+static void setCornerImage(WMLabel *label, WMFont *font, RImage *source, int corner)
 {
-	_Panel *panel = (_Panel *) p;
-	int i;
-	char *buf1, *buf2;
-	WMColor *color;
-	WMFont *font;
-	char *path;
-	RImage *xis = NULL;
-	WMScreen *scr = WMWidgetScreen(panel->parent);
-	RContext *rc = WMScreenRContext(scr);
-	GC gc = XCreateGC(scr->display, WMWidgetXID(panel->parent), 0, NULL);
+	RImage *image, *scaled;
+	WMPixmap *pixmap;
+	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(label));
+	int width = source->width / 2, height = source->height / 2;
+	int unit = WMAX(17, WMFontHeight(font));
 
-	path = LocateImage(ICON_FILE);
-	if (path) {
-		xis = RLoadImage(rc, path, 0);
-		if (!xis) {
-			wwarning(_("could not load image file %s"), path);
-		}
-		wfree(path);
+	image = RGetSubImage(source, (corner % 2) * width, (corner / 2) * height, width, height);
+	if (!image)
+		goto failed;
+	if (unit > 17) {
+		RCombineImageWithColor(image, &background);
+		scaled = RSmoothScaleImage(image, width * unit / 17, height * unit / 17);
+		RReleaseImage(image);
+		image = scaled;
+		if (!image)
+			goto failed;
 	}
+	pixmap = WMCreatePixmapFromRImage(WMWidgetScreen(label), image, 127);
+	RReleaseImage(image);
+	if (!pixmap)
+		goto failed;
+	WMSetLabelImage(label, pixmap);
+	WMReleasePixmap(pixmap);
+	return;
+failed:
+	wwarning(_("could not resize preference preview: %s"), RMessageForError(RErrorCode));
+}
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+static void createPanel(Panel *p)
+{
+	_Panel *panel = (_Panel *)p;
+	WMScreen *screen = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(screen);
+	WMColor *color = WMDarkGrayColor(screen);
+	WPrefsGroup enable, edge, instructions, delay, actions;
+	WMBox *columns, *left, *right, *row;
+	WMSize labelSize, size;
+	int unit = WMAX(17, WMFontHeight(font));
+	char *path;
+	RImage *image = NULL;
 
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
-    /***************** Hot Corner lelf side frames *****************/
-	panel->hcF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->hcF, 240, 53);
-	WMMoveWidget(panel->hcF, 15, 17);
-
-	panel->hcB = WMCreateSwitchButton(panel->hcF);
-	WMResizeWidget(panel->hcB, 150, 30);
-	WMMoveWidget(panel->hcB, 15, 12);
+	enable = WPrefsCreateGroup(left, "");
+	panel->hcF = enable.frame;
+	panel->hcB = WMCreateSwitchButton(enable.content);
 	WMSetButtonText(panel->hcB, _("Enable Hot Corners"));
+	WPrefsPackButton(enable.content, panel->hcB, 0);
+	WPrefsPackGroup(left, &enable, False, 12);
 
-	WMMapSubwidgets(panel->hcF);
-
-	panel->hceF = WMCreateFrame(panel->box);
-	WMSetFrameTitle(panel->hceF, _("Hot Corner Edge"));
-	WMResizeWidget(panel->hceF, 240, 40);
-	WMMoveWidget(panel->hceF, 15, 77);
-
-	panel->hceS = WMCreateSlider(panel->hceF);
-	WMResizeWidget(panel->hceS, 80, 15);
-	WMMoveWidget(panel->hceS, 15, 18);
+	edge = WPrefsCreateGroup(left, _("Hot Corner Edge"));
+	panel->hceF = edge.frame;
+	row = WMCreateBox(edge.content);
+	WMSetBoxHorizontal(row, True);
+	panel->hceS = WMCreateSlider(row);
 	WMSetSliderMinValue(panel->hceS, 2);
 	WMSetSliderMaxValue(panel->hceS, 10);
 	WMSetSliderAction(panel->hceS, edgeCallback, panel);
-
-	panel->hceL = WMCreateLabel(panel->hceF);
-	WMResizeWidget(panel->hceL, 100, 15);
-	WMMoveWidget(panel->hceL, 105, 18);
-
-	WMMapSubwidgets(panel->hceF);
-
-	panel->hcdescF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->hcdescF, 240, 95);
-	WMMoveWidget(panel->hcdescF, 15, 130);
-
-	panel->hcdescL = WMCreateLabel(panel->hcdescF);
-	WMResizeWidget(panel->hcdescL, 200, 70);
-	WMMoveWidget(panel->hcdescL, 15, 10);
-	WMSetLabelText(panel->hcdescL,
-		       _("Instructions:\n\n"
-			 " - assign command to corner\n"
-			 " - or leave it empty\n"));
-
-	WMMapSubwidgets(panel->hcdescF);
-
-    /***************** Hot Corner Action Delay *****************/
-	panel->hcdelayF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->hcdelayF, 245, 60);
-	WMMoveWidget(panel->hcdelayF, 265, 10);
-
-	WMSetFrameTitle(panel->hcdelayF, _("Hot Corner Delay"));
-
-	buf1 = wmalloc(strlen(DELAY_ICON) + 1);
-	buf2 = wmalloc(strlen(DELAY_ICON_S) + 1);
-
-	for (i = 0; i < 5; i++) {
-		char *path;
-
-		panel->hcdelayB[i] = WMCreateCustomButton(panel->hcdelayF, WBBStateChangeMask);
-		WMResizeWidget(panel->hcdelayB[i], 25, 25);
-		WMMoveWidget(panel->hcdelayB[i], 12 + (30 * i), 25);
-		WMSetButtonBordered(panel->hcdelayB[i], False);
-		WMSetButtonImagePosition(panel->hcdelayB[i], WIPImageOnly);
-		WMSetButtonAction(panel->hcdelayB[i], pushDelayButton, panel);
-		if (i > 0)
-			WMGroupButtons(panel->hcdelayB[0], panel->hcdelayB[i]);
-		sprintf(buf1, DELAY_ICON, i);
-		sprintf(buf2, DELAY_ICON_S, i);
-		path = LocateImage(buf1);
-		if (path) {
-			panel->icon = WMCreatePixmapFromFile(scr, path);
-			if (panel->icon) {
-				WMSetButtonImage(panel->hcdelayB[i], panel->icon);
-				WMReleasePixmap(panel->icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-		path = LocateImage(buf2);
-		if (path) {
-			panel->icon = WMCreatePixmapFromFile(scr, path);
-			if (panel->icon) {
-				WMSetButtonAltImage(panel->hcdelayB[i], panel->icon);
-				WMReleasePixmap(panel->icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
+	WMPackBoxSubview(row, panel->hceS, wmksize(100 * unit / 17, 20 * unit / 17), True, 10);
+	panel->hceL = WMCreateLabel(row);
+	labelSize = wmksize(1, 1);
+	for (int i = 2; i <= 10; i++) {
+		WMSetSliderValue(panel->hceS, i);
+		edgeCallback(NULL, panel);
+		size = WMGetLabelPreferredSize(panel->hceL);
+		labelSize.width = WMAX(labelSize.width, size.width);
+		labelSize.height = WMAX(labelSize.height, size.height);
 	}
-	wfree(buf1);
-	wfree(buf2);
+	WMPackBoxSubview(row, panel->hceL, labelSize, False, 0);
+	WMPackBoxSubview(edge.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(left, &edge, False, 12);
 
-	panel->hcdelayT = WMCreateTextField(panel->hcdelayF);
+	instructions = WPrefsCreateGroup(left, "");
+	panel->hcdescF = instructions.frame;
+	panel->hcdescL = WMCreateLabel(instructions.content);
+	WMSetLabelWraps(panel->hcdescL, False);
+	WMSetLabelText(panel->hcdescL, _("Instructions:\n\n"
+					" - assign command to corner\n"
+					" - or leave it empty\n"));
+	WPrefsPackLabel(instructions.content, panel->hcdescL, 0);
+	row = WMCreateBox(instructions.content);
+	WMPackBoxSubview(instructions.content, row, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(left, &instructions, True, 0);
 
-	WMResizeWidget(panel->hcdelayT, 36, 20);
-	WMMoveWidget(panel->hcdelayT, 165, 28);
+	delay = WPrefsCreateGroup(right, _("Hot Corner Delay"));
+	panel->hcdelayF = delay.frame;
+	row = WMCreateBox(delay.content);
+	WMSetBoxHorizontal(row, True);
+	for (int i = 0; i < wlengthof(panel->hcdelayB); i++) {
+		panel->hcdelayB[i] = WMCreateCustomButton(row, WBBStateChangeMask);
+		WPrefsSetClockButtonFont(panel->hcdelayB[i], font, i);
+		WMSetButtonAction(panel->hcdelayB[i], pushDelayButton, panel);
+		if (i)
+			WMGroupButtons(panel->hcdelayB[0], panel->hcdelayB[i]);
+		WMPackBoxSubview(row, panel->hcdelayB[i], WMGetViewSize(WMWidgetView(panel->hcdelayB[i])),
+				 False, i == 4 ? 12 : 2);
+	}
+	panel->hcdelayT = WMCreateTextField(row);
+	WMPackBoxSubview(row, panel->hcdelayT, WMGetTextFieldPreferredSize(panel->hcdelayT, 5), False, 8);
 	WMAddNotificationObserver(delayTextChanged, panel, WMTextDidChangeNotification, panel->hcdelayT);
-
-	panel->hcdelayL = WMCreateLabel(panel->hcdelayF);
-	WMResizeWidget(panel->hcdelayL, 36, 16);
-	WMMoveWidget(panel->hcdelayL, 205, 32);
+	panel->hcdelayL = WMCreateLabel(row);
 	WMSetLabelText(panel->hcdelayL, _("ms"));
-
-	color = WMDarkGrayColor(scr);
-	font = WMSystemFontOfSize(scr, 10);
-
 	WMSetLabelTextColor(panel->hcdelayL, color);
-	WMSetLabelFont(panel->hcdelayL, font);
+	WPrefsPackLabel(row, panel->hcdelayL, 0);
+	WMPackBoxSubview(delay.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(right, &delay, False, 12);
 
+	actions = WPrefsCreateGroup(right, _("Hot Corner Actions"));
+	panel->hcactionsF = actions.frame;
+	path = LocateImage(ICON_FILE);
+	if (path) {
+		image = RLoadImage(WMScreenRContext(screen), path, 0);
+		if (!image)
+			wwarning(_("could not load image file %s"), path);
+		wfree(path);
+	}
+	for (int i = 0; i < wlengthof(panel->hcactionsT); i++) {
+		row = WMCreateBox(actions.content);
+		WMSetBoxHorizontal(row, True);
+		panel->icornerL[i] = WMCreateLabel(row);
+		WMSetLabelImagePosition(panel->icornerL[i], WIPImageOnly);
+		if (image)
+			setCornerImage(panel->icornerL[i], font, image, i);
+		size = WMGetLabelPreferredSize(panel->icornerL[i]);
+		size.width = WMAX(size.width, 24 * unit / 17);
+		size.height = WMAX(size.height, 24 * unit / 17);
+		WMPackBoxSubview(row, panel->icornerL[i], size, False, 10);
+		panel->hcactionsT[i] = WMCreateTextField(row);
+		WMPackBoxSubview(row, panel->hcactionsT[i], WMGetTextFieldPreferredSize(panel->hcactionsT[i], 24),
+				 True, 0);
+		WMPackBoxSubview(actions.content, row, WMGetBoxMinimumSize(row), False, i == 3 ? 0 : 8);
+		WMMapSubwidgets(row);
+	}
+	if (image)
+		RReleaseImage(image);
+	row = WMCreateBox(actions.content);
+	WMPackBoxSubview(actions.content, row, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(right, &actions, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
 	WMReleaseColor(color);
 	WMReleaseFont(font);
-
-	WMMapSubwidgets(panel->hcdelayF);
-
-    /***************** Set Hot Corner Actions ****************/
-	panel->hcactionsF = WMCreateFrame(panel->box);
-	WMSetFrameTitle(panel->hcactionsF, _("Hot Corner Actions"));
-	WMResizeWidget(panel->hcactionsF, 245, 148);
-	WMMoveWidget(panel->hcactionsF, 265, 77);
-
-	panel->icornerL = WMCreateLabel(panel->hcactionsF);
-	WMResizeWidget(panel->icornerL, 24, 24);
-	WMMoveWidget(panel->icornerL, 10, 18);
-	WMSetLabelImagePosition(panel->icornerL, WIPImageOnly);
-	CreateImages(scr, rc, xis, ICON_FILE, &panel->icon, NULL);
-	if (panel->icon)
-	{
-		WMPixmap *nicon;
-
-		panel->quarter[0] = XCreatePixmap(scr->display, WMWidgetXID(panel->parent), panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		XCopyArea(scr->display, WMGetPixmapXID(panel->icon), panel->quarter[0], gc, 0, 0, panel->icon->width/2, panel->icon->height/2,  0, 0);
-		nicon = WMCreatePixmapFromXPixmaps(scr, panel->quarter[0], WMGetPixmapMaskXID(panel->icon),
-                                     panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		WMSetLabelImage(panel->icornerL, nicon);
-		WMReleasePixmap(nicon);
-	}
-
-	panel->hcactionsT[0] = WMCreateTextField(panel->hcactionsF);
-	WMResizeWidget(panel->hcactionsT[0], 180, 20);
-	WMMoveWidget(panel->hcactionsT[0], 50, 20);
-
-	panel->icornerL = WMCreateLabel(panel->hcactionsF);
-	WMResizeWidget(panel->icornerL, 24, 24);
-	WMMoveWidget(panel->icornerL, 10, 48);
-	WMSetLabelImagePosition(panel->icornerL, WIPImageOnly);
-	if (panel->icon)
-	{
-		WMPixmap *nicon;
-
-		panel->quarter[1] = XCreatePixmap(scr->display, WMWidgetXID(panel->parent), panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		XCopyArea(scr->display, WMGetPixmapXID(panel->icon), panel->quarter[1], gc, panel->icon->width/2, 0, panel->icon->width/2, panel->icon->height/2,  0, 0);
-		nicon = WMCreatePixmapFromXPixmaps(scr, panel->quarter[1], WMGetPixmapMaskXID(panel->icon),
-                                     panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		WMSetLabelImage(panel->icornerL, nicon);
-		WMReleasePixmap(nicon);
-	}
-
-	panel->hcactionsT[1] = WMCreateTextField(panel->hcactionsF);
-	WMResizeWidget(panel->hcactionsT[1], 180, 20);
-	WMMoveWidget(panel->hcactionsT[1], 50, 50);
-
-	panel->icornerL = WMCreateLabel(panel->hcactionsF);
-	WMResizeWidget(panel->icornerL, 24, 24);
-	WMMoveWidget(panel->icornerL, 10, 78);
-	WMSetLabelImagePosition(panel->icornerL, WIPImageOnly);
-	if (panel->icon)
-	{
-		WMPixmap *nicon;
-
-		panel->quarter[2] = XCreatePixmap(scr->display, WMWidgetXID(panel->parent), panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		XCopyArea(scr->display, WMGetPixmapXID(panel->icon), panel->quarter[2], gc, 0, panel->icon->height/2, panel->icon->width/2, panel->icon->height/2,  0, 0);
-		nicon = WMCreatePixmapFromXPixmaps(scr, panel->quarter[2], WMGetPixmapMaskXID(panel->icon),
-                                     panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		WMSetLabelImage(panel->icornerL, nicon);
-		WMReleasePixmap(nicon);
-	}
-	panel->hcactionsT[2] = WMCreateTextField(panel->hcactionsF);
-	WMResizeWidget(panel->hcactionsT[2], 180, 20);
-	WMMoveWidget(panel->hcactionsT[2], 50, 80);
-
-	panel->icornerL = WMCreateLabel(panel->hcactionsF);
-	WMResizeWidget(panel->icornerL, 24, 24);
-	WMMoveWidget(panel->icornerL, 10, 108);
-	WMSetLabelImagePosition(panel->icornerL, WIPImageOnly);
-	if (panel->icon)
-	{
-		WMPixmap *nicon;
-
-		panel->quarter[3] = XCreatePixmap(scr->display, WMWidgetXID(panel->parent), panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		XCopyArea(scr->display, WMGetPixmapXID(panel->icon), panel->quarter[3], gc, panel->icon->width/2, panel->icon->height/2, panel->icon->width/2, panel->icon->height/2,  0, 0);
-		nicon = WMCreatePixmapFromXPixmaps(scr, panel->quarter[3], WMGetPixmapMaskXID(panel->icon),
-                                     panel->icon->width/2, panel->icon->height/2, WMScreenDepth(scr));
-		WMSetLabelImage(panel->icornerL, nicon);
-		WMReleasePixmap(nicon);
-	}
-
-	panel->hcactionsT[3] = WMCreateTextField(panel->hcactionsF);
-	WMResizeWidget(panel->hcactionsT[3], 180, 20);
-	WMMoveWidget(panel->hcactionsT[3], 50, 107);
-
-	WMMapSubwidgets(panel->hcactionsF);
-
-	if (xis)
-		RReleaseImage(xis);
-	XFreeGC(scr->display, gc);
-
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
-
 	showData(panel);
-}
-static void prepareForClose(_Panel *panel)
-{
-	int i;
-	WMScreen *scr = WMWidgetScreen(panel->parent);
-
-	WMReleasePixmap(panel->icon);
-	for (i = 0; i < sizeof(panel->quarter) / sizeof(Pixmap); i++)
-		XFreePixmap(scr->display, panel->quarter[i]);
 }
 
 Panel *InitHotCornerShortcuts(WMWidget *parent)
 {
-	_Panel *panel;
-
-	panel = wmalloc(sizeof(_Panel));
+	_Panel *panel = wmalloc(sizeof(_Panel));
 
 	panel->sectionName = _("Hot Corner Shortcut Preferences");
 	panel->description = _("Choose actions to perform when you move the\n"
 			       "mouse pointer to the screen corners.");
 	panel->parent = parent;
-
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
-	panel->callbacks.prepareForClose = prepareForClose;
-
 	AddSection(panel, ICON_FILE);
-
 	return panel;
 }
