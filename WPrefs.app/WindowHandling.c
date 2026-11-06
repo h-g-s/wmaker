@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 typedef struct _Panel {
 	WMBox *box;
@@ -116,8 +118,8 @@ static void sliderCallback(WMWidget * w, void *data)
 	x = WMGetSliderValue(panel->hsli);
 	y = WMGetSliderValue(panel->vsli);
 
-	rx = x * (WMWidgetWidth(panel->porigF) - 3) / swidth + 2;
-	ry = y * (WMWidgetHeight(panel->porigF) - 3) / sheight + 2;
+	rx = x * (WMWidgetWidth(panel->porigF) - WMWidgetWidth(panel->porigW) - 4) / swidth + 2;
+	ry = y * (WMWidgetHeight(panel->porigF) - WMWidgetHeight(panel->porigW) - 4) / sheight + 2;
 	WMMoveWidget(panel->porigW, rx, ry);
 
 	sprintf(buffer, "(%i,%i)", x, y);
@@ -281,305 +283,267 @@ static void storeData(_Panel * panel)
 	WMReleasePropList(arr);
 }
 
-static void createPanel(Panel * p)
+static WMPixmap *loadPreview(WMScreen *screen, const char *name)
 {
-	_Panel *panel = (Panel *) p;
-	WMScreen *scr = WMWidgetScreen(panel->parent);
-	WMColor *color;
-	WMPixmap *pixmap;
-	int width, height;
-	int swidth, sheight;
-	char *path;
-	WMBox *hbox;
+	char *path = LocateImage(name);
+	WMPixmap *image = NULL;
+
+	if (path) {
+		image = WMCreatePixmapFromFile(screen, path);
+		if (!image)
+			wwarning(_("could not load icon %s"), path);
+		wfree(path);
+	} else {
+		wwarning(_("could not locate icon %s"), name);
+	}
+	return image;
+}
+
+static void createOpaqueButton(WMButton *button, WMFont *font, const char *normal, const char *selected)
+{
+	WMScreen *screen = WMWidgetScreen(button);
+	WMPixmap *image = loadPreview(screen, normal);
+	WMPixmap *altImage = loadPreview(screen, selected);
+
+	WPrefsSetPreviewButtonFont(button, font, image, altImage);
+	if (image)
+		WMReleasePixmap(image);
+	if (altImage)
+		WMReleasePixmap(altImage);
+}
+
+static void packValueSlider(WMBox *parent, WMSlider *slider, WMLabel *label, WMFont *font, int maximum)
+{
+	WMSize size = wmksize(0, 0), current;
+	char buffer[32];
 	int i;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
-	WMSetBoxHorizontal(panel->box, False);
-	WMSetBoxBorderWidth(panel->box, 8);
+	/* Reserve every value, including translated OFF, before callbacks change the label. */
+	for (i = 0; i <= maximum; i++) {
+		sprintf(buffer, "%d", i);
+		WMSetLabelText(label, i ? buffer : _("OFF"));
+		current = WMGetLabelPreferredSize(label);
+		size.width = WMAX(size.width, current.width);
+		size.height = WMAX(size.height, current.height);
+	}
+	WMSetSliderFont(slider, font);
+	WMPackBoxSubview(parent, slider, WMGetSliderPreferredSize(slider), True, 8);
+	WMPackBoxSubview(parent, label, size, False, 0);
+}
 
-	hbox = WMCreateBox(panel->box);
-	WMSetBoxHorizontal(hbox, True);
-	WMAddBoxSubview(panel->box, WMWidgetView(hbox), False, True, 110, 0, 10);
+static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
+{
+	WMScreen *screen = WMWidgetScreen(panel->parent);
+	int swidth = WMScreenWidth(screen), sheight = WMScreenHeight(screen);
+	int scale = WMAX(17, WMFontHeight(font));
+	int width = 191 * scale / 17, height = 96 * scale / 17;
+	WMBox *row = WMCreateBox(group->content);
+	WMBox *diagram, *top, *bottom;
+	WMColor *color;
+	WMPixmap *image;
+	WMSize size;
+	char buffer[64];
 
-    /************** Window Placement ***************/
-	panel->placF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->placF, 222, 163);
-	WMMoveWidget(panel->placF, 8, 6);
-	WMSetFrameTitle(panel->placF, _("Window Placement"));
-	WMSetBalloonTextForView(_("How to place windows when they are first put\n"
-				  "on screen."), WMWidgetView(panel->placF));
-
-	panel->placP = WMCreatePopUpButton(panel->placF);
-	WMResizeWidget(panel->placP, 90, 20);
-	WMMoveWidget(panel->placP, 9, 19);
-
-	for (i = 0; i < wlengthof(window_placements); i++)
+	WMSetBoxHorizontal(row, True);
+	panel->placP = WMCreatePopUpButton(row);
+	for (int i = 0; i < wlengthof(window_placements); i++)
 		WMAddPopUpButtonItem(panel->placP, _(window_placements[i].label));
-
-	panel->porigL = WMCreateLabel(panel->placF);
-	WMResizeWidget(panel->porigL, 50, 20);
-	WMMoveWidget(panel->porigL, 100, 19);
-	WMSetLabelTextAlignment(panel->porigL, WARight);
+	WMPackBoxSubview(row, panel->placP, WMGetPopUpButtonPreferredSize(panel->placP), True, 8);
+	panel->porigL = WMCreateLabel(row);
 	WMSetLabelText(panel->porigL, _("Origin:"));
-
-	panel->porigvL = WMCreateLabel(panel->placF);
-	WMResizeWidget(panel->porigvL, 69, 20);
-	WMMoveWidget(panel->porigvL, 150, 19);
+	WPrefsPackLabel(row, panel->porigL, 4);
+	panel->porigvL = WMCreateLabel(row);
+	sprintf(buffer, "(%d,%d)", swidth, sheight);
+	WMSetLabelText(panel->porigvL, buffer);
 	WMSetLabelTextAlignment(panel->porigvL, WACenter);
+	WPrefsPackLabel(row, panel->porigvL, 0);
+	WMPackBoxSubview(group->content, row, WMGetBoxMinimumSize(row), False, 10);
+	WMMapSubwidgets(row);
 
-	color = WMCreateRGBColor(scr, 0x5100, 0x5100, 0x7100, True);
-	panel->porigF = WMCreateFrame(panel->placF);
+	if (swidth * height / sheight <= width)
+		width = swidth * height / sheight;
+	else
+		height = sheight * width / swidth;
+	diagram = WMCreateBox(group->content);
+	top = WMCreateBox(diagram);
+	WMSetBoxHorizontal(top, True);
+	panel->porigF = WMCreateFrame(top);
+	color = WMCreateRGBColor(screen, 0x5100, 0x5100, 0x7100, True);
 	WMSetWidgetBackgroundColor(panel->porigF, color);
 	WMReleaseColor(color);
 	WMSetFrameRelief(panel->porigF, WRSunken);
-
-	/*
-	 * There is an available area of 204 x 109, starting at x=9 y=45
-	 * We have to keep 12 pixels in each direction for the sliders,
-	 * and an extra pixel for spacing.
-	 * In this area, we want to have a rectangle with the same aspect
-	 * ratio as the screen.
-	 */
-	swidth = WidthOfScreen(DefaultScreenOfDisplay(WMScreenDisplay(scr)));
-	sheight = HeightOfScreen(DefaultScreenOfDisplay(WMScreenDisplay(scr)));
-
-	width = swidth * (109 - 13) / sheight;
-	if (width <= (204 - 13)) {
-		height = 109 - 13;
-	} else {
-		width = 204 - 13;
-		height = sheight * (204 - 13) / swidth;
-	}
-	WMResizeWidget(panel->porigF, width, height);
-	WMMoveWidget(panel->porigF, 9 + (204 - 13 - width) / 2, 45 + (109 - 13 - height) / 2);
-
 	panel->porigW = WMCreateLabel(panel->porigF);
-	WMMoveWidget(panel->porigW, 2, 2);
-	path = LocateImage(PLACEMENT_WINDOW_PIXMAP);
-	if (path) {
-		pixmap = WMCreatePixmapFromFile(scr, path);
-		if (pixmap) {
-			WMSize size;
+	image = loadPreview(screen, PLACEMENT_WINDOW_PIXMAP);
+	if (image && scale > 17) {
+		RImage *source = RCreateImageFromDrawable(WMScreenRContext(screen), image->pixmap, None);
+		RImage *scaled = source ? RSmoothScaleImage(source, image->width * scale / 17,
+							  image->height * scale / 17) : NULL;
+		WMPixmap *result = scaled ? WMCreatePixmapFromRImage(screen, scaled, 127) : NULL;
 
-			WMSetLabelImagePosition(panel->porigW, WIPImageOnly);
-			size = WMGetPixmapSize(pixmap);
-			WMSetLabelImage(panel->porigW, pixmap);
-			WMResizeWidget(panel->porigW, size.width, size.height);
-			WMReleasePixmap(pixmap);
-		} else {
-			wwarning(_("could not load icon %s"), path);
-		}
-		wfree(path);
-		if (!pixmap)
-			goto use_old_window_representation;
+		if (source)
+			RReleaseImage(source);
+		if (scaled)
+			RReleaseImage(scaled);
+		if (!result)
+			wwarning(_("could not scale placement preview: %s"), RMessageForError(RErrorCode));
+		WMReleasePixmap(image);
+		image = result;
+	}
+	if (image) {
+		WMSetLabelImagePosition(panel->porigW, WIPImageOnly);
+		WMSetLabelImage(panel->porigW, image);
+		size = WMGetPixmapSize(image);
+		WMReleasePixmap(image);
 	} else {
-	use_old_window_representation:
-		WMResizeWidget(panel->porigW, THUMB_SIZE, THUMB_SIZE);
+		size = wmksize(THUMB_SIZE * scale / 17, THUMB_SIZE * scale / 17);
 		WMSetLabelRelief(panel->porigW, WRRaised);
 	}
-
-	panel->hsli = WMCreateSlider(panel->placF);
-	WMResizeWidget(panel->hsli, width, 12);
-	WMMoveWidget(panel->hsli, 9 + (204 - 13 - width) / 2, 45 + (109 - 13 - height) / 2 + height + 1);
-	WMSetSliderAction(panel->hsli, sliderCallback, panel);
-	WMSetSliderMinValue(panel->hsli, 0);
-	WMSetSliderMaxValue(panel->hsli, swidth);
-
-	panel->vsli = WMCreateSlider(panel->placF);
-	WMResizeWidget(panel->vsli, 12, height);
-	WMMoveWidget(panel->vsli, 9 + (204 - 13 - width) / 2 + width + 1, 45 + (109 - 13 - height) / 2);
-	WMSetSliderAction(panel->vsli, sliderCallback, panel);
+	WMResizeWidget(panel->porigW, size.width, size.height);
+	width = WMAX(width, (int)size.width + 4);
+	height = WMAX(height, (int)size.height + 4);
+	WMPackBoxSubview(top, panel->porigF, wmksize(width, height), False, 2);
+	panel->vsli = WMCreateSlider(top);
+	WMSetSliderFont(panel->vsli, font);
+	size = WMGetSliderPreferredSize(panel->vsli);
 	WMSetSliderMinValue(panel->vsli, 0);
 	WMSetSliderMaxValue(panel->vsli, sheight);
-
+	WMSetSliderAction(panel->vsli, sliderCallback, panel);
+	WMPackBoxSubview(top, panel->vsli, wmksize(size.height, height), False, 0);
+	WMPackBoxSubview(diagram, top, WMGetBoxMinimumSize(top), False, 2);
+	bottom = WMCreateBox(diagram);
+	WMSetBoxHorizontal(bottom, True);
+	panel->hsli = WMCreateSlider(bottom);
+	WMSetSliderFont(panel->hsli, font);
+	WMSetSliderMinValue(panel->hsli, 0);
+	WMSetSliderMaxValue(panel->hsli, swidth);
+	WMSetSliderAction(panel->hsli, sliderCallback, panel);
+	WMPackBoxSubview(bottom, panel->hsli, wmksize(width, size.height), False, 0);
+	WMPackBoxSubview(diagram, bottom, WMGetBoxMinimumSize(bottom), False, 0);
+	WMPackBoxSubview(group->content, diagram, WMGetBoxMinimumSize(diagram), False, 0);
 	WMMapSubwidgets(panel->porigF);
+	WMMapSubwidgets(top);
+	WMMapSubwidgets(bottom);
+	WMMapSubwidgets(diagram);
+}
 
-	WMMapSubwidgets(panel->placF);
+static void createPanel(Panel *p)
+{
+	_Panel *panel = (_Panel *)p;
+	WMScreen *screen = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(screen);
+	WMBox *top, *left, *middle, *right, *row;
+	WPrefsGroup placement, resistance, resize, maximize, opaque, dragging;
 
-    /************** Opaque Move, Resize ***************/
-	panel->opaqF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->opaqF, 140, 118);
-	WMMoveWidget(panel->opaqF, 372, 103);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	top = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(top, True);
+	left = WMCreateBox(top);
+	middle = WMCreateBox(top);
+	right = WMCreateBox(top);
 
-	WMSetFrameTitle(panel->opaqF, _("Opaque Move/Resize"));
-	WMSetBalloonTextForView(_("Whether the window contents or only a frame should\n"
-				  "be displayed during a move or resize.\n"),
-				WMWidgetView(panel->opaqF));
+	placement = WPrefsCreateGroup(left, _("Window Placement"));
+	panel->placF = placement.frame;
+	WMSetBalloonTextForView(_("How to place windows when they are first put\n"
+				  "on screen."), WMWidgetView(panel->placF));
+	createPlacement(panel, &placement, font);
+	WPrefsPackGroup(left, &placement, True, 0);
 
-	panel->opaqB = WMCreateButton(panel->opaqF, WBTToggle);
-	WMResizeWidget(panel->opaqB, 54, 54);
-	WMMoveWidget(panel->opaqB, 11, 22);
-	WMSetButtonImagePosition(panel->opaqB, WIPImageOnly);
-
-	path = LocateImage(NON_OPAQUE_MOVE_PIXMAP);
-	if (path) {
-		pixmap = WMCreatePixmapFromFile(scr, path);
-		if (pixmap) {
-			WMSetButtonImage(panel->opaqB, pixmap);
-			WMReleasePixmap(pixmap);
-		} else {
-			wwarning(_("could not load icon %s"), path);
-		}
-		wfree(path);
-	}
-
-	path = LocateImage(OPAQUE_MOVE_PIXMAP);
-	if (path) {
-		pixmap = WMCreatePixmapFromFile(scr, path);
-		if (pixmap) {
-			WMSetButtonAltImage(panel->opaqB, pixmap);
-			WMReleasePixmap(pixmap);
-		} else {
-			wwarning(_("could not load icon %s"), path);
-		}
-		wfree(path);
-	}
-
-
-
-	panel->opaqresizeB = WMCreateButton(panel->opaqF, WBTToggle);
-	WMResizeWidget(panel->opaqresizeB, 54, 54);
-	WMMoveWidget(panel->opaqresizeB, 75, 22);
-	WMSetButtonImagePosition(panel->opaqresizeB, WIPImageOnly);
-
-	path = LocateImage(NON_OPAQUE_RESIZE_PIXMAP);
-	if (path) {
-		pixmap = WMCreatePixmapFromFile(scr, path);
-		if (pixmap) {
-			WMSetButtonImage(panel->opaqresizeB, pixmap);
-			WMReleasePixmap(pixmap);
-		} else {
-			wwarning(_("could not load icon %s"), path);
-		}
-		wfree(path);
-	}
-
-	path = LocateImage(OPAQUE_RESIZE_PIXMAP);
-	if (path) {
-		pixmap = WMCreatePixmapFromFile(scr, path);
-		if (pixmap) {
-			WMSetButtonAltImage(panel->opaqresizeB, pixmap);
-			WMReleasePixmap(pixmap);
-		} else {
-			wwarning(_("could not load icon %s"), path);
-		}
-		wfree(path);
-	}
-
-	panel->opaqkeybB = WMCreateSwitchButton(panel->opaqF);
-	WMResizeWidget(panel->opaqkeybB, 122, 25);
-	WMMoveWidget(panel->opaqkeybB, 11, 85);
-	WMSetButtonText(panel->opaqkeybB, _("by keyboard"));
-
-	WMSetBalloonTextForView(_("When selected, moving or resizing windows\n"
-				  "using keyboard shortcuts will also display its\n"
-				  "content instead of just a frame."), WMWidgetView(panel->opaqkeybB));
-
-	WMMapSubwidgets(panel->opaqF);
-
-
-    /**************** Account for Icon/Dock ***************/
-	panel->maxiF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->maxiF, 140, 92);
-	WMMoveWidget(panel->maxiF, 372, 6);
-	WMSetFrameTitle(panel->maxiF, _("When maximizing..."));
-
-	panel->maxiL = WMCreateLabel(panel->maxiF);
-	WMSetLabelText(panel->maxiL, _("...do not cover:"));
-	WMResizeWidget(panel->maxiL, 120, 20);
-	WMMoveWidget(panel->maxiL, 10, 16);
-
-	panel->miconB = WMCreateSwitchButton(panel->maxiF);
-	WMResizeWidget(panel->miconB, 120, 25);
-	WMMoveWidget(panel->miconB, 10, 36);
-	WMSetButtonText(panel->miconB, _("Icons"));
-
-	panel->mdockB = WMCreateSwitchButton(panel->maxiF);
-	WMResizeWidget(panel->mdockB, 120, 25);
-	WMMoveWidget(panel->mdockB, 10, 61);
-	WMSetButtonText(panel->mdockB, _("The dock"));
-
-	WMMapSubwidgets(panel->maxiF);
-
-    /**************** Resize with Mod+Wheel ***************/
-	panel->resizeF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->resizeF, 127, 66);
-	WMMoveWidget(panel->resizeF, 238, 103);
-	WMSetFrameTitle(panel->resizeF, _("Mod+Wheel"));
-
-	panel->resizeTextL = WMCreateLabel(panel->resizeF);
-	WMSetLabelText(panel->resizeTextL, _("Resize increment:"));
-	WMResizeWidget(panel->resizeTextL, 118, 20);
-	WMMoveWidget(panel->resizeTextL, 5, 16);
-
-	panel->resizeS = WMCreateSlider(panel->resizeF);
-	WMResizeWidget(panel->resizeS, 80, 15);
-	WMMoveWidget(panel->resizeS, 9, 40);
-	WMSetSliderMinValue(panel->resizeS, 0);
-	WMSetSliderMaxValue(panel->resizeS, 100);
-	WMSetSliderAction(panel->resizeS, resizeCallback, panel);
-
-	panel->resizeL = WMCreateLabel(panel->resizeF);
-	WMResizeWidget(panel->resizeL, 30, 15);
-	WMMoveWidget(panel->resizeL, 90, 40);
-
-	WMMapSubwidgets(panel->resizeF);
-
-    /**************** Edge Resistance  ****************/
-	panel->resF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->resF, 127, 92);
-	WMMoveWidget(panel->resF, 238, 6);
-	WMSetFrameTitle(panel->resF, _("Edge Resistance"));
-
+	resistance = WPrefsCreateGroup(middle, _("Edge Resistance"));
+	panel->resF = resistance.frame;
 	WMSetBalloonTextForView(_("Edge resistance will make windows `resist'\n"
 				  "being moved further for the defined threshold\n"
 				  "when moved against other windows or the edges\n"
 				  "of the screen."), WMWidgetView(panel->resF));
-
-	panel->resS = WMCreateSlider(panel->resF);
-	WMResizeWidget(panel->resS, 80, 15);
-	WMMoveWidget(panel->resS, 9, 20);
+	row = WMCreateBox(resistance.content);
+	WMSetBoxHorizontal(row, True);
+	panel->resS = WMCreateSlider(row);
 	WMSetSliderMinValue(panel->resS, 0);
 	WMSetSliderMaxValue(panel->resS, 80);
 	WMSetSliderAction(panel->resS, resistanceCallback, panel);
-
-	panel->resL = WMCreateLabel(panel->resF);
-	WMResizeWidget(panel->resL, 30, 15);
-	WMMoveWidget(panel->resL, 90, 22);
-
-	panel->resaB = WMCreateRadioButton(panel->resF);
-	WMMoveWidget(panel->resaB, 9, 39);
-	WMResizeWidget(panel->resaB, 107, 23);
+	panel->resL = WMCreateLabel(row);
+	packValueSlider(row, panel->resS, panel->resL, font, 80);
+	WMPackBoxSubview(resistance.content, row, WMGetBoxMinimumSize(row), False, 8);
+	WMMapSubwidgets(row);
+	panel->resaB = WMCreateRadioButton(resistance.content);
 	WMSetButtonText(panel->resaB, _("Resist"));
-
-	panel->resrB = WMCreateRadioButton(panel->resF);
-	WMMoveWidget(panel->resrB, 9, 62);
-	WMResizeWidget(panel->resrB, 107, 23);
+	panel->resrB = WMCreateRadioButton(resistance.content);
 	WMSetButtonText(panel->resrB, _("Attract"));
 	WMGroupButtons(panel->resrB, panel->resaB);
+	WPrefsPackButton(resistance.content, panel->resaB, 8);
+	WPrefsPackButton(resistance.content, panel->resrB, 0);
+	WPrefsPackGroup(middle, &resistance, False, 12);
 
-	WMMapSubwidgets(panel->resF);
+	resize = WPrefsCreateGroup(middle, _("Mod+Wheel"));
+	panel->resizeF = resize.frame;
+	panel->resizeTextL = WMCreateLabel(resize.content);
+	WMSetLabelText(panel->resizeTextL, _("Resize increment:"));
+	WPrefsPackLabel(resize.content, panel->resizeTextL, 8);
+	row = WMCreateBox(resize.content);
+	WMSetBoxHorizontal(row, True);
+	panel->resizeS = WMCreateSlider(row);
+	WMSetSliderMinValue(panel->resizeS, 0);
+	WMSetSliderMaxValue(panel->resizeS, 100);
+	WMSetSliderAction(panel->resizeS, resizeCallback, panel);
+	panel->resizeL = WMCreateLabel(row);
+	packValueSlider(row, panel->resizeS, panel->resizeL, font, 100);
+	WMPackBoxSubview(resize.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(middle, &resize, True, 0);
 
-    /**************** Dragging a Maximized Window ****************/
-	panel->dragmaxF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->dragmaxF, 357, 49);
-	WMMoveWidget(panel->dragmaxF, 8, 172);
-	WMSetFrameTitle(panel->dragmaxF, _("Dragging a maximized window..."));
+	maximize = WPrefsCreateGroup(right, _("When maximizing..."));
+	panel->maxiF = maximize.frame;
+	panel->maxiL = WMCreateLabel(maximize.content);
+	WMSetLabelText(panel->maxiL, _("...do not cover:"));
+	WPrefsPackLabel(maximize.content, panel->maxiL, 8);
+	panel->miconB = WMCreateSwitchButton(maximize.content);
+	WMSetButtonText(panel->miconB, _("Icons"));
+	panel->mdockB = WMCreateSwitchButton(maximize.content);
+	WMSetButtonText(panel->mdockB, _("The dock"));
+	WPrefsPackButton(maximize.content, panel->miconB, 8);
+	WPrefsPackButton(maximize.content, panel->mdockB, 0);
+	WPrefsPackGroup(right, &maximize, False, 12);
 
-	panel->dragmaxP = WMCreatePopUpButton(panel->dragmaxF);
-	WMResizeWidget(panel->dragmaxP, 328, 20);
-	WMMoveWidget(panel->dragmaxP, 15, 18);
+	opaque = WPrefsCreateGroup(right, _("Opaque Move/Resize"));
+	panel->opaqF = opaque.frame;
+	WMSetBalloonTextForView(_("Whether the window contents or only a frame should\n"
+				  "be displayed during a move or resize.\n"), WMWidgetView(panel->opaqF));
+	row = WMCreateBox(opaque.content);
+	WMSetBoxHorizontal(row, True);
+	panel->opaqB = WMCreateButton(row, WBTToggle);
+	createOpaqueButton(panel->opaqB, font, NON_OPAQUE_MOVE_PIXMAP, OPAQUE_MOVE_PIXMAP);
+	panel->opaqresizeB = WMCreateButton(row, WBTToggle);
+	createOpaqueButton(panel->opaqresizeB, font, NON_OPAQUE_RESIZE_PIXMAP, OPAQUE_RESIZE_PIXMAP);
+	WPrefsPackButton(row, panel->opaqB, 8);
+	WPrefsPackButton(row, panel->opaqresizeB, 0);
+	WMPackBoxSubview(opaque.content, row, WMGetBoxMinimumSize(row), False, 8);
+	WMMapSubwidgets(row);
+	panel->opaqkeybB = WMCreateSwitchButton(opaque.content);
+	WMSetButtonText(panel->opaqkeybB, _("by keyboard"));
+	WMSetBalloonTextForView(_("When selected, moving or resizing windows\n"
+				  "using keyboard shortcuts will also display its\n"
+				  "content instead of just a frame."), WMWidgetView(panel->opaqkeybB));
+	WPrefsPackButton(opaque.content, panel->opaqkeybB, 0);
+	WPrefsPackGroup(right, &opaque, True, 0);
+	WMPackBoxSubview(top, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(top, middle, WMGetBoxMinimumSize(middle), True, 12);
+	WMPackBoxSubview(top, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, top, WMGetBoxMinimumSize(top), True, 12);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(middle);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(top);
 
-	for (i = 0; i < wlengthof(drag_maximized_window_options); i++)
+	dragging = WPrefsCreateGroup(panel->box, _("Dragging a maximized window..."));
+	panel->dragmaxF = dragging.frame;
+	panel->dragmaxP = WMCreatePopUpButton(dragging.content);
+	for (int i = 0; i < wlengthof(drag_maximized_window_options); i++)
 		WMAddPopUpButtonItem(panel->dragmaxP, _(drag_maximized_window_options[i].label));
-
-	WMMapSubwidgets(panel->dragmaxF);
-
+	WMPackBoxSubview(dragging.content, panel->dragmaxP,
+			 WMGetPopUpButtonPreferredSize(panel->dragmaxP), False, 0);
+	WPrefsPackGroup(panel->box, &dragging, False, 0);
+	WMReleaseFont(font);
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
-
-	/* show the config data */
 	showData(panel);
 }
 
@@ -602,6 +566,7 @@ Panel *InitWindowHandling(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 	panel->callbacks.undoChanges = undo;
 
