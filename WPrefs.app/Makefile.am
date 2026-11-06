@@ -78,7 +78,9 @@ WPrefs_LDADD = \
 	@FCLIBS@ \
 	@INTLIBS@
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test
+menu_test_SOURCES = menu_test.c editmenu.h xmodifier.c PanelLayout.c PanelLayout.h
+menu_test_LDADD = $(WPrefs_LDADD)
 font_simple_test_SOURCES = font_simple_test.c PanelLayout.c PanelLayout.h
 font_simple_test_LDADD = $(WPrefs_LDADD)
 font_controls_test_SOURCES = font_controls_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
@@ -120,3 +122,4 @@ check-local: $(check_PROGRAMS)
 	./mouse_settings_test || test $$? -eq 77
 	./expert_test || test $$? -eq 77
 	./font_simple_test || test $$? -eq 77
+	./menu_test || test $$? -eq 77

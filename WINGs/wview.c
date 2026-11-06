@@ -2,6 +2,7 @@
 #include "WINGsP.h"
 
 #include <X11/Xresource.h>
+#include <X11/Xft/Xft.h>
 
 static void focusFirstFocusable(W_View *toplevel);
 
@@ -389,6 +390,10 @@ static void destroyView(W_View * view)
 
 	if (view->flags.realized) {
 		XDeleteContext(view->screen->display, view->window, ViewContext);
+
+		/* Release the cached Render picture before its drawable disappears. */
+		if (view->screen->xftdraw && XftDrawDrawable(view->screen->xftdraw) == view->window)
+			XftDrawChange(view->screen->xftdraw, view->screen->rootWin);
 
 		/* if parent is being destroyed, it will die naturaly */
 		if (!view->flags.parentDying || view->flags.topLevel)

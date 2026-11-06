@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <ctype.h>
 
+#include "../src/wconfig.h"
 #include "editmenu.h"
 
 typedef struct W_EditMenuItem {
@@ -60,6 +61,7 @@ typedef struct W_EditMenu {
 	WMTextField *tfield;
 
 	WMButton *closeB;
+	WMPixmap *cascade[2];
 
 	int titleHeight;
 	int itemHeight;
@@ -174,6 +176,40 @@ void WSetEditMenuItemImage(WEditMenuItem * item, WMPixmap * pixmap)
 	item->pixmap = WMRetainPixmap(pixmap);
 }
 
+static WMPixmap *cascadeSymbol(WMScreen *screen, int height, Bool highlighted)
+{
+	int width = WMAX(4, height / 2);
+	int samples = 4;
+	Pixmap canvas = XCreatePixmap(screen->display, screen->rootWin, width * samples,
+				     height * samples, screen->depth);
+	GC gc = XCreateGC(screen->display, canvas, 0, NULL);
+	XPoint points[] = {
+		{ 0, 0 }, { width * samples - 1, height * samples / 2 },
+		{ 0, height * samples - 1 }
+	};
+	RImage *image, *scaled;
+	WMPixmap *symbol = NULL;
+
+	XSetForeground(screen->display, gc, W_PIXEL(highlighted ? screen->white : screen->gray));
+	XFillRectangle(screen->display, canvas, gc, 0, 0, width * samples, height * samples);
+	XSetForeground(screen->display, gc, W_PIXEL(screen->black));
+	XFillPolygon(screen->display, canvas, gc, points, 3, Convex, CoordModeOrigin);
+	image = RCreateImageFromDrawable(screen->rcontext, canvas, None);
+	XFreeGC(screen->display, gc);
+	XFreePixmap(screen->display, canvas);
+	if (image) {
+		scaled = RSmoothScaleImage(image, width, height);
+		RReleaseImage(image);
+		if (scaled) {
+			symbol = WMCreatePixmapFromRImage(screen, scaled, 127);
+			RReleaseImage(scaled);
+		}
+	}
+	if (!symbol)
+		wwarning(_("could not render submenu indicator: %s"), RMessageForError(RErrorCode));
+	return symbol;
+}
+
 static void paintEditMenuItem(WEditMenuItem * iPtr)
 {
 	WMScreen *scr = WMWidgetScreen(iPtr);
@@ -202,10 +238,13 @@ static void paintEditMenuItem(WEditMenuItem * iPtr)
 
 		WMDrawPixmap(iPtr->pixmap, win, w - size.width - 5, (h - size.height) / 2);
 	} else if (iPtr->submenu) {
-		/* draw the cascade indicator */
-		XDrawLine(scr->display, win, WMColorGC(scr->darkGray), w - 11, 6, w - 6, h / 2 - 1);
-		XDrawLine(scr->display, win, WMColorGC(scr->white), w - 11, h - 8, w - 6, h / 2 - 1);
-		XDrawLine(scr->display, win, WMColorGC(scr->black), w - 12, 6, w - 12, h - 8);
+		WMPixmap *symbol = iPtr->parent->cascade[iPtr->flags.isHighlighted];
+
+		if (symbol) {
+			WMSize size = WMGetPixmapSize(symbol);
+
+			WMDrawPixmap(symbol, win, w - size.width - 5, (h - size.height) / 2);
+		}
 	}
 }
 
@@ -413,6 +452,8 @@ static WEditMenu *makeEditMenu(WMScreen * scr, WMWidget * parent, const char *ti
 
 	mPtr->itemHeight = WMFontHeight(scr->normalFont) + 6;
 	mPtr->titleHeight = WMFontHeight(scr->boldFont) + 8;
+	for (int i = 0; i < 2; i++)
+		mPtr->cascade[i] = cascadeSymbol(scr, WMAX(8, WMFontHeight(scr->normalFont) / 2), i);
 
 	updateMenuContents(mPtr);
 
@@ -537,12 +578,14 @@ void WSetEditMenuMinSize(WEditMenu * mPtr, WMSize size)
 {
 	mPtr->minSize.width = size.width;
 	mPtr->minSize.height = size.height;
+	updateMenuContents(mPtr);
 }
 
 void WSetEditMenuMaxSize(WEditMenu * mPtr, WMSize size)
 {
 	mPtr->maxSize.width = size.width;
 	mPtr->maxSize.height = size.height;
+	updateMenuContents(mPtr);
 }
 
 WMPoint WGetEditMenuLocationForSubmenu(WEditMenu * mPtr, WEditMenu * submenu)
@@ -591,8 +634,9 @@ void WTearOffEditMenu(WEditMenu * menu, WEditMenu * submenu)
 	item = (WEditMenuItem *) WMGetFromArray(submenu->items, 0);
 
 	submenu->closeB = WMCreateCommandButton(item);
-	WMResizeWidget(submenu->closeB, 15, 15);
-	WMMoveWidget(submenu->closeB, W_VIEW(submenu)->size.width - 20, 3);
+	int closeSize = WMAX(15, submenu->titleHeight - 10);
+	WMResizeWidget(submenu->closeB, closeSize, closeSize);
+	WMMoveWidget(submenu->closeB, W_VIEW(submenu)->size.width - closeSize - 5, 3);
 	WMRealizeWidget(submenu->closeB);
 	WMSetButtonText(submenu->closeB, "X");
 	WMSetButtonAction(submenu->closeB, closeMenuAction, submenu);
@@ -710,7 +754,7 @@ static void updateMenuContents(WEditMenu * mPtr)
 	W_ResizeView(mPtr->view, newW, newH + 1);
 
 	if (mPtr->closeB)
-		WMMoveWidget(mPtr->closeB, newW - 20, 3);
+		WMMoveWidget(mPtr->closeB, newW - WMWidgetWidth(mPtr->closeB) - 5, 3);
 
 	newW -= 2 * offs;
 
@@ -1336,6 +1380,9 @@ static void destroyEditMenu(WEditMenu * mPtr)
 	WMFreeArray(mPtr->items);
 
 	wfree(mPtr->tdelegate);
+	for (int i = 0; i < 2; i++)
+		if (mPtr->cascade[i])
+			WMReleasePixmap(mPtr->cascade[i]);
 
 	wfree(mPtr);
 }

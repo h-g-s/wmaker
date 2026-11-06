@@ -27,6 +27,8 @@
 #include <X11/cursorfont.h>
 
 #include "editmenu.h"
+#include "PanelLayout.h"
+#include <X11/Xft/Xft.h>
 
 typedef enum {
 	NoInfo,
@@ -69,6 +71,15 @@ typedef struct _Panel {
 	char *menuPath;
 
 	WMFrame *optionsF;
+	WMBox *paletteBox;
+	WMFrame *padHost;
+	WEditMenu *factory[3];
+	WMSize optionSize;
+	Bool loaded;
+	WMScrollView *instructionsV;
+	WMLabel *instructionsL;
+	WMFrame *instructionsContent;
+	WMLabel *saveLocationL;
 
 	WMFrame *commandF;
 	WMTextField *commandT;	/* command to run */
@@ -328,20 +339,155 @@ static ItemData *putNewItem(_Panel * panel, WEditMenu * menu, int type, const ch
 	return data;
 }
 
-static WEditMenu *makeFactoryMenu(WMWidget * parent, int width)
+static WEditMenu *makeFactoryMenu(WMWidget * parent)
 {
 	WEditMenu *pad;
 
 	pad = WCreateEditMenuPad(parent);
-	WMResizeWidget(pad, width, 10);
-	WSetEditMenuMinSize(pad, wmksize(width, 0));
-	WSetEditMenuMaxSize(pad, wmksize(width, 0));
 	WSetEditMenuSelectable(pad, False);
 	WSetEditMenuEditable(pad, False);
 	WSetEditMenuIsFactory(pad, True);
 	WSetEditMenuDelegate(pad, &menuDelegate);
 
 	return pad;
+}
+
+static WPrefsGroup menuGroup(_Panel *panel, const char *title)
+{
+	return WPrefsCreateGroup(panel->optionsF, title);
+}
+
+static void packField(WMBox *box, WMTextField *field)
+{
+	WMPackBoxSubview(box, field, WMGetTextFieldPreferredSize(field, 26), True, 0);
+}
+
+static void packExplanation(WMBox *box, const char *text, int width)
+{
+	WMLabel *label = WMCreateLabel(box);
+
+	WMSetLabelText(label, text);
+	WMSetLabelWraps(label, True);
+	WMPackBoxSubview(box, label, WMGetLabelPreferredSizeForWidth(label, width), False, 8);
+}
+
+static void finishGroup(WPrefsGroup *group)
+{
+	WMWidget *parent = W_VIEW(group->frame)->parent->self;
+	WMBox *measure = WMCreateBox(parent);
+	WMSize size;
+
+	/* Measure using the shared group rules without packing into the options overlay. */
+	WMReparentWidget(group->frame, measure, 0, 0);
+	WPrefsPackGroup(measure, group, False, 0);
+	size = WMGetBoxMinimumSize(measure);
+	WMReparentWidget(group->frame, parent, 0, 0);
+	WMDestroyWidget(measure);
+	WMResizeWidget(group->frame, size.width, size.height);
+}
+
+static int layoutInstructionText(_Panel *panel, int width)
+{
+	WMSize instructions = WMGetLabelPreferredSizeForWidth(panel->instructionsL, width);
+	WMSize location = WMGetLabelPreferredSizeForWidth(panel->saveLocationL, width);
+	int gap = WMFontHeight(panel->normalFont);
+	int height = instructions.height;
+
+	WMResizeWidget(panel->instructionsL, width, WMAX(1, instructions.height));
+	if (panel->loaded) {
+		WMMoveWidget(panel->saveLocationL, 0, height + gap);
+		WMResizeWidget(panel->saveLocationL, width, WMAX(1, location.height));
+		height += gap + location.height;
+	}
+	WMResizeWidget(panel->instructionsContent, width, WMAX(1, height));
+	return height;
+}
+
+static void layoutInstructions(_Panel *panel)
+{
+	int width = WMWidgetWidth(panel->optionsF) - 20;
+	int height = WMWidgetHeight(panel->optionsF) - WMFontHeight(panel->normalFont) - 18;
+
+	for (WMView *view = W_VIEW(panel->box)->parent; view; view = view->parent) {
+		if (view->self && WMWidgetClass(view->self) == WC_ScrollView) {
+			WMSize visible = WMGetScrollViewVisibleRect(view->self).size;
+
+			width = WMIN(width, (int)visible.width - W_VIEW(panel->box)->pos.x -
+				     W_VIEW(panel->optionsF)->pos.x - 20);
+			height = WMIN(height, (int)visible.height - W_VIEW(panel->box)->pos.y -
+				      W_VIEW(panel->optionsF)->pos.y - WMFontHeight(panel->normalFont) - 18);
+			break;
+		}
+	}
+	width = WMAX(1, width);
+	height = WMAX(1, height);
+	WMResizeWidget(panel->instructionsV, width, height);
+	WMSetScrollViewHasVerticalScroller(panel->instructionsV, False);
+	if (layoutInstructionText(panel, width) > height)
+		WMSetScrollViewHasVerticalScroller(panel->instructionsV, True);
+	width = WMGetScrollViewVisibleRect(panel->instructionsV).size.width;
+	layoutInstructionText(panel, width);
+}
+
+static void layoutOptions(_Panel *panel, Bool measure)
+{
+	int top = WMFontHeight(panel->normalFont) + 8;
+	int available = WMWidgetWidth(panel->optionsF) - 20;
+
+	for (int type = 0; type < LastInfo; type++) {
+		int y = top;
+
+		if (!measure && type != panel->currentType)
+			continue;
+		for (int i = 0; i < MAX_SECTION_SIZE && panel->sections[type][i]; i++) {
+			WMWidget *widget = panel->sections[type][i];
+			WMSize size = WMGetViewSize(WMWidgetView(widget));
+
+			if (measure)
+				panel->optionSize.width = WMAX(panel->optionSize.width, size.width + 20);
+			else if (type == NoInfo)
+				layoutInstructions(panel);
+			else
+				WMResizeWidget(widget, WMAX(1, available), size.height);
+			WMMoveWidget(widget, 10, y);
+			y += size.height + 10;
+			if (type == CommandInfo && i == 0) {
+				int extra = WMAX(WMWidgetHeight(panel->paramF), WMWidgetHeight(panel->quickB));
+
+				WMMoveWidget(panel->paramF, 10, y);
+				WMMoveWidget(panel->quickB, 10, y);
+				if (!measure) {
+					WMResizeWidget(panel->paramF, WMAX(1, available), WMWidgetHeight(panel->paramF));
+					WMResizeWidget(panel->quickB, WMAX(1, available), WMWidgetHeight(panel->quickB));
+				}
+				y += extra + 10;
+			}
+		}
+		if (measure)
+			panel->optionSize.height = WMAX(panel->optionSize.height, y);
+	}
+}
+
+static void optionsResized(void *data, WMNotification *notification)
+{
+	(void)notification;
+	layoutOptions(data, False);
+}
+
+static void paletteResized(void *data, WMNotification *notification)
+{
+	_Panel *panel = data;
+	int width = WMWidgetWidth(panel->padHost);
+
+	(void)notification;
+	for (int i = 0; i < 3; i++) {
+		int content;
+
+		WMResizeWidget(panel->itemPad[i], width, WMWidgetHeight(panel->padHost));
+		content = WMGetScrollViewVisibleRect(panel->itemPad[i]).size.width;
+		WSetEditMenuMinSize(panel->factory[i], wmksize(content, 0));
+		WSetEditMenuMaxSize(panel->factory[i], wmksize(content, 0));
+	}
 }
 
 static void createPanel(_Panel * p)
@@ -351,8 +497,8 @@ static void createPanel(_Panel * p)
 	WMColor *black = WMBlackColor(scr);
 	WMColor *white = WMWhiteColor(scr);
 	WMColor *gray = WMGrayColor(scr);
-	WMFont *bold = WMBoldSystemFontOfSize(scr, 12);
-	WMFont *font = WMSystemFontOfSize(scr, 12);
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMFont *bold = WMBoldSystemFontOfSize(scr, WMAX(12, WMFontHeight(font) * 12 / 17));
 	WMLabel *label;
 	int width;
 
@@ -404,12 +550,11 @@ static void createPanel(_Panel * p)
 		XFreeGC(dpy, gc);
 	}
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	WMSetBoxHorizontal(panel->box, True);
+	panel->paletteBox = WMCreateBox(panel->box);
 
-	panel->typeP = WMCreatePopUpButton(panel->box);
-	WMResizeWidget(panel->typeP, 150, 20);
-	WMMoveWidget(panel->typeP, 10, 10);
+	panel->typeP = WMCreatePopUpButton(panel->paletteBox);
 
 	WMAddPopUpButtonItem(panel->typeP, _("New Items"));
 	WMAddPopUpButtonItem(panel->typeP, _("Sample Commands"));
@@ -421,9 +566,14 @@ static void createPanel(_Panel * p)
 
 	{
 		WEditMenu *pad;
+		WMScrollView *sview = WMCreateScrollView(panel->box);
 
-		pad = makeFactoryMenu(panel->box, 150);
-		WMMoveWidget(pad, 10, 40);
+		WMSetScrollViewHasVerticalScroller(sview, True);
+		WMSetScrollViewRelief(sview, WRFlat);
+		pad = makeFactoryMenu(sview);
+		WMSetScrollViewContentView(sview, WMWidgetView(pad));
+		WMMapWidget(pad);
+		WMMapSubwidgets(sview);
 
 		putNewItem(panel, pad, ExecInfo, _("Run Program"));
 		putNewItem(panel, pad, CommandInfo, _("Internal Command"));
@@ -435,7 +585,8 @@ static void createPanel(_Panel * p)
 		putNewItem(panel, pad, WSMenuInfo, _("Workspace Menu"));
 		putNewItem(panel, pad, WWindowListInfo, _("Window List Menu"));
 
-		panel->itemPad[0] = pad;
+		panel->itemPad[0] = sview;
+		panel->factory[0] = pad;
 	}
 
 	{
@@ -444,11 +595,9 @@ static void createPanel(_Panel * p)
 		WMScrollView *sview;
 
 		sview = WMCreateScrollView(panel->box);
-		WMResizeWidget(sview, 150, 180);
-		WMMoveWidget(sview, 10, 40);
 		WMSetScrollViewHasVerticalScroller(sview, True);
 
-		pad = makeFactoryMenu(panel->box, 130);
+		pad = makeFactoryMenu(sview);
 
 		WMSetScrollViewContentView(sview, WMWidgetView(pad));
 
@@ -491,6 +640,7 @@ static void createPanel(_Panel * p)
 		WMMapWidget(pad);
 
 		panel->itemPad[1] = sview;
+		panel->factory[1] = pad;
 	}
 
 	{
@@ -499,11 +649,9 @@ static void createPanel(_Panel * p)
 		WMScrollView *sview;
 
 		sview = WMCreateScrollView(panel->box);
-		WMResizeWidget(sview, 150, 180);
-		WMMoveWidget(sview, 10, 40);
 		WMSetScrollViewHasVerticalScroller(sview, True);
 
-		pad = makeFactoryMenu(panel->box, 130);
+		pad = makeFactoryMenu(sview);
 
 		WMSetScrollViewContentView(sview, WMWidgetView(pad));
 
@@ -569,191 +717,139 @@ static void createPanel(_Panel * p)
 		WMMapWidget(pad);
 
 		panel->itemPad[2] = sview;
+		panel->factory[2] = pad;
 	}
 
-	width = FRAME_WIDTH - 20 - 150 - 10 - 2;
-
 	panel->optionsF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->optionsF, width, FRAME_HEIGHT - 15);
-	WMMoveWidget(panel->optionsF, 10 + 150 + 10, 5);
-
-	width -= 20;
+	width = 26 * WMWidthOfString(font, "M", 1) + 8;
 
 	/* command */
 
-	panel->commandF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->commandF, width, 50);
-	WMMoveWidget(panel->commandF, 10, 20);
-	WMSetFrameTitle(panel->commandF, _("Program to Run"));
-	WMSetFrameTitlePosition(panel->commandF, WTPAtTop);
-
-	panel->commandT = WMCreateTextField(panel->commandF);
-	WMResizeWidget(panel->commandT, width - 95, 20);
-	WMMoveWidget(panel->commandT, 10, 20);
-
-	panel->browseB = WMCreateCommandButton(panel->commandF);
-	WMResizeWidget(panel->browseB, 70, 24);
-	WMMoveWidget(panel->browseB, width - 80, 18);
+	WPrefsGroup command = menuGroup(panel, _("Program to Run"));
+	panel->commandF = command.frame;
+	WMBox *commandRow = WMCreateBox(command.content);
+	WMSetBoxHorizontal(commandRow, True);
+	panel->commandT = WMCreateTextField(commandRow);
+	packField(commandRow, panel->commandT);
+	panel->browseB = WMCreateCommandButton(commandRow);
 	WMSetButtonText(panel->browseB, _("Browse"));
 	WMSetButtonAction(panel->browseB, browseForFile, panel);
+	WPrefsPackButton(commandRow, panel->browseB, 0);
+	WMPackBoxSubview(command.content, commandRow, WMGetBoxMinimumSize(commandRow), False, 0);
+	WMMapSubwidgets(commandRow);
+	finishGroup(&command);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->commandT);
 
-#if 0
-	panel->xtermC = WMCreateSwitchButton(panel->commandF);
-	WMResizeWidget(panel->xtermC, width - 20, 20);
-	WMMoveWidget(panel->xtermC, 10, 50);
-	WMSetButtonText(panel->xtermC, _("Run the program inside a Xterm"));
-#endif
-	WMMapSubwidgets(panel->commandF);
-
 	/* path */
 
-	panel->pathF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->pathF, width, 150);
-	WMMoveWidget(panel->pathF, 10, 40);
-	WMSetFrameTitle(panel->pathF, _("Path for Menu"));
-
-	panel->pathT = WMCreateTextField(panel->pathF);
-	WMResizeWidget(panel->pathT, width - 20, 20);
-	WMMoveWidget(panel->pathT, 10, 20);
+	WPrefsGroup path = menuGroup(panel, _("Path for Menu"));
+	panel->pathF = path.frame;
+	panel->pathT = WMCreateTextField(path.content);
+	WMPackBoxSubview(path.content, panel->pathT, WMGetTextFieldPreferredSize(panel->pathT, 26), False, 8);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->pathT);
 
-	label = WMCreateLabel(panel->pathF);
-	WMResizeWidget(label, width - 20, 90);
-	WMMoveWidget(label, 10, 50);
-	WMSetLabelText(label, _("Enter the path for a file containing a menu\n"
+	packExplanation(path.content, _("Enter the path for a file containing a menu\n"
 				"or a list of directories with the programs you\n"
 				"want to have listed in the menu. Ex:\n"
 				"~/" GSUSER_SUBDIR "/" USERDATA_SUBDIR "/" PACKAGE_TARNAME "/menu\n"
-				"or\n" "/usr/bin ~/xbin"));
-
-	WMMapSubwidgets(panel->pathF);
+				"or\n" "/usr/bin ~/xbin"), width);
+	finishGroup(&path);
 
 	/* pipe */
 
-	panel->pipeF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->pipeF, width, 155);
-	WMMoveWidget(panel->pipeF, 10, 30);
-	WMSetFrameTitle(panel->pipeF, _("Command"));
-
-	panel->pipeT = WMCreateTextField(panel->pipeF);
-	WMResizeWidget(panel->pipeT, width - 20, 20);
-	WMMoveWidget(panel->pipeT, 10, 20);
+	WPrefsGroup pipe = menuGroup(panel, _("Command"));
+	panel->pipeF = pipe.frame;
+	panel->pipeT = WMCreateTextField(pipe.content);
+	WMPackBoxSubview(pipe.content, panel->pipeT, WMGetTextFieldPreferredSize(panel->pipeT, 26), False, 8);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->pipeT);
 
-	label = WMCreateLabel(panel->pipeF);
-	WMResizeWidget(label, width - 20, 40);
-	WMMoveWidget(label, 10, 50);
-	WMSetLabelText(label, _("Enter a command that outputs a menu\n" "definition to stdout when invoked."));
-
-	panel->pipeCacheB = WMCreateSwitchButton(panel->pipeF);
-	WMResizeWidget(panel->pipeCacheB, width - 20, 40);
-	WMMoveWidget(panel->pipeCacheB, 10, 110);
+	packExplanation(pipe.content, _("Enter a command that outputs a menu\n" "definition to stdout when invoked."), width);
+	panel->pipeCacheB = WMCreateSwitchButton(pipe.content);
 	WMSetButtonText(panel->pipeCacheB, _("Cache menu contents after opening for\n" "the first time"));
 
-	WMMapSubwidgets(panel->pipeF);
+	WMPackBoxSubview(pipe.content, panel->pipeCacheB,
+			 WMGetButtonPreferredSizeForWidth(panel->pipeCacheB, width), False, 0);
+	finishGroup(&pipe);
 
 	/* proplist pipe */
 
-	panel->plpipeF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->plpipeF, width, 155);
-	WMMoveWidget(panel->plpipeF, 10, 30);
-	WMSetFrameTitle(panel->plpipeF, _("Command"));
-
-	panel->plpipeT = WMCreateTextField(panel->plpipeF);
-	WMResizeWidget(panel->plpipeT, width - 20, 20);
-	WMMoveWidget(panel->plpipeT, 10, 20);
+	WPrefsGroup plpipe = menuGroup(panel, _("Command"));
+	panel->plpipeF = plpipe.frame;
+	panel->plpipeT = WMCreateTextField(plpipe.content);
+	WMPackBoxSubview(plpipe.content, panel->plpipeT, WMGetTextFieldPreferredSize(panel->plpipeT, 26), False, 8);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->plpipeT);
 
-	label = WMCreateLabel(panel->plpipeF);
-	WMResizeWidget(label, width - 20, 40);
-	WMMoveWidget(label, 10, 50);
-	WMSetLabelText(label, _("Enter a command that outputs a proplist menu\n" "definition to stdout when invoked."));
-
-	panel->plpipeCacheB = WMCreateSwitchButton(panel->plpipeF);
-	WMResizeWidget(panel->plpipeCacheB, width - 20, 40);
-	WMMoveWidget(panel->plpipeCacheB, 10, 110);
+	packExplanation(plpipe.content, _("Enter a command that outputs a proplist menu\n" "definition to stdout when invoked."), width);
+	panel->plpipeCacheB = WMCreateSwitchButton(plpipe.content);
 	WMSetButtonText(panel->plpipeCacheB, _("Cache menu contents after opening for\n" "the first time"));
 
-	WMMapSubwidgets(panel->plpipeF);
+	WMPackBoxSubview(plpipe.content, panel->plpipeCacheB,
+			 WMGetButtonPreferredSizeForWidth(panel->plpipeCacheB, width), False, 0);
+	finishGroup(&plpipe);
 
 	/* directory menu */
 
-	panel->dcommandF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->dcommandF, width, 90);
-	WMMoveWidget(panel->dcommandF, 10, 25);
-	WMSetFrameTitle(panel->dcommandF, _("Command to Open Files"));
-
-	panel->dcommandT = WMCreateTextField(panel->dcommandF);
-	WMResizeWidget(panel->dcommandT, width - 20, 20);
-	WMMoveWidget(panel->dcommandT, 10, 20);
+	WPrefsGroup dcommand = menuGroup(panel, _("Command to Open Files"));
+	panel->dcommandF = dcommand.frame;
+	panel->dcommandT = WMCreateTextField(dcommand.content);
+	WMPackBoxSubview(dcommand.content, panel->dcommandT, WMGetTextFieldPreferredSize(panel->dcommandT, 26), False, 8);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->dcommandT);
 
-	label = WMCreateLabel(panel->dcommandF);
-	WMResizeWidget(label, width - 20, 45);
-	WMMoveWidget(label, 10, 40);
-	WMSetLabelText(label, _("Enter the command you want to use to open the\n"
-				"files in the directories listed below."));
-
-	WMMapSubwidgets(panel->dcommandF);
-
-	panel->dpathF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->dpathF, width, 80);
-	WMMoveWidget(panel->dpathF, 10, 125);
-	WMSetFrameTitle(panel->dpathF, _("Directories with Files"));
-
-	panel->dpathT = WMCreateTextField(panel->dpathF);
-	WMResizeWidget(panel->dpathT, width - 20, 20);
-	WMMoveWidget(panel->dpathT, 10, 20);
+	packExplanation(dcommand.content, _("Enter the command you want to use to open the\n"
+				"files in the directories listed below."), width);
+	finishGroup(&dcommand);
+	WPrefsGroup dpath = menuGroup(panel, _("Directories with Files"));
+	panel->dpathF = dpath.frame;
+	panel->dpathT = WMCreateTextField(dpath.content);
+	WMPackBoxSubview(dpath.content, panel->dpathT, WMGetTextFieldPreferredSize(panel->dpathT, 26), False, 8);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->dpathT);
 
-	panel->dstripB = WMCreateSwitchButton(panel->dpathF);
-	WMResizeWidget(panel->dstripB, width - 20, 20);
-	WMMoveWidget(panel->dstripB, 10, 50);
+	panel->dstripB = WMCreateSwitchButton(dpath.content);
 	WMSetButtonText(panel->dstripB, _("Strip extensions from file names"));
 
 	WMSetButtonAction(panel->dstripB, buttonClicked, panel);
 
-	WMMapSubwidgets(panel->dpathF);
+	WMPackBoxSubview(dpath.content, panel->dstripB, WMGetButtonPreferredSizeForWidth(panel->dstripB, width), False, 0);
+	finishGroup(&dpath);
 
 	/* shortcut */
 
-	panel->shortF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->shortF, width, 50);
-	WMMoveWidget(panel->shortF, 10, 160);
-	WMSetFrameTitle(panel->shortF, _("Keyboard Shortcut"));
-
-	panel->shortT = WMCreateTextField(panel->shortF);
-	WMResizeWidget(panel->shortT, width - 20 - 150, 20);
-	WMMoveWidget(panel->shortT, 10, 20);
+	WPrefsGroup shortcut = menuGroup(panel, _("Keyboard Shortcut"));
+	panel->shortF = shortcut.frame;
+	WMBox *shortcutRow = WMCreateBox(shortcut.content);
+	WMSetBoxHorizontal(shortcutRow, True);
+	panel->shortT = WMCreateTextField(shortcutRow);
+	packField(shortcutRow, panel->shortT);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->shortT);
 
-	panel->sgrabB = WMCreateCommandButton(panel->shortF);
-	WMResizeWidget(panel->sgrabB, 70, 24);
-	WMMoveWidget(panel->sgrabB, width - 80, 18);
+	panel->sgrabB = WMCreateCommandButton(shortcutRow);
+	WMSetButtonText(panel->sgrabB, _("Cancel"));
+	WMSize cancelSize = WMGetButtonPreferredSize(panel->sgrabB);
 	WMSetButtonText(panel->sgrabB, _("Capture"));
 	WMSetButtonAction(panel->sgrabB, sgrabClicked, panel);
 
-	panel->sclearB = WMCreateCommandButton(panel->shortF);
-	WMResizeWidget(panel->sclearB, 70, 24);
-	WMMoveWidget(panel->sclearB, width - 155, 18);
+	panel->sclearB = WMCreateCommandButton(shortcutRow);
 	WMSetButtonText(panel->sclearB, _("Clear"));
 	WMSetButtonAction(panel->sclearB, sgrabClicked, panel);
 
-	WMMapSubwidgets(panel->shortF);
+	WPrefsPackButton(shortcutRow, panel->sclearB, 8);
+	WMSize captureSize = WMGetButtonPreferredSize(panel->sgrabB);
+	WMPackBoxSubview(shortcutRow, panel->sgrabB,
+			 wmksize(WMAX(cancelSize.width, captureSize.width), WMAX(cancelSize.height, captureSize.height)), False, 0);
+	WMPackBoxSubview(shortcut.content, shortcutRow, WMGetBoxMinimumSize(shortcutRow), False, 0);
+	WMMapSubwidgets(shortcutRow);
+	finishGroup(&shortcut);
 
 	/* internal command */
 
 	panel->icommandL = WMCreateList(panel->optionsF);
-	WMResizeWidget(panel->icommandL, width, 80);
-	WMMoveWidget(panel->icommandL, 10, 20);
 
 	WMSetListAction(panel->icommandL, icommandLClicked, panel);
 
@@ -774,28 +870,56 @@ static void createPanel(_Panel * p)
 	WMInsertListItem(panel->icommandL, 10, _("Open Info Panel"));
 	WMInsertListItem(panel->icommandL, 11, _("Open Copyright Panel"));
 
-	panel->paramF = WMCreateFrame(panel->optionsF);
-	WMResizeWidget(panel->paramF, width, 50);
-	WMMoveWidget(panel->paramF, 10, 105);
-	WMSetFrameTitle(panel->paramF, _("Window Manager to Start"));
-
-	panel->paramT = WMCreateTextField(panel->paramF);
-	WMResizeWidget(panel->paramT, width - 20, 20);
-	WMMoveWidget(panel->paramT, 10, 20);
+	WPrefsGroup parameter = menuGroup(panel, _("Window Manager to Start"));
+	panel->paramF = parameter.frame;
+	panel->paramT = WMCreateTextField(parameter.content);
+	WMPackBoxSubview(parameter.content, panel->paramT, WMGetTextFieldPreferredSize(panel->paramT, 26), False, 0);
 
 	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->paramT);
 
-	WMMapSubwidgets(panel->paramF);
+	finishGroup(&parameter);
 
 	panel->quickB = WMCreateSwitchButton(panel->optionsF);
-	WMResizeWidget(panel->quickB, width, 20);
-	WMMoveWidget(panel->quickB, 10, 120);
 	WMSetButtonText(panel->quickB, _("Do not confirm action."));
 	WMSetButtonAction(panel->quickB, buttonClicked, panel);
 
-	label = WMCreateLabel(panel->optionsF);
-	WMResizeWidget(label, width + 5, FRAME_HEIGHT - 50);
-	WMMoveWidget(label, 7, 20);
+	panel->instructionsV = WMCreateScrollView(panel->optionsF);
+	WMSetScrollViewRelief(panel->instructionsV, WRFlat);
+	panel->instructionsContent = WMCreateFrame(panel->instructionsV);
+	WMSetFrameRelief(panel->instructionsContent, WRFlat);
+	label = WMCreateLabel(panel->instructionsContent);
+	panel->instructionsL = label;
+	WMSetScrollViewContentView(panel->instructionsV, WMWidgetView(panel->instructionsContent));
+	WMMapWidget(panel->instructionsContent);
+	panel->saveLocationL = WMCreateLabel(panel->instructionsContent);
+	WMSetLabelWraps(panel->saveLocationL, True);
+	{
+		FcPattern *pattern = FcPatternDuplicate(font->font->pattern);
+		double pixels;
+		WMFont *noteFont = NULL;
+
+		if (pattern && FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &pixels) == FcResultMatch) {
+			FcChar8 *name;
+
+			FcPatternDel(pattern, FC_SIZE);
+			FcPatternDel(pattern, FC_PIXEL_SIZE);
+			FcPatternAddDouble(pattern, FC_PIXEL_SIZE, pixels * 0.6);
+			name = FcNameUnparse(pattern);
+			if (name) {
+				noteFont = WMCreateFont(scr, (char *)name);
+				FcStrFree(name);
+			}
+		}
+		if (pattern)
+			FcPatternDestroy(pattern);
+		if (noteFont) {
+			WMSetLabelFont(panel->saveLocationL, noteFont);
+			WMReleaseFont(noteFont);
+		} else {
+			wwarning(_("could not load menu save-location font"));
+		}
+	}
+	WMMapWidget(label);
 	WMSetLabelText(label,
 		       _("Instructions:\n\n"
 			 " - drag items from the left to the menu to add new items\n"
@@ -806,18 +930,7 @@ static void createPanel(_Panel * p)
 			 " - click on a menu item to change related information"));
 	WMMapWidget(label);
 
-	WMRealizeWidget(panel->box);
-	WMMapSubwidgets(panel->box);
-	WMMapWidget(panel->box);
-
-	{
-		int i;
-		for (i = 0; i < wlengthof(panel->itemPad); i++)
-			WMUnmapWidget(panel->itemPad[i]);
-	}
-	changedItemPad(panel->typeP, panel);
-
-	panel->sections[NoInfo][0] = label;
+	panel->sections[NoInfo][0] = panel->instructionsV;
 
 	panel->sections[ExecInfo][0] = panel->commandF;
 	panel->sections[ExecInfo][1] = panel->shortF;
@@ -831,29 +944,72 @@ static void createPanel(_Panel * p)
 
 	panel->sections[PLPipeInfo][0] = panel->plpipeF;
 
-	panel->sections[DirectoryInfo][0] = panel->dpathF;
-	panel->sections[DirectoryInfo][1] = panel->dcommandF;
+	panel->sections[DirectoryInfo][0] = panel->dcommandF;
+	panel->sections[DirectoryInfo][1] = panel->dpathF;
 
 	panel->currentType = NoInfo;
-
-	showData(panel);
-
 	{
-		WMPoint pos;
+		int rows = WMFontHeight(font) + 6;
+		int paletteWidth = WMGetPopUpButtonPreferredSize(panel->typeP).width;
+		int internalWidth = width;
+		WMSize instructions;
 
-		pos = WMGetViewScreenPosition(WMWidgetView(panel->box));
+		WMSetListUserDrawItemHeight(panel->icommandL, rows);
+		for (int i = 0; i < WMGetListNumberOfRows(panel->icommandL); i++) {
+			char *text = WMGetListItem(panel->icommandL, i)->text;
 
-		if (pos.x < 200) {
-			pos.x += FRAME_WIDTH + 20;
-		} else {
-			pos.x = 10;
+			internalWidth = WMAX(internalWidth, WMWidthOfString(font, text, strlen(text)) + 10);
 		}
+		WMResizeWidget(panel->icommandL,
+			       internalWidth + WMGetScrollerWidth(WMGetListScroller(panel->icommandL)), rows * 5 + 4);
+		WMSize quickSize = WMGetButtonPreferredSize(panel->quickB);
+		WMResizeWidget(panel->quickB, quickSize.width, quickSize.height);
+		WMSetLabelWraps(label, True);
+		instructions = WMGetLabelPreferredSizeForWidth(label, internalWidth);
+		WMResizeWidget(label, instructions.width, instructions.height + 4 * rows);
+		WMResizeWidget(panel->instructionsV, instructions.width, instructions.height + 4 * rows);
+		layoutOptions(panel, True);
+		panel->optionSize.width = WMAX(panel->optionSize.width, WMWidgetWidth(panel->paramF) + 20);
 
-		pos.y = WMAX(pos.y - 100, 0);
-
-		if (panel->menu)
-			WEditMenuShowAt(panel->menu, pos.x, pos.y);
+		for (int i = 0; i < 3; i++)
+			paletteWidth = WMAX(paletteWidth, WMWidgetWidth(panel->factory[i]) +
+					    WMGetScrollerWidth(WMGetScrollViewVerticalScroller(panel->itemPad[i])) + 4);
+		WMPackBoxSubview(panel->paletteBox, panel->typeP, WMGetPopUpButtonPreferredSize(panel->typeP), False, 10);
+		panel->padHost = WMCreateFrame(panel->paletteBox);
+		WMSetFrameRelief(panel->padHost, WRFlat);
+		for (int i = 0; i < 3; i++) {
+			WMReparentWidget(panel->itemPad[i], panel->padHost, 0, 0);
+			WMSetViewExpandsToParent(WMWidgetView(panel->itemPad[i]), 0, 0, 0, 0);
+		}
+		WMPackBoxSubview(panel->paletteBox, panel->padHost, wmksize(paletteWidth, rows * 10 + 4), True, 0);
+		WMPackBoxSubview(panel->box, panel->paletteBox, WMGetBoxMinimumSize(panel->paletteBox), False, 12);
+		WMPackBoxSubview(panel->box, panel->optionsF, panel->optionSize, True, 0);
+		WMSetViewNotifySizeChanges(WMWidgetView(panel->optionsF), True);
+		WMAddNotificationObserver(optionsResized, panel, WMViewSizeDidChangeNotification, WMWidgetView(panel->optionsF));
+		WMSetViewNotifySizeChanges(WMWidgetView(panel->padHost), True);
+		WMAddNotificationObserver(paletteResized, panel, WMViewSizeDidChangeNotification, WMWidgetView(panel->padHost));
+		layoutOptions(panel, False);
+		paletteResized(panel, NULL);
+		for (WMView *view = W_VIEW(panel->box)->parent; view; view = view->parent) {
+			if (view->self && WMWidgetClass(view->self) == WC_ScrollView) {
+				WMSetViewNotifySizeChanges(view, True);
+				WMAddNotificationObserver(optionsResized, panel, WMViewSizeDidChangeNotification, view);
+				break;
+			}
+		}
 	}
+	WMMapSubwidgets(panel->paletteBox);
+	WMMapSubwidgets(panel->box);
+	for (int type = 0; type < LastInfo; type++)
+		for (int i = 0; i < MAX_SECTION_SIZE && panel->sections[type][i]; i++)
+			WMUnmapWidget(panel->sections[type][i]);
+	WMUnmapWidget(panel->paramF);
+	WMUnmapWidget(panel->quickB);
+	WMMapWidget(panel->instructionsV);
+	WMRealizeWidget(panel->box);
+	for (int i = 0; i < 3; i++)
+		WMUnmapWidget(panel->itemPad[i]);
+	changedItemPad(panel->typeP, panel);
 }
 
 static void freeItemData(ItemData * data)
@@ -1139,6 +1295,7 @@ static void changeInfoType(_Panel * panel, const char *title, InfoType type)
 	updateFrameTitle(panel, title, type);
 
 	panel->currentType = type;
+	layoutOptions(panel, False);
 }
 
 static void updateMenuItem(_Panel * panel, WEditMenuItem * item, WMWidget * changedWidget)
@@ -1501,7 +1658,7 @@ static WMPropList *getDefaultMenu(_Panel * panel)
 
 static void showData(_Panel * panel)
 {
-	char *menuPath, *labelText;
+	char *menuPath;
 	char buf[1024];
 	WMPropList *pmenu;
 
@@ -1573,12 +1730,11 @@ static void showData(_Panel * panel)
 	panel->menuPath = menuPath;
 
 	snprintf(buf, sizeof(buf),
-		 _("\n\nWhen saved, the menu will be written to the file\n\"%s\"."),
+		 _("When saved, the menu will be written to the file\n\"%s\"."),
 		 menuPath);
-	labelText = WMGetLabelText(panel->sections[NoInfo][0]);
-	labelText = wstrconcat(labelText, buf);
-	WMSetLabelText(panel->sections[NoInfo][0], labelText);
-	wfree(labelText);
+	WMSetLabelText(panel->saveLocationL, buf);
+	WMMapWidget(panel->saveLocationL);
+	layoutOptions(panel, False);
 
 	buildMenuFromPL(panel, pmenu);
 
@@ -1791,6 +1947,19 @@ static void storeData(_Panel * panel)
 
 static void showMenus(_Panel * panel)
 {
+	if (!panel->loaded) {
+		WMPoint pos = WMGetViewScreenPosition(WMWidgetView(panel->box));
+
+		panel->loaded = True;
+		showData(panel);
+		if (pos.x < 200)
+			pos.x += WMWidgetWidth(panel->box) + 20;
+		else
+			pos.x = 10;
+		pos.y = WMAX(pos.y - 100, 0);
+		if (panel->menu)
+			WEditMenuShowAt(panel->menu, pos.x, pos.y);
+	}
 	if (panel->menu)
 		WEditMenuUnhide(panel->menu);
 }
@@ -1817,6 +1986,7 @@ Panel *InitMenu(WMWidget *parent)
 	panel->callbacks.updateDomain = storeData;
 	panel->callbacks.showPanel = showMenus;
 	panel->callbacks.hidePanel = hideMenus;
+	panel->callbacks.automaticLayout = True;
 
 	AddSection(panel, ICON_FILE);
 
