@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 typedef struct _Panel {
 	WMBox *box;
@@ -31,10 +33,10 @@ typedef struct _Panel {
 	WMWidget *parent;
 
 	WMFrame *icoF;
-	WMButton *icoB[5];
+	WPrefsSpeedControl iconSpeed;
 
 	WMFrame *shaF;
-	WMButton *shaB[5];
+	WPrefsSpeedControl shadeSpeed;
 
 	WMFrame *titlF;
 	WMButton *oldsB;
@@ -66,8 +68,6 @@ typedef struct _Panel {
 #define ANIM_IMAGE	"animations"
 #define SUPERF_IMAGE	"moreanim"
 #define SMOOTH_IMAGE	"smooth"
-#define SPEED_IMAGE 	"speed%i"
-#define SPEED_IMAGE_S 	"speed%is"
 #define ARQUIVO_XIS	"xis"
 
 static void updateLabel(WMWidget *self, void *data);
@@ -76,8 +76,8 @@ static void showData(_Panel *panel)
 {
 	char *str;
 
-	WMPerformButtonClick(panel->icoB[GetSpeedForKey("IconSlideSpeed")]);
-	WMPerformButtonClick(panel->shaB[GetSpeedForKey("ShadeSpeed")]);
+	WPrefsSetSpeedControlValue(&panel->iconSpeed, GetSpeedForKey("IconSlideSpeed"));
+	WPrefsSetSpeedControlValue(&panel->shadeSpeed, GetSpeedForKey("ShadeSpeed"));
 
 	str = GetStringForKey("NewStyle");
 	if (str && strcasecmp(str, "next") == 0) {
@@ -110,16 +110,64 @@ static void updateLabel(WMWidget *self, void *data)
 	WMSetLabelText(panel->dithL, buffer);
 }
 
+static void setTitlebarImage(WMButton *button, WMFont *font, const char *name)
+{
+	char *path = LocateImage(name);
+	WMPixmap *image = path ? WMCreatePixmapFromFile(WMWidgetScreen(button), path) : NULL;
+
+	if (!image)
+		wwarning(_("could not load titlebar preview %s"), name);
+	WPrefsSetImageButtonFont(button, font, image, NULL);
+	if (image)
+		WMReleasePixmap(image);
+	if (path)
+		wfree(path);
+}
+
+static void setSmoothImages(WMButton *button, WMFont *font)
+{
+	WMScreen *screen = WMWidgetScreen(button);
+	char *path = LocateImage(SMOOTH_IMAGE);
+	RImage *image = path ? RLoadImage(WMScreenRContext(screen), path, 0) : NULL;
+	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(button));
+	int side = 61 * WMAX(17, WMFontHeight(font)) / 17;
+
+	if (path)
+		wfree(path);
+	if (!image) {
+		wwarning(_("could not load smooth scaling preview: %s"), RMessageForError(RErrorCode));
+		return;
+	}
+	RCombineImageWithColor(image, &background);
+	for (int i = 0; i < 2; i++) {
+		RImage *scaled = i ? RSmoothScaleImage(image, side, side) : RScaleImage(image, side, side);
+		WMPixmap *icon = scaled ? WMCreatePixmapFromRImage(screen, scaled, 128) : NULL;
+
+		if (scaled)
+			RReleaseImage(scaled);
+		if (icon) {
+			if (i)
+				WMSetButtonAltImage(button, icon);
+			else
+				WMSetButtonImage(button, icon);
+			WMReleasePixmap(icon);
+		} else {
+			wwarning(_("could not scale background preview: %s"), RMessageForError(RErrorCode));
+		}
+	}
+	RReleaseImage(image);
+}
+
 static void createPanel(Panel *p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
-	char *buf1, *buf2;
 	WMPixmap *icon, *altIcon;
 	RImage *xis = NULL;
-	int i;
 	RContext *rc = WMScreenRContext(scr);
-	WMFont *font = WMSystemFontOfSize(scr, 10);
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMBox *columns, *left, *right, *row, *features, *colors;
+	WPrefsGroup slide, shade, style, animations, smoothing, dithering;
 	char *path;
 
 	path = LocateImage(ARQUIVO_XIS);
@@ -130,205 +178,103 @@ static void createPanel(Panel *p)
 		wfree(path);
 	}
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
     /*********** Icon Slide Speed **********/
-	panel->icoF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->icoF, 212, 45);
-	WMMoveWidget(panel->icoF, 15, 10);
-	WMSetFrameTitle(panel->icoF, _("Icon Slide Speed"));
+	slide = WPrefsCreateGroup(left, _("Icon Slide Speed"));
+	panel->icoF = slide.frame;
+	WPrefsCreateSpeedControl(&panel->iconSpeed, slide.content, font);
+	WMPackBoxSubview(slide.content, panel->iconSpeed.box,
+			 WMGetViewSize(WMWidgetView(panel->iconSpeed.box)), False, 0);
+	WPrefsPackGroup(left, &slide, False, 12);
 
     /*********** Shade Animation Speed **********/
-	panel->shaF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->shaF, 212, 45);
-	WMMoveWidget(panel->shaF, 15, 65);
-	WMSetFrameTitle(panel->shaF, _("Shade Animation Speed"));
-
-	buf1 = wmalloc(strlen(SPEED_IMAGE) + 1);
-	buf2 = wmalloc(strlen(SPEED_IMAGE_S) + 1);
-
-	for (i = 0; i < 5; i++) {
-		panel->icoB[i] = WMCreateCustomButton(panel->icoF, WBBStateChangeMask);
-		panel->shaB[i] = WMCreateCustomButton(panel->shaF, WBBStateChangeMask);
-		WMResizeWidget(panel->icoB[i], 40, 24);
-		WMMoveWidget(panel->icoB[i], 2 + (40 * i), 15);
-		WMResizeWidget(panel->shaB[i], 40, 24);
-		WMMoveWidget(panel->shaB[i], 2 + (40 * i), 15);
-		WMSetButtonBordered(panel->icoB[i], False);
-		WMSetButtonImagePosition(panel->icoB[i], WIPImageOnly);
-		if (i > 0) {
-			WMGroupButtons(panel->icoB[0], panel->icoB[i]);
-		}
-		WMSetButtonBordered(panel->shaB[i], False);
-		WMSetButtonImagePosition(panel->shaB[i], WIPImageOnly);
-		if (i > 0) {
-			WMGroupButtons(panel->shaB[0], panel->shaB[i]);
-		}
-		sprintf(buf1, SPEED_IMAGE, i);
-		sprintf(buf2, SPEED_IMAGE_S, i);
-		path = LocateImage(buf1);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonImage(panel->icoB[i], icon);
-				WMSetButtonImage(panel->shaB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-		path = LocateImage(buf2);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonAltImage(panel->icoB[i], icon);
-				WMSetButtonAltImage(panel->shaB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-	}
-	wfree(buf1);
-	wfree(buf2);
-
-	WMMapSubwidgets(panel->icoF);
-	WMMapSubwidgets(panel->shaF);
+	shade = WPrefsCreateGroup(left, _("Shade Animation Speed"));
+	panel->shaF = shade.frame;
+	WPrefsCreateSpeedControl(&panel->shadeSpeed, shade.content, font);
+	WMPackBoxSubview(shade.content, panel->shadeSpeed.box,
+			 WMGetViewSize(WMWidgetView(panel->shadeSpeed.box)), False, 0);
+	WPrefsPackGroup(left, &shade, False, 12);
+	features = WMCreateBox(right);
+	WMSetBoxHorizontal(features, True);
 
     /***************** Smoothed Scaling *****************/
-	panel->smoF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->smoF, 94, 100);
-	WMMoveWidget(panel->smoF, 420, 10);
-	WMSetFrameTitle(panel->smoF, _("Smooth Scaling"));
+	smoothing = WPrefsCreateGroup(features, _("Smooth Scaling"));
+	panel->smoF = smoothing.frame;
 
-	panel->smoB = WMCreateButton(panel->smoF, WBTToggle);
-	WMResizeWidget(panel->smoB, 64, 64);
-	WMMoveWidget(panel->smoB, 15, 23);
+	panel->smoB = WMCreateButton(smoothing.content, WBTToggle);
+	WMSetButtonFont(panel->smoB, font);
 	WMSetButtonImagePosition(panel->smoB, WIPImageOnly);
-	path = LocateImage(SMOOTH_IMAGE);
-	if (path) {
-		RImage *image, *scaled;
-
-		image = RLoadImage(WMScreenRContext(scr), path, 0);
-		wfree(path);
-
-		scaled = RScaleImage(image, 61, 61);
-		icon = WMCreatePixmapFromRImage(scr, scaled, 128);
-		RReleaseImage(scaled);
-		if (icon) {
-			WMSetButtonImage(panel->smoB, icon);
-			WMReleasePixmap(icon);
-		}
-
-		scaled = RSmoothScaleImage(image, 61, 61);
-		icon = WMCreatePixmapFromRImage(scr, scaled, 128);
-		RReleaseImage(scaled);
-		if (icon) {
-			WMSetButtonAltImage(panel->smoB, icon);
-			WMReleasePixmap(icon);
-		}
-
-		RReleaseImage(image);
-	}
+	setSmoothImages(panel->smoB, font);
 	WMSetBalloonTextForView(_("Smooth scaled background images, neutralizing\n"
 				  "the `pixelization' effect. This will slow\n"
 				  "down loading of background images considerably."), WMWidgetView(panel->smoB));
 
-	WMMapSubwidgets(panel->smoF);
+	WPrefsPackButton(smoothing.content, panel->smoB, 0);
 
     /***************** Titlebar Style Size ****************/
-	panel->titlF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->titlF, 212, 97);
-	WMMoveWidget(panel->titlF, 15, 120);
-	WMSetFrameTitle(panel->titlF, _("Titlebar Style"));
+	style = WPrefsCreateGroup(left, _("Titlebar Style"));
+	panel->titlF = style.frame;
+	row = WMCreateBox(style.content);
+	WMSetBoxHorizontal(row, True);
 
-	panel->oldsB = WMCreateButton(panel->titlF, WBTOnOff);
-	WMResizeWidget(panel->oldsB, 60, 40);
-	WMMoveWidget(panel->oldsB, 16, 32);
+	panel->oldsB = WMCreateButton(row, WBTOnOff);
 	WMSetButtonImagePosition(panel->oldsB, WIPImageOnly);
-	path = LocateImage(OLDS_IMAGE);
-	if (path) {
-		icon = WMCreatePixmapFromFile(scr, path);
-		if (icon) {
-			WMSetButtonImage(panel->oldsB, icon);
-			WMReleasePixmap(icon);
-		}
-		wfree(path);
-	}
+	setTitlebarImage(panel->oldsB, font, OLDS_IMAGE);
 
-	panel->newsB = WMCreateButton(panel->titlF, WBTOnOff);
-	WMResizeWidget(panel->newsB, 60, 40);
-	WMMoveWidget(panel->newsB, 76, 32);
+	panel->newsB = WMCreateButton(row, WBTOnOff);
 	WMSetButtonImagePosition(panel->newsB, WIPImageOnly);
-	path = LocateImage(NEWS_IMAGE);
-	if (path) {
-		icon = WMCreatePixmapFromFile(scr, path);
-		if (icon) {
-			WMSetButtonImage(panel->newsB, icon);
-			WMReleasePixmap(icon);
-		}
-		wfree(path);
-	}
+	setTitlebarImage(panel->newsB, font, NEWS_IMAGE);
 
-	panel->nextB = WMCreateButton(panel->titlF, WBTOnOff);
-	WMResizeWidget(panel->nextB, 60, 40);
-	WMMoveWidget(panel->nextB, 136, 32);
+	panel->nextB = WMCreateButton(row, WBTOnOff);
 	WMSetButtonImagePosition(panel->nextB, WIPImageOnly);
-	path = LocateImage(NEXT_IMAGE);
-	if (path) {
-		icon = WMCreatePixmapFromFile(scr, path);
-		if (icon) {
-			WMSetButtonImage(panel->nextB, icon);
-			WMReleasePixmap(icon);
-		}
-		wfree(path);
-	}
+	setTitlebarImage(panel->nextB, font, NEXT_IMAGE);
 
 	WMGroupButtons(panel->newsB, panel->oldsB);
 	WMGroupButtons(panel->newsB, panel->nextB);
 
-	WMMapSubwidgets(panel->titlF);
+	WPrefsPackButton(row, panel->oldsB, 8);
+	WPrefsPackButton(row, panel->newsB, 8);
+	WPrefsPackButton(row, panel->nextB, 0);
+	WMPackBoxSubview(style.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(left, &style, True, 0);
 
     /**************** Features ******************/
-	panel->animF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->animF, 173, 100);
-	WMMoveWidget(panel->animF, 237, 10);
-	WMSetFrameTitle(panel->animF, _("Animations"));
+	animations = WPrefsCreateGroup(features, _("Animations"));
+	panel->animF = animations.frame;
+	row = WMCreateBox(animations.content);
+	WMSetBoxHorizontal(row, True);
 
-	panel->animB = WMCreateButton(panel->animF, WBTToggle);
-	WMResizeWidget(panel->animB, 64, 64);
-	WMMoveWidget(panel->animB, 15, 23);
+	panel->animB = WMCreateButton(row, WBTToggle);
 	WMSetButtonFont(panel->animB, font);
 	WMSetButtonText(panel->animB, _("Animations"));
 	WMSetButtonImagePosition(panel->animB, WIPAbove);
 	CreateImages(scr, rc, xis, ANIM_IMAGE, &altIcon, &icon);
+	WPrefsSetImageButtonFont(panel->animB, font, icon, altIcon);
 	if (icon) {
-		WMSetButtonImage(panel->animB, icon);
 		WMReleasePixmap(icon);
 	}
 	if (altIcon) {
-		WMSetButtonAltImage(panel->animB, altIcon);
 		WMReleasePixmap(altIcon);
 	}
 	WMSetBalloonTextForView(_("Disable/enable animations such as those shown\n"
 				  "for window miniaturization, shading etc."), WMWidgetView(panel->animB));
 
-	panel->supB = WMCreateButton(panel->animF, WBTToggle);
-	WMResizeWidget(panel->supB, 64, 64);
-	WMMoveWidget(panel->supB, 94, 23);
+	panel->supB = WMCreateButton(row, WBTToggle);
 	WMSetButtonFont(panel->supB, font);
 	WMSetButtonText(panel->supB, _("Superfluous"));
 	WMSetButtonImagePosition(panel->supB, WIPAbove);
 	CreateImages(scr, rc, xis, SUPERF_IMAGE, &altIcon, &icon);
+	WPrefsSetImageButtonFont(panel->supB, font, icon, altIcon);
 	if (icon) {
-		WMSetButtonImage(panel->supB, icon);
 		WMReleasePixmap(icon);
 	}
 	if (altIcon) {
-		WMSetButtonAltImage(panel->supB, altIcon);
 		WMReleasePixmap(altIcon);
 	}
 	WMSetBalloonTextForView(_("Disable/enable `superfluous' features and\n"
@@ -336,54 +282,68 @@ static void createPanel(Panel *p)
 				  "dock when it's being moved to another side and\n"
 				  "the explosion animation when undocking icons."), WMWidgetView(panel->supB));
 
-	WMMapSubwidgets(panel->animF);
+	WPrefsPackButton(row, panel->animB, 8);
+	WPrefsPackButton(row, panel->supB, 0);
+	WMPackBoxSubview(animations.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(features, &animations, True, 12);
+	WPrefsPackGroup(features, &smoothing, True, 0);
+	WMPackBoxSubview(right, features, WMGetBoxMinimumSize(features), False, 12);
+	WMMapSubwidgets(features);
 
     /*********** Dithering **********/
 	panel->cmapSize = 4;
 
-	panel->dithF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->dithF, 277, 97);
-	WMMoveWidget(panel->dithF, 237, 120);
-	WMSetFrameTitle(panel->dithF, _("Dithering colormap for 8bpp"));
+	dithering = WPrefsCreateGroup(right, _("Dithering colormap for 8bpp"));
+	panel->dithF = dithering.frame;
 
 	WMSetBalloonTextForView(_("Number of colors to reserve for Window Maker\n"
 				  "on displays that support only 8bpp (PseudoColor)."),
 				WMWidgetView(panel->dithF));
 
-	panel->dithB = WMCreateSwitchButton(panel->dithF);
-	WMResizeWidget(panel->dithB, 235, 32);
-	WMMoveWidget(panel->dithB, 15, 15);
+	panel->dithB = WMCreateSwitchButton(dithering.content);
 	WMSetButtonText(panel->dithB, _("Disable dithering in any visual/depth"));
 
-	panel->dithL = WMCreateLabel(panel->dithF);
-	WMResizeWidget(panel->dithL, 75, 16);
-	WMMoveWidget(panel->dithL, 98, 50);
+	WPrefsPackButton(dithering.content, panel->dithB, 8);
+	row = WMCreateBox(dithering.content);
+	WMSetBoxHorizontal(row, True);
+	colors = WMCreateBox(row);
+	panel->dithL = WMCreateLabel(colors);
 	WMSetLabelTextAlignment(panel->dithL, WACenter);
-	WMSetLabelText(panel->dithL, "64");
+	WMSetLabelText(panel->dithL, "216");
+	WPrefsPackLabel(colors, panel->dithL, 4);
 
-	panel->dithS = WMCreateSlider(panel->dithF);
-	WMResizeWidget(panel->dithS, 95, 16);
-	WMMoveWidget(panel->dithS, 90, 65);
+	panel->dithS = WMCreateSlider(colors);
+	WMSetSliderFont(panel->dithS, font);
 	WMSetSliderMinValue(panel->dithS, 2);
 	WMSetSliderMaxValue(panel->dithS, 6);
 	WMSetSliderContinuous(panel->dithS, True);
 	WMSetSliderAction(panel->dithS, updateLabel, panel);
+	WMPackBoxSubview(colors, panel->dithS, WMGetSliderPreferredSize(panel->dithS), False, 0);
 
-	panel->dith1L = WMCreateLabel(panel->dithF);
-	WMResizeWidget(panel->dith1L, 80, 35);
-	WMMoveWidget(panel->dith1L, 5, 50);
+	panel->dith1L = WMCreateLabel(row);
 	WMSetLabelTextAlignment(panel->dith1L, WACenter);
 	WMSetLabelFont(panel->dith1L, font);
 	WMSetLabelText(panel->dith1L, _("More colors for\napplications"));
 
-	panel->dith2L = WMCreateLabel(panel->dithF);
-	WMResizeWidget(panel->dith2L, 80, 35);
-	WMMoveWidget(panel->dith2L, 190, 50);
+	panel->dith2L = WMCreateLabel(row);
 	WMSetLabelTextAlignment(panel->dith2L, WACenter);
 	WMSetLabelFont(panel->dith2L, font);
 	WMSetLabelText(panel->dith2L, _("More colors for\nWindow Maker"));
 
-	WMMapSubwidgets(panel->dithF);
+	WPrefsPackLabel(row, panel->dith1L, 8);
+	WMPackBoxSubview(row, colors, WMGetBoxMinimumSize(colors), True, 8);
+	WPrefsPackLabel(row, panel->dith2L, 0);
+	WMPackBoxSubview(dithering.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(colors);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(right, &dithering, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -396,19 +356,8 @@ static void createPanel(Panel *p)
 
 static void storeData(_Panel *panel)
 {
-	int i;
-
-	for (i = 0; i < 5; i++) {
-		if (WMGetButtonSelected(panel->icoB[i]))
-			break;
-	}
-	SetSpeedForKey(i, "IconSlideSpeed");
-
-	for (i = 0; i < 5; i++) {
-		if (WMGetButtonSelected(panel->shaB[i]))
-			break;
-	}
-	SetSpeedForKey(i, "ShadeSpeed");
+	SetSpeedForKey(WPrefsGetSpeedControlValue(&panel->iconSpeed), "IconSlideSpeed");
+	SetSpeedForKey(WPrefsGetSpeedControlValue(&panel->shadeSpeed), "ShadeSpeed");
 
 	if (WMGetButtonSelected(panel->newsB)) {
 		SetStringForKey("new", "NewStyle");
@@ -436,6 +385,7 @@ Panel *InitConfigurations(WMWidget *parent)
 
 	panel->parent = parent;
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

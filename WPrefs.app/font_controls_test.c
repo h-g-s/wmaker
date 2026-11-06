@@ -400,6 +400,41 @@ static void testPreviewButton(WMScreen *screen)
 	WMDestroyWidget(window);
 }
 
+static void testImageButton(WMScreen *screen)
+{
+	WMWindow *window = WMCreateWindow(screen, "imageButtonTest");
+	WMButton *button = WMCreateButton(window, WBTToggle);
+	WMFont *small = WMSystemFontOfSize(screen, 11);
+	WMFont *large = WMSystemFontOfSize(screen, 32);
+	WMPixmap *image = WMCreatePixmap(screen, 60, 20, screen->depth, False);
+	WMSize baseline, enlarged;
+	GC gc = XCreateGC(screen->display, image->pixmap, 0, NULL);
+
+	XSetForeground(screen->display, gc, WMColorPixel(screen->gray));
+	XFillRectangle(screen->display, image->pixmap, gc, 0, 0, 60, 20);
+	XFreeGC(screen->display, gc);
+	WMSetButtonText(button, "Caption below the preview");
+	WMSetButtonImagePosition(button, WIPAbove);
+	WPrefsSetImageButtonFont(button, small, image, image);
+	baseline = WMGetButtonPreferredSize(button);
+	WMSetButtonSelected(button, True);
+	WPrefsSetImageButtonFont(button, large, image, image);
+	enlarged = WMGetButtonPreferredSize(button);
+	assert(WMGetButtonSelected(button));
+	assert(enlarged.width > baseline.width && enlarged.height > baseline.height);
+	WMSetButtonImagePosition(button, WIPImageOnly);
+	enlarged = WMGetButtonPreferredSize(button);
+	assert(enlarged.width > 2 * enlarged.height);
+	WMSetButtonImagePosition(button, WIPAbove);
+	WPrefsSetImageButtonFont(button, small, image, image);
+	assert(WMGetButtonPreferredSize(button).width == baseline.width);
+	assert(WMGetButtonPreferredSize(button).height == baseline.height);
+	WMReleasePixmap(image);
+	WMReleaseFont(small);
+	WMReleaseFont(large);
+	WMDestroyWidget(window);
+}
+
 int main(int argc, char **argv)
 {
 	Display *display;
@@ -427,6 +462,7 @@ int main(int argc, char **argv)
 	if (!gallery) {
 		testPanelLayout(screen);
 		testPreviewButton(screen);
+		testImageButton(screen);
 		testFocusPanel(screen);
 	}
 	window = WMCreateWindow(screen, "fontControls");

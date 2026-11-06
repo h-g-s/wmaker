@@ -7,20 +7,20 @@ static int scaledSize(WMFont *font, int size)
 	return size * WMAX(17, WMFontHeight(font)) / 17;
 }
 
-static WMPixmap *resizePreview(WMPixmap *source, int side, RColor background)
+static WMPixmap *resizePreview(WMPixmap *source, int width, int height, RColor background)
 {
 	RImage *image, *scaled;
 	WMPixmap *result;
 
 	if (!source)
 		return NULL;
-	if (source->width == side && source->height == side)
+	if (source->width == width && source->height == height)
 		return WMRetainPixmap(source);
 	image = RCreateImageFromDrawable(source->screen->rcontext, source->pixmap, source->mask);
 	if (!image)
 		goto failed;
 	RCombineImageWithColor(image, &background);
-	scaled = RSmoothScaleImage(image, side, side);
+	scaled = RSmoothScaleImage(image, width, height);
 	RReleaseImage(image);
 	if (!scaled)
 		goto failed;
@@ -37,8 +37,8 @@ void WPrefsSetPreviewButtonFont(WMButton *button, WMFont *font, WMPixmap *normal
 {
 	int side = scaledSize(font, 48);
 	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(button));
-	WMPixmap *image = resizePreview(normal, side, background);
-	WMPixmap *altImage = resizePreview(selected, side, background);
+	WMPixmap *image = resizePreview(normal, side, side, background);
+	WMPixmap *altImage = resizePreview(selected, side, side, background);
 	WMSize size;
 
 	WMSetButtonFont(button, font);
@@ -49,6 +49,28 @@ void WPrefsSetPreviewButtonFont(WMButton *button, WMFont *font, WMPixmap *normal
 		WMReleasePixmap(image);
 	if (altImage)
 		WMReleasePixmap(altImage);
+	size = WMGetButtonPreferredSize(button);
+	WMResizeWidget(button, size.width, size.height);
+}
+
+void WPrefsSetImageButtonFont(WMButton *button, WMFont *font, WMPixmap *normal, WMPixmap *selected)
+{
+	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(button));
+	WMPixmap *sources[] = { normal, selected };
+	WMSize size;
+
+	WMSetButtonFont(button, font);
+	for (int i = 0; i < 2; i++) {
+		WMPixmap *image = sources[i] ? resizePreview(sources[i], scaledSize(font, sources[i]->width),
+							    scaledSize(font, sources[i]->height), background) : NULL;
+
+		if (i)
+			WMSetButtonAltImage(button, image);
+		else
+			WMSetButtonImage(button, image);
+		if (image)
+			WMReleasePixmap(image);
+	}
 	size = WMGetButtonPreferredSize(button);
 	WMResizeWidget(button, size.width, size.height);
 }

@@ -87,6 +87,7 @@ WPrefs.app/font_controls_test
 WPrefs.app/window_handling_test
 WPrefs.app/icons_test
 WPrefs.app/paths_test
+WPrefs.app/configurations_test
 
 # These files are generated from make rules
 wrlib/wrlib.pc
