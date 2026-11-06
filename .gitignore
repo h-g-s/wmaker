@@ -81,6 +81,7 @@ WINGs/Tests/wmfile
 WINGs/Tests/wmquery
 WINGs/Tests/wtest
 WINGs/layout_test
+WINGs/scroller_test
 
 WPrefs.app/WPrefs
 WPrefs.app/font_controls_test

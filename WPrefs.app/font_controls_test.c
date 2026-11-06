@@ -338,6 +338,25 @@ static void testPanelLayout(WMScreen *screen)
 	assert(!WMGetScrollViewVerticalScroller(viewport));
 	assert(WMGetScrollViewVisibleRect(viewport).pos.x == 0);
 	assert(WMGetScrollViewVisibleRect(viewport).pos.y == 0);
+	{
+		WMFont *original = WMDefaultSystemFont(screen);
+		WMFont *large = WMSystemFontOfSize(screen, 24);
+
+		WMSetWidgetDefaultFont(screen, large);
+		WMReleaseFont(large);
+		/* Enlarged scrollbars can consume more than the old 20-pixel allowance. */
+		WMResizeWidget(viewport, 625, 399);
+		assert(WMGetScrollViewHorizontalScroller(viewport));
+		assert(WMGetScrollViewVerticalScroller(viewport));
+		WMResizeWidget(viewport, 700, 500);
+		assert(!WMGetScrollViewHorizontalScroller(viewport));
+		assert(!WMGetScrollViewVerticalScroller(viewport));
+		WMResizeWidget(viewport, 599, 425);
+		assert(WMGetScrollViewHorizontalScroller(viewport));
+		assert(WMGetScrollViewVerticalScroller(viewport));
+		WMSetWidgetDefaultFont(screen, original);
+		WMReleaseFont(original);
+	}
 	WMDestroyWidget(window);
 }
 

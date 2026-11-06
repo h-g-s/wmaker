@@ -409,7 +409,8 @@ static void splitterHandler(XEvent * event, void *data)
 	WMScreen *scr = WMWidgetScreen(table);
 	GC gc = scr->ixorGC;
 	Display *dpy = WMScreenDisplay(scr);
-	int h = WMWidgetHeight(table) - 22;
+	int h = WMWidgetHeight(table) - (table->hscroll ? WMGetScrollerWidth(table->hscroll) : 20) - 2;
+	int left = table->vscroll ? WMGetScrollerWidth(table->vscroll) : 20;
 	Window w = WMViewXID(table->view);
 
 	pos = WMGetViewPosition(WMWidgetView(column->titleW));
@@ -418,7 +419,7 @@ static void splitterHandler(XEvent * event, void *data)
 
 	ox = cx = offsX;
 
-	XDrawLine(dpy, w, gc, cx + 20, 0, cx + 20, h);
+	XDrawLine(dpy, w, gc, cx + left, 0, cx + left, h);
 
 	while (!done) {
 		XEvent ev;
@@ -436,8 +437,8 @@ static void splitterHandler(XEvent * event, void *data)
 			else
 				cx = offsX + ev.xmotion.x;
 
-			XDrawLine(dpy, w, gc, ox + 20, 0, ox + 20, h);
-			XDrawLine(dpy, w, gc, cx + 20, 0, cx + 20, h);
+			XDrawLine(dpy, w, gc, ox + left, 0, ox + left, h);
+			XDrawLine(dpy, w, gc, cx + left, 0, cx + left, h);
 			break;
 
 		case ButtonRelease:
@@ -447,7 +448,7 @@ static void splitterHandler(XEvent * event, void *data)
 		}
 	}
 
-	XDrawLine(dpy, w, gc, cx + 20, 0, cx + 20, h);
+	XDrawLine(dpy, w, gc, cx + left, 0, cx + left, h);
 	rearrangeHeader(table);
 	repaintTable(table);
 }
@@ -1176,9 +1177,9 @@ static void reorganizeInterior(WMTableView * table)
 	int vsThickness = 0;
 
 	if (table->vscroll)
-		vsThickness = WMWidgetWidth(table->vscroll);
+		vsThickness = WMGetScrollerWidth(table->vscroll);
 	if (table->hscroll)
-		hsThickness = WMWidgetHeight(table->hscroll);
+		hsThickness = WMGetScrollerWidth(table->hscroll);
 
 	width = W_VIEW_WIDTH(view) - 2;
 	height = W_VIEW_HEIGHT(view) - 3;
@@ -1186,18 +1187,22 @@ static void reorganizeInterior(WMTableView * table)
 	height -= table->headerHeight;	/* table header */
 
 	if (table->corner)
-		WMResizeWidget(table->corner, 20, table->headerHeight);
+		WMResizeWidget(table->corner, WMAX(1, vsThickness), table->headerHeight);
 
-	WMMoveWidget(table->vscroll, 1, table->headerHeight + 1);
-	WMResizeWidget(table->vscroll, 20, height + 1);
+	if (table->vscroll) {
+		WMMoveWidget(table->vscroll, 1, table->headerHeight + 1);
+		WMResizeWidget(table->vscroll, 1, WMAX(2, height + 1));
+	}
 
 	if (table->hscroll) {
 		WMMoveWidget(table->hscroll, vsThickness, W_VIEW_HEIGHT(view) - hsThickness - 1);
-		WMResizeWidget(table->hscroll, width - (vsThickness + 1), hsThickness);
+		WMResizeWidget(table->hscroll, WMAX(2, width - (vsThickness + 1)), 1);
 	}
 
 	if (table->header)
-		WMResizeWidget(table->header, width - (vsThickness + 1), table->headerHeight);
+		WMMoveWidget(table->header, vsThickness + 2, 2);
+	if (table->header)
+		WMResizeWidget(table->header, WMAX(1, width - (vsThickness + 1)), table->headerHeight);
 
 	if (table->viewBuffer) {
 		WMReleasePixmap(table->viewBuffer);

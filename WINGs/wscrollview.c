@@ -137,7 +137,7 @@ static void reorganizeInterior(WMScrollView * sPtr)
 	}
 
 	if (sPtr->flags.hasHScroller) {
-		int h = 20;
+		int h = WMGetScrollerWidth(sPtr->hScroller);
 
 		ch -= h;
 
@@ -159,7 +159,7 @@ static void reorganizeInterior(WMScrollView * sPtr)
 	}
 
 	if (sPtr->flags.hasVScroller) {
-		int w = 20;
+		int w = WMGetScrollerWidth(sPtr->vScroller);
 		cw -= w;
 		cx += w;
 		hx += w - 1;
@@ -182,15 +182,15 @@ static void reorganizeInterior(WMScrollView * sPtr)
 		vy = 0;
 	}
 
-	W_ResizeView(sPtr->viewport, cw, ch);
+	W_ResizeView(sPtr->viewport, WMAX(1, cw), WMAX(1, ch));
 	W_MoveView(sPtr->viewport, cx, cy);
 
 	if (sPtr->flags.hasHScroller) {
-		WMResizeWidget(sPtr->hScroller, hw, 20);
+		WMResizeWidget(sPtr->hScroller, WMAX(2, hw), 1);
 		WMMoveWidget(sPtr->hScroller, hx, hy);
 	}
 	if (sPtr->flags.hasVScroller) {
-		WMResizeWidget(sPtr->vScroller, 20, vh);
+		WMResizeWidget(sPtr->vScroller, 1, WMAX(2, vh));
 		WMMoveWidget(sPtr->vScroller, vx, vy);
 	}
 
@@ -224,14 +224,14 @@ void WMResizeScrollViewContent(WMScrollView * sPtr, unsigned int width, unsigned
 	}
 
 	if (sPtr->flags.hasVScroller) {
-		WMResizeWidget(sPtr->vScroller, 20, h);
-		width -= W_VIEW(sPtr->vScroller)->size.width;
+		WMResizeWidget(sPtr->vScroller, 1, WMAX(2, h));
+		width = WMAX(1, (int)width - WMGetScrollerWidth(sPtr->vScroller));
 	}
 
 	if (sPtr->flags.hasHScroller) {
-		WMResizeWidget(sPtr->hScroller, w, 20);
+		WMResizeWidget(sPtr->hScroller, WMAX(2, w), 1);
 		WMMoveWidget(sPtr->hScroller, x, h);
-		height -= W_VIEW(sPtr->hScroller)->size.height;
+		height = WMAX(1, (int)height - WMGetScrollerWidth(sPtr->hScroller));
 	}
 
 	W_ResizeView(sPtr->view, w, h);

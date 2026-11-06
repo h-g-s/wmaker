@@ -21,12 +21,15 @@ libWUtil_la_LIBADD = @LIBBSD@
 
 EXTRA_DIST = BUGS make-rgb Examples Extras Tests
 
-check_PROGRAMS = layout_test
+check_PROGRAMS = layout_test scroller_test
 layout_test_SOURCES = layout_test.c
 layout_test_LDADD = $(LDADD) @XLIBS@
+scroller_test_SOURCES = scroller_test.c
+scroller_test_LDADD = $(LDADD) @XLIBS@ @LIBM@
 
-check-local: layout_test
+check-local: $(check_PROGRAMS)
 	./layout_test || test $$? -eq 77
+	./scroller_test || test $$? -eq 77
 
 
 # wbutton.c

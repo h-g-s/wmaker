@@ -1214,6 +1214,9 @@ extern const char *WMTextDidEndEditingNotification;
 
 WMScroller* WMCreateScroller(WMWidget *parent);
 
+/* Thickness in either orientation, based on the default font at creation. */
+int WMGetScrollerWidth(WMScroller *sPtr);
+
 void WMSetScrollerParameters(WMScroller *sPtr, float floatValue,
                              float knobProportion);
 
@@ -1233,6 +1236,8 @@ extern const char *WMScrollerDidScrollNotification;
 /* ---[ WINGs/wlist.c ]--------------------------------------------------- */
 
 WMList* WMCreateList(WMWidget *parent);
+
+WMScroller* WMGetListScroller(WMList *lPtr);
 
 void WMSetListAllowMultipleSelection(WMList *lPtr, Bool flag);
 

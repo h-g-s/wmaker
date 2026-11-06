@@ -1701,27 +1701,29 @@ static void textDidResize(W_ViewDelegate * self, WMView * view)
 
 	if (tPtr->vS) {
 		WMMoveWidget(tPtr->vS, 1 - (rel ? 1 : 0), rh + 1 - (rel ? 1 : 0));
-		WMResizeWidget(tPtr->vS, 20, h - rh - 2 + (rel ? 2 : 0));
-		vw = 20;
-		WMSetRulerOffset(tPtr->ruler, 22);
+		WMResizeWidget(tPtr->vS, 1, WMAX(2, h - rh - 2 + (rel ? 2 : 0)));
+		vw = WMGetScrollerWidth(tPtr->vS);
+		WMSetRulerOffset(tPtr->ruler, vw + 2);
 	} else
 		WMSetRulerOffset(tPtr->ruler, 2);
 
 	if (tPtr->hS) {
+		int thickness = WMGetScrollerWidth(tPtr->hS);
+
 		if (tPtr->vS) {
-			WMMoveWidget(tPtr->hS, vw, h - 21);
-			WMResizeWidget(tPtr->hS, w - vw - 1, 20);
+			WMMoveWidget(tPtr->hS, vw, h - thickness - 1);
+			WMResizeWidget(tPtr->hS, WMAX(2, w - vw - 1), 1);
 		} else {
-			WMMoveWidget(tPtr->hS, vw + 1, h - 21);
-			WMResizeWidget(tPtr->hS, w - vw - 2, 20);
+			WMMoveWidget(tPtr->hS, vw + 1, h - thickness - 1);
+			WMResizeWidget(tPtr->hS, WMAX(2, w - vw - 2), 1);
 		}
 	}
 
-	tPtr->visible.x = (tPtr->vS) ? 24 : 4;
+	tPtr->visible.x = vw + 4;
 	tPtr->visible.y = (tPtr->ruler && tPtr->flags.rulerShown) ? 43 : 3;
 	tPtr->visible.w = tPtr->view->size.width - tPtr->visible.x - 8;
 	tPtr->visible.h = tPtr->view->size.height - tPtr->visible.y;
-	tPtr->visible.h -= (tPtr->hS) ? 20 : 0;
+	tPtr->visible.h -= tPtr->hS ? WMGetScrollerWidth(tPtr->hS) : 0;
 	tPtr->margins[0].right = tPtr->visible.w;
 
 	if (tPtr->view->flags.realized) {

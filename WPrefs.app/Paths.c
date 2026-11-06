@@ -232,7 +232,7 @@ static WMSize createPathPage(_Panel *panel, const char *title, int identifier,
 	WMTabViewItem *tab = WMCreateTabViewItemWithIdentifier(identifier);
 	WMBox *column, *actions, *spacer;
 	int rowHeight = WMFontHeight(panel->font) + 4;
-	int listWidth = 42 * WMWidthOfString(panel->font, "M", 1) + 28;
+	int listWidth = 42 * WMWidthOfString(panel->font, "M", 1) + 8;
 	WMSize size;
 
 	*frame = WMCreateFrame(panel->box);
@@ -246,7 +246,8 @@ static WMSize createPathPage(_Panel *panel, const char *title, int identifier,
 	WMSetListUserDrawProc(*list, paintItem);
 	WMSetListUserDrawItemHeight(*list, rowHeight);
 	WMHangData(*list, panel);
-	WMPackBoxSubview(column, *list, wmksize(listWidth, rowHeight * 8 + 4), True, 10);
+	WMPackBoxSubview(column, *list, wmksize(listWidth + WMGetScrollerWidth(WMGetListScroller(*list)),
+					     rowHeight * 8 + 4), True, 10);
 	actions = WMCreateBox(column);
 	WMSetBoxHorizontal(actions, True);
 	spacer = WMCreateBox(actions);

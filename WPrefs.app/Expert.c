@@ -461,7 +461,8 @@ static void createPanel(Panel *p)
 	WMResizeWidget(f, panel->contentSize.width, panel->contentSize.height);
 	WMSetScrollViewContentView(sv, WMWidgetView(f));
 	WMPackBoxSubview(panel->box, sv,
-			 wmksize(panel->contentSize.width + 24, 10 * (WMFontHeight(font) + 10)), True, 0);
+			 wmksize(panel->contentSize.width + WMGetScrollerWidth(WMGetScrollViewVerticalScroller(sv)) + 4,
+				 10 * (WMFontHeight(font) + 10)), True, 0);
 	WMMapSubwidgets(f);
 	WMMapSubwidgets(panel->box);
 	/* keep references for the wheel handler and register it */

@@ -229,6 +229,7 @@ static void createMainWindow(WMScreen * scr)
 	WMSetFrameRelief(WPrefs.buttonF, WRFlat);
 
 	WMSetScrollViewContentView(WPrefs.scrollV, WMWidgetView(WPrefs.buttonF));
+	WMResizeWidget(WPrefs.scrollV, 500, 64 + WMGetScrollerWidth(scroller) + 3);
 
 	WPrefs.undosBtn = WMCreateCommandButton(WPrefs.win);
 	WMResizeWidget(WPrefs.undosBtn, 90, 28);

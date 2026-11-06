@@ -8,6 +8,7 @@
 #endif
 
 #include "WINGsP.h"
+#include "wconfig.h"
 
 #include <math.h>
 
@@ -31,6 +32,9 @@ typedef struct W_Scroller {
 
 	float knobProportion;
 	float floatValue;
+	int thickness;
+	WMPixmap *arrows[8];
+	WMPixmap *dimple;
 
 	WMHandlerID timerID;	/* for continuous scrolling mode */
 
@@ -66,7 +70,7 @@ typedef struct W_Scroller {
 
 #define DEFAULT_ARROWS_POSITION	WSAMinEnd
 
-#define BUTTON_SIZE             ((SCROLLER_WIDTH) - 4)
+#define BUTTON_SIZE             (sPtr->thickness - 4)
 
 static void destroyScroller(Scroller * sPtr);
 static void paintScroller(Scroller * sPtr);
@@ -85,11 +89,103 @@ W_ViewDelegate _ScrollerViewDelegate = {
 	willResizeScroller
 };
 
+static WMPixmap *scrollerSymbol(WMScreen *screen, WMPixmap *source, int thickness, int kind)
+{
+	/* Supersample geometry, not the original small bitmap, for smooth edges. */
+	const int samples = 4;
+	RImage *image, *scaled;
+	WMPixmap *pixmap;
+	Pixmap canvas;
+	GC gc;
+	int width, height, w, h;
+
+	if (thickness == SCROLLER_WIDTH)
+		return WMRetainPixmap(source);
+	width = kind == 8 ? 7 * thickness / SCROLLER_WIDTH : (thickness - 4) * 2 / 3;
+	height = width;
+	w = width * samples;
+	h = height * samples;
+	canvas = XCreatePixmap(screen->display, screen->rootWin, w, h, screen->depth);
+	gc = XCreateGC(screen->display, canvas, 0, NULL);
+	XSetForeground(screen->display, gc, W_PIXEL(kind >= 4 && kind < 8 ? screen->white : screen->gray));
+	XFillRectangle(screen->display, canvas, gc, 0, 0, w, h);
+	if (kind == 8) {
+		int inset = samples;
+
+		XSetForeground(screen->display, gc, W_PIXEL(screen->darkGray));
+		XFillArc(screen->display, canvas, gc, 0, 0, w, h, 45 * 64, 180 * 64);
+		XSetForeground(screen->display, gc, W_PIXEL(screen->white));
+		XFillArc(screen->display, canvas, gc, 0, 0, w, h, 225 * 64, 180 * 64);
+		XSetForeground(screen->display, gc, W_PIXEL(screen->gray));
+		XFillArc(screen->display, canvas, gc, inset, inset, w - 2 * inset, h - 2 * inset, 0, 360 * 64);
+	} else {
+		XPoint points[3];
+		int end = w - 1;
+		int middle = end / 2;
+
+		switch (kind % 4) {
+		case 0:
+			points[0] = (XPoint){ 0, middle };
+			points[1] = (XPoint){ end, 0 };
+			points[2] = (XPoint){ end, end };
+			break;
+		case 1:
+			points[0] = (XPoint){ end, middle };
+			points[1] = (XPoint){ 0, end };
+			points[2] = (XPoint){ 0, 0 };
+			break;
+		case 2:
+			points[0] = (XPoint){ middle, 0 };
+			points[1] = (XPoint){ end, end };
+			points[2] = (XPoint){ 0, end };
+			break;
+		default:
+			points[0] = (XPoint){ middle, end };
+			points[1] = (XPoint){ 0, 0 };
+			points[2] = (XPoint){ end, 0 };
+			break;
+		}
+		XSetForeground(screen->display, gc, W_PIXEL(kind >= 4 ? screen->darkGray : screen->black));
+		XFillPolygon(screen->display, canvas, gc, points, 3, Convex, CoordModeOrigin);
+	}
+	image = RCreateImageFromDrawable(screen->rcontext, canvas, None);
+	XFreeGC(screen->display, gc);
+	XFreePixmap(screen->display, canvas);
+	if (!image)
+		goto failed;
+	scaled = RSmoothScaleImage(image, width, height);
+	RReleaseImage(image);
+	if (!scaled)
+		goto failed;
+	pixmap = WMCreatePixmapFromRImage(screen, scaled, 127);
+	RReleaseImage(scaled);
+	if (pixmap)
+		return pixmap;
+failed:
+	wwarning(_("could not render scrollbar symbol: %s"), RMessageForError(RErrorCode));
+	return WMRetainPixmap(source);
+}
+
+int WMGetScrollerWidth(WMScroller *sPtr)
+{
+	CHECK_CLASS(sPtr, WC_Scroller);
+	return sPtr->thickness;
+}
+
 WMScroller *WMCreateScroller(WMWidget * parent)
 {
 	Scroller *sPtr;
+	WMScreen *screen = WMWidgetScreen(parent);
+	WMFont *font = WMDefaultSystemFont(screen);
+	int unit = WMAX(17, WMFontHeight(font));
+	WMPixmap *sources[] = {
+		screen->leftArrow, screen->rightArrow, screen->upArrow, screen->downArrow,
+		screen->hiLeftArrow, screen->hiRightArrow, screen->hiUpArrow, screen->hiDownArrow
+	};
 
 	sPtr = wmalloc(sizeof(Scroller));
+	sPtr->thickness = SCROLLER_WIDTH + SCROLLER_WIDTH * (unit - 17) / (2 * 17);
+	WMReleaseFont(font);
 	sPtr->widgetClass = WC_Scroller;
 
 	sPtr->view = W_CreateView(W_VIEW(parent));
@@ -98,6 +194,9 @@ WMScroller *WMCreateScroller(WMWidget * parent)
 		return NULL;
 	}
 	sPtr->view->self = sPtr;
+	for (int i = 0; i < 8; i++)
+		sPtr->arrows[i] = scrollerSymbol(screen, sources[i], sPtr->thickness, i);
+	sPtr->dimple = scrollerSymbol(screen, screen->scrollerDimple, sPtr->thickness, 8);
 
 	sPtr->view->delegate = &_ScrollerViewDelegate;
 
@@ -106,7 +205,7 @@ WMScroller *WMCreateScroller(WMWidget * parent)
 	WMCreateEventHandler(sPtr->view, ExposureMask | StructureNotifyMask
 			     | ClientMessageMask, handleEvents, sPtr);
 
-	W_ResizeView(sPtr->view, SCROLLER_WIDTH, SCROLLER_WIDTH);
+	W_ResizeView(sPtr->view, sPtr->thickness, sPtr->thickness);
 	sPtr->flags.arrowsPosition = DEFAULT_ARROWS_POSITION;
 
 	WMCreateEventHandler(sPtr->view, ButtonPressMask | ButtonReleaseMask
@@ -137,10 +236,10 @@ static void willResizeScroller(W_ViewDelegate * self, WMView * view, unsigned in
 
 	if (*width > *height) {
 		sPtr->flags.horizontal = 1;
-		*height = SCROLLER_WIDTH;
+		*height = sPtr->thickness;
 	} else {
 		sPtr->flags.horizontal = 0;
-		*width = SCROLLER_WIDTH;
+		*width = sPtr->thickness;
 	}
 }
 
@@ -217,6 +316,15 @@ WMScrollerPart WMGetScrollerHitPart(WMScroller * sPtr)
 	return sPtr->flags.hitPart;
 }
 
+static int arrowOffset(Scroller *sPtr, int part)
+{
+	int length = sPtr->flags.horizontal ? sPtr->view->size.width : sPtr->view->size.height;
+
+	if (sPtr->flags.arrowsPosition == WSAMaxEnd)
+		return length - (2 - part) * (BUTTON_SIZE + 1) - 1;
+	return 2 + part * (BUTTON_SIZE + 1);
+}
+
 static void paintArrow(WMScroller * sPtr, Drawable d, int part)
 /*
  * part- 0 paints the decrement arrow, 1 the increment arrow
@@ -224,7 +332,7 @@ static void paintArrow(WMScroller * sPtr, Drawable d, int part)
 {
 	WMView *view = sPtr->view;
 	WMScreen *scr = view->screen;
-	int ofs;
+	int ofs = arrowOffset(sPtr, part);
 	W_Pixmap *arrow;
 
 #ifndef DOUBLE_BUFFER
@@ -233,26 +341,16 @@ static void paintArrow(WMScroller * sPtr, Drawable d, int part)
 
 	if (part == 0) {	/* decrement button */
 		if (sPtr->flags.horizontal) {
-			if (sPtr->flags.arrowsPosition == WSAMaxEnd) {
-				ofs = view->size.width - 2 * (BUTTON_SIZE + 1) - 1;
-			} else {
-				ofs = 2;
-			}
 			if (sPtr->flags.decrDown)
-				arrow = scr->hiLeftArrow;
+				arrow = sPtr->arrows[4];
 			else
-				arrow = scr->leftArrow;
+				arrow = sPtr->arrows[0];
 
 		} else {
-			if (sPtr->flags.arrowsPosition == WSAMaxEnd) {
-				ofs = view->size.height - 2 * (BUTTON_SIZE + 1) - 1;
-			} else {
-				ofs = 2;
-			}
 			if (sPtr->flags.decrDown)
-				arrow = scr->hiUpArrow;
+				arrow = sPtr->arrows[6];
 			else
-				arrow = scr->upArrow;
+				arrow = sPtr->arrows[2];
 		}
 
 #ifndef DOUBLE_BUFFER
@@ -261,25 +359,15 @@ static void paintArrow(WMScroller * sPtr, Drawable d, int part)
 #endif
 	} else {		/* increment button */
 		if (sPtr->flags.horizontal) {
-			if (sPtr->flags.arrowsPosition == WSAMaxEnd) {
-				ofs = view->size.width - BUTTON_SIZE + 1 - 3;
-			} else {
-				ofs = 2 + BUTTON_SIZE + 1;
-			}
 			if (sPtr->flags.incrDown)
-				arrow = scr->hiRightArrow;
+				arrow = sPtr->arrows[5];
 			else
-				arrow = scr->rightArrow;
+				arrow = sPtr->arrows[1];
 		} else {
-			if (sPtr->flags.arrowsPosition == WSAMaxEnd) {
-				ofs = view->size.height - BUTTON_SIZE + 1 - 3;
-			} else {
-				ofs = 2 + BUTTON_SIZE + 1;
-			}
 			if (sPtr->flags.incrDown)
-				arrow = scr->hiDownArrow;
+				arrow = sPtr->arrows[7];
 			else
-				arrow = scr->downArrow;
+				arrow = sPtr->arrows[3];
 		}
 
 #ifndef DOUBLE_BUFFER
@@ -349,7 +437,7 @@ static int knobLength(Scroller * sPtr)
 	if (tmp < BUTTON_SIZE)
 		tmp = BUTTON_SIZE;
 
-	return tmp;
+	return WMAX(0, WMIN(tmp, length));
 }
 
 static void paintScroller(Scroller * sPtr)
@@ -364,6 +452,8 @@ static void paintScroller(Scroller * sPtr)
 	int length, ofs;
 	float knobP, knobL;
 
+	if (view->size.width < 5 || view->size.height < 5)
+		return;
 #ifdef DOUBLE_BUFFER
 	d = XCreatePixmap(scr->display, view->window, view->size.width, view->size.height, scr->depth);
 	XFillRectangle(scr->display, d, WMColorGC(scr->gray), 0, 0, view->size.width, view->size.height);
@@ -379,7 +469,8 @@ static void paintScroller(Scroller * sPtr)
 	else
 		length = view->size.height - 4;
 
-	if (sPtr->flags.documentFullyVisible) {
+	if (sPtr->flags.documentFullyVisible ||
+	    length < BUTTON_SIZE + (sPtr->flags.arrowsPosition == WSANone ? 0 : 2 * (BUTTON_SIZE + 1))) {
 		XFillRectangle(scr->display, d, scr->stippleGC, 2, 2, view->size.width - 4, view->size.height - 4);
 	} else {
 		ofs = 2;
@@ -405,11 +496,11 @@ static void paintScroller(Scroller * sPtr)
 #endif
 			W_DrawRelief(scr, d, ofs + (int)knobP, 2, (int)knobL, view->size.height - 4, WRRaised);
 
-			XCopyArea(scr->display, scr->scrollerDimple->pixmap, d,
+			XCopyArea(scr->display, sPtr->dimple->pixmap, d,
 				  scr->copyGC, 0, 0,
-				  scr->scrollerDimple->width, scr->scrollerDimple->height,
-				  ofs + (int)knobP + ((int)knobL - scr->scrollerDimple->width - 1) / 2,
-				  (view->size.height - scr->scrollerDimple->height - 1) / 2);
+				  sPtr->dimple->width, sPtr->dimple->height,
+				  ofs + (int)knobP + ((int)knobL - sPtr->dimple->width - 1) / 2,
+				  (view->size.height - sPtr->dimple->height - 1) / 2);
 
 			/* after */
 			if ((int)(knobP + knobL) < length)
@@ -427,11 +518,11 @@ static void paintScroller(Scroller * sPtr)
 			XFillRectangle(scr->display, d, scr->lightGC,
 				       2 + 2, ofs + (int)knobP + 2, view->size.width - 4 - 4, (int)knobL - 4);
 #endif
-			XCopyArea(scr->display, scr->scrollerDimple->pixmap, d,
+			XCopyArea(scr->display, sPtr->dimple->pixmap, d,
 				  scr->copyGC, 0, 0,
-				  scr->scrollerDimple->width, scr->scrollerDimple->height,
-				  (view->size.width - scr->scrollerDimple->width - 1) / 2,
-				  ofs + (int)knobP + ((int)knobL - scr->scrollerDimple->height - 1) / 2);
+				  sPtr->dimple->width, sPtr->dimple->height,
+				  (view->size.width - sPtr->dimple->width - 1) / 2,
+				  ofs + (int)knobP + ((int)knobL - sPtr->dimple->height - 1) / 2);
 
 			W_DrawRelief(scr, d, 2, ofs + (int)knobP, view->size.width - 4, (int)knobL, WRRaised);
 
@@ -481,11 +572,16 @@ static WMScrollerPart locatePointInScroller(Scroller * sPtr, int x, int y, int a
 	int width = sPtr->view->size.width;
 	int height = sPtr->view->size.height;
 	int c, p1, p2, p3, p4, p5, p6;
+	int length = (sPtr->flags.horizontal ? width : height) - 4;
+	int buttonSpan = BUTTON_SIZE + 1;
 	int knobL, slotL;
 
 	/* if there is no knob... */
-	if (sPtr->flags.documentFullyVisible)
+	if (sPtr->flags.documentFullyVisible ||
+	    length < BUTTON_SIZE + (sPtr->flags.arrowsPosition == WSANone ? 0 : 2 * buttonSpan))
 		return WSKnobSlot;
+	if (x < 0 || y < 0 || x >= width || y >= height)
+		return WSNoPart;
 
 	if (sPtr->flags.horizontal)
 		c = x;
@@ -499,37 +595,21 @@ static WMScrollerPart locatePointInScroller(Scroller * sPtr, int x, int y, int a
 	 */
 
 	if (sPtr->flags.arrowsPosition == WSAMinEnd) {
-		p1 = 18;
-		p2 = 36;
-
-		if (sPtr->flags.horizontal) {
-			slotL = width - 36;
-			p5 = width;
-		} else {
-			slotL = height - 36;
-			p5 = height;
-		}
+		p1 = arrowOffset(sPtr, 1);
+		p2 = p1 + buttonSpan;
+		slotL = length - 2 * buttonSpan;
+		p5 = length + 2;
 		p6 = p5;
 	} else if (sPtr->flags.arrowsPosition == WSAMaxEnd) {
-		if (sPtr->flags.horizontal) {
-			slotL = width - 36;
-			p6 = width - 18;
-		} else {
-			slotL = height - 36;
-			p6 = height - 18;
-		}
-		p5 = p6 - 18;
-
-		p1 = p2 = 0;
+		slotL = length - 2 * buttonSpan;
+		p5 = arrowOffset(sPtr, 0);
+		p6 = arrowOffset(sPtr, 1);
+		p1 = p2 = 2;
 	} else {
 		/* no arrows */
-		p1 = p2 = 0;
-
-		if (sPtr->flags.horizontal) {
-			slotL = p5 = p6 = width;
-		} else {
-			slotL = p5 = p6 = height;
-		}
+		p1 = p2 = 2;
+		slotL = length;
+		p5 = p6 = length + 2;
 	}
 
 	knobL = knobLength(sPtr);
@@ -537,17 +617,17 @@ static WMScrollerPart locatePointInScroller(Scroller * sPtr, int x, int y, int a
 	p4 = p3 + knobL;
 
 	/* uses a mix of the NS and Win ways of doing scroll page */
-	if (c <= p1)
+	if (sPtr->flags.arrowsPosition == WSAMinEnd && c < p1)
 		return alternate ? WSDecrementPage : WSDecrementLine;
-	else if (c <= p2)
+	else if (sPtr->flags.arrowsPosition == WSAMinEnd && c < p2)
 		return alternate ? WSIncrementPage : WSIncrementLine;
-	else if (c <= p3)
+	else if (c < p3)
 		return WSDecrementPage;
-	else if (c <= p4)
+	else if (c < p4)
 		return WSKnob;
-	else if (c <= p5)
+	else if (c < p5 || sPtr->flags.arrowsPosition != WSAMaxEnd)
 		return WSIncrementPage;
-	else if (c <= p6)
+	else if (c < p6)
 		return alternate ? WSDecrementPage : WSDecrementLine;
 	else
 		return alternate ? WSIncrementPage : WSIncrementLine;
@@ -651,6 +731,8 @@ static float floatValueForPoint(Scroller * sPtr, int point)
 	}
 
 	knobL = (float)knobLength(sPtr);
+	if (slotLength <= knobL)
+		return sPtr->floatValue;
 #ifdef STRICT_NEXT_BEHAVIOUR
 	if (point < slotOfs + knobL / 2)
 		position = (float)(slotOfs + knobL / 2);
@@ -840,5 +922,8 @@ static void destroyScroller(Scroller * sPtr)
 		WMDeleteTimerHandler(sPtr->timerID);
 	}
 
+	for (int i = 0; i < 8; i++)
+		WMReleasePixmap(sPtr->arrows[i]);
+	WMReleasePixmap(sPtr->dimple);
 	wfree(sPtr);
 }

@@ -695,7 +695,8 @@ static void createPanel(Panel * p)
 	panel->shortcuts = wmalloc(sizeof(char *) * panel->actionCount);
 	WPrefsPackLabel(actions, panel->actL, 2);
 	WMPackBoxSubview(actions, panel->actLs,
-			 wmksize(listWidth + panel->indicatorWidth + 24, rowHeight * 10 + 4), True, 0);
+			 wmksize(listWidth + panel->indicatorWidth + WMGetScrollerWidth(WMGetListScroller(panel->actLs)) + 4,
+				 rowHeight * 10 + 4), True, 0);
 	WMPackBoxSubview(panel->box, actions, WMGetBoxMinimumSize(actions), True, 12);
 
     /***************** Shortcut ****************/

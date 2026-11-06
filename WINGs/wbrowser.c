@@ -120,12 +120,12 @@ WMBrowser *WMCreateBrowser(WMWidget * parent)
 	bPtr->flags.isTitled = DEFAULT_IS_TITLED;
 	bPtr->maxVisibleColumns = DEFAULT_MAX_VISIBLE_COLUMNS;
 
+	if (bPtr->flags.hasScroller)
+		setupScroller(bPtr);
+
 	WMResizeWidget(bPtr, DEFAULT_WIDTH, DEFAULT_HEIGHT);
 
 	bPtr->pathSeparator = wstrdup(DEFAULT_SEPARATOR);
-
-	if (bPtr->flags.hasScroller)
-		setupScroller(bPtr);
 
 	for (i = 0; i < bPtr->maxVisibleColumns; i++) {
 		WMAddBrowserColumn(bPtr);
@@ -441,22 +441,23 @@ static void willResizeBrowser(W_ViewDelegate * self, WMView * view, unsigned int
 	assert(*width > 0);
 	assert(*height > 0);
 
-	bPtr->columnSize.width = (*width - (cols - 1) * COLUMN_SPACING) / cols;
+	bPtr->columnSize.width = WMAX(1, ((int)*width - (cols - 1) * COLUMN_SPACING) / cols);
 	bPtr->columnSize.height = *height;
 
 	if (bPtr->flags.isTitled) {
 		colY = TITLE_SPACING + bPtr->titleHeight;
-		bPtr->columnSize.height -= colY;
+		bPtr->columnSize.height = WMAX(1, (int)bPtr->columnSize.height - colY);
 	} else {
 		colY = 0;
 	}
 
 	if (bPtr->flags.hasScroller) {
-		bPtr->columnSize.height -= SCROLLER_WIDTH + 4;
+		bPtr->columnSize.height = WMAX(1, (int)bPtr->columnSize.height -
+						WMGetScrollerWidth(bPtr->scroller) - 4);
 
 		if (bPtr->scroller) {
-			WMResizeWidget(bPtr->scroller, *width - 2, 1);
-			WMMoveWidget(bPtr->scroller, 1, *height - SCROLLER_WIDTH - 1);
+			WMResizeWidget(bPtr->scroller, WMAX(2, (int)*width - 2), 1);
+			WMMoveWidget(bPtr->scroller, 1, *height - WMGetScrollerWidth(bPtr->scroller) - 1);
 		}
 	}
 
@@ -593,12 +594,11 @@ static void setupScroller(WMBrowser * bPtr)
 	WMScroller *sPtr;
 	int y;
 
-	y = bPtr->view->size.height - SCROLLER_WIDTH - 1;
-
 	sPtr = WMCreateScroller(bPtr);
+	y = bPtr->view->size.height - WMGetScrollerWidth(sPtr) - 1;
 	WMSetScrollerAction(sPtr, scrollCallback, bPtr);
 	WMMoveWidget(sPtr, 1, y);
-	WMResizeWidget(sPtr, bPtr->view->size.width - 2, SCROLLER_WIDTH);
+	WMResizeWidget(sPtr, WMAX(2, (int)bPtr->view->size.width - 2), 1);
 
 	bPtr->scroller = sPtr;
 
@@ -843,8 +843,10 @@ static void paintBrowser(WMBrowser * bPtr)
 	if (!bPtr->view->flags.mapped)
 		return;
 
-	W_DrawRelief(bPtr->view->screen, bPtr->view->window, 0,
-		     bPtr->view->size.height - SCROLLER_WIDTH - 2, bPtr->view->size.width, 22, WRSunken);
+	if (bPtr->scroller)
+		W_DrawRelief(bPtr->view->screen, bPtr->view->window, 0,
+			     bPtr->view->size.height - WMGetScrollerWidth(bPtr->scroller) - 2,
+			     bPtr->view->size.width, WMGetScrollerWidth(bPtr->scroller) + 2, WRSunken);
 
 	if (bPtr->flags.isTitled) {
 		for (i = 0; i < bPtr->maxVisibleColumns; i++) {

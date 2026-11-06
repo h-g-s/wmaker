@@ -61,12 +61,20 @@ static void resizeViewport(PanelViewport *viewport)
 	Bool vertical = viewport->minimum.height > size.height;
 	WMRect visible;
 
-	if (vertical && viewport->minimum.width > size.width - 20)
-		horizontal = True;
-	if (horizontal && viewport->minimum.height > size.height - 20)
-		vertical = True;
 	WMSetScrollViewHasHorizontalScroller(viewport->scroll, horizontal);
 	WMSetScrollViewHasVerticalScroller(viewport->scroll, vertical);
+	/* Either scrollbar can make the other necessary. */
+	for (int i = 0; i < 2; i++) {
+		visible = WMGetScrollViewVisibleRect(viewport->scroll);
+		if (!horizontal && viewport->minimum.width > visible.size.width) {
+			horizontal = True;
+			WMSetScrollViewHasHorizontalScroller(viewport->scroll, True);
+		}
+		if (!vertical && viewport->minimum.height > visible.size.height) {
+			vertical = True;
+			WMSetScrollViewHasVerticalScroller(viewport->scroll, True);
+		}
+	}
 	visible = WMGetScrollViewVisibleRect(viewport->scroll);
 	WMResizeWidget(viewport->content, WMAX(viewport->minimum.width, visible.size.width),
 		       WMAX(viewport->minimum.height, visible.size.height));
@@ -108,7 +116,7 @@ void WPrefsArrangeWindow(WPrefsWindowLayout *layout, WMSize contentSize)
 
 	WMReparentWidget(layout->sections, column, 0, 0);
 	WMReparentWidget(layout->viewport, column, 0, 0);
-	WMPackBoxSubview(column, layout->sections, wmksize(500, 87), False, 8);
+	WMPackBoxSubview(column, layout->sections, wmksize(500, WMWidgetHeight(layout->sections)), False, 8);
 	WMPackBoxSubview(column, layout->viewport, wmksize(contentSize.width + 20, 100), True, 8);
 	WMPackBoxSubview(column, actions, footer, False, 0);
 	natural = WMGetBoxMinimumSize(column);

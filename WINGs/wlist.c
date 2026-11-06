@@ -176,6 +176,12 @@ void WMSetListAllowMultipleSelection(WMList * lPtr, Bool flag)
 	lPtr->flags.allowMultipleSelection = ((flag == 0) ? 0 : 1);
 }
 
+WMScroller *WMGetListScroller(WMList *lPtr)
+{
+	CHECK_CLASS(lPtr, WC_List);
+	return lPtr->vScroller;
+}
+
 void WMSetListAllowEmptySelection(WMList * lPtr, Bool flag)
 {
 	lPtr->flags.allowEmptySelection = ((flag == 0) ? 0 : 1);
@@ -480,9 +486,9 @@ static void paintItem(List * lPtr, int index)
 
 	itemPtr = WMGetFromArray(lPtr->items, index);
 
-	width = lPtr->view->size.width - 2 - 19;
+	x = WMGetScrollerWidth(lPtr->vScroller) - 1;
+	width = WMAX(1, (int)lPtr->view->size.width - 2 - x);
 	height = lPtr->itemHeight;
-	x = 19;
 	y = 2 + (index - lPtr->topItem) * lPtr->itemHeight + 1;
 	tlen = strlen(itemPtr->text);
 
@@ -535,8 +541,10 @@ static void paintList(List * lPtr)
 		if (lPtr->topItem + lPtr->fullFitLines + lPtr->flags.dontFitAll > itemCount) {
 
 			lim = itemCount - lPtr->topItem;
-			XClearArea(scrPtr->display, lPtr->view->window, 19,
-				   2 + lim * lPtr->itemHeight, lPtr->view->size.width - 21,
+			int left = WMGetScrollerWidth(lPtr->vScroller) - 1;
+
+			XClearArea(scrPtr->display, lPtr->view->window, left,
+				   2 + lim * lPtr->itemHeight, WMAX(1, (int)lPtr->view->size.width - left - 2),
 				   lPtr->view->size.height - lim * lPtr->itemHeight - 3, False);
 		} else {
 			lim = lPtr->fullFitLines + lPtr->flags.dontFitAll;
@@ -1632,7 +1640,7 @@ static void didResizeList(W_ViewDelegate * self, WMView * view)
 	/* Parameter not used, but tell the compiler that it is ok */
 	(void) self;
 
-	WMResizeWidget(lPtr->vScroller, 1, view->size.height - 2);
+	WMResizeWidget(lPtr->vScroller, 1, WMAX(2, (int)view->size.height - 2));
 
 	updateDoubleBufferPixmap(lPtr);
 
