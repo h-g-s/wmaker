@@ -78,7 +78,10 @@ WPrefs_LDADD = \
 	@FCLIBS@ \
 	@INTLIBS@
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test
+appearance_test_SOURCES = appearance_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
+appearance_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
+appearance_test_LDADD = $(WPrefs_LDADD)
 menu_test_SOURCES = menu_test.c editmenu.h xmodifier.c PanelLayout.c PanelLayout.h
 menu_test_LDADD = $(WPrefs_LDADD)
 font_simple_test_SOURCES = font_simple_test.c PanelLayout.c PanelLayout.h
@@ -123,3 +126,4 @@ check-local: $(check_PROGRAMS)
 	./expert_test || test $$? -eq 77
 	./font_simple_test || test $$? -eq 77
 	./menu_test || test $$? -eq 77
+	./appearance_test || test $$? -eq 77
