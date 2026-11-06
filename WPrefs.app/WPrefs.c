@@ -30,7 +30,7 @@
 #endif
 
 
-#define MAX_SECTIONS 16
+#define MAX_SECTIONS 32
 
 typedef struct _WPrefs {
 	WMWindow *win;
@@ -495,7 +495,10 @@ void AddSection(Panel * panel, const char *iconFile)
 {
 	WMButton *bPtr;
 
-	assert(WPrefs.sectionCount < MAX_SECTIONS);
+	if (WPrefs.sectionCount >= MAX_SECTIONS) {
+		wwarning("too many preference sections, ignoring \"%s\"", iconFile);
+		return;
+	}
 
 	bPtr = WMCreateCustomButton(WPrefs.buttonF, WBBStateLightMask | WBBStateChangeMask);
 	WMResizeWidget(bPtr, 64, 64);
