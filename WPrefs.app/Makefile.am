@@ -6,6 +6,8 @@ wpexecbindir = @wprefs_bindir@
 
 wpexecbin_PROGRAMS = WPrefs
 
+bin_PROGRAMS = wmwallpaper
+
 wpdatadir = @wprefs_datadir@
 
 wpdata_DATA = WPrefs.tiff WPrefs.xpm
@@ -49,6 +51,9 @@ WPrefs_SOURCES = \
 	Preferences.c \
 	TexturePanel.c \
 	TexturePanel.h \
+	Wallpaper.c \
+	WallpaperChooser.c \
+	WallpaperChooser.h \
 	WindowHandling.c \
 	Workspace.c \
 	double.c \
@@ -78,7 +83,13 @@ WPrefs_LDADD = \
 	@FCLIBS@ \
 	@INTLIBS@
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test
+wmwallpaper_SOURCES = wmwallpaper.c WallpaperChooser.c WallpaperChooser.h PanelLayout.c PanelLayout.h
+wmwallpaper_DEPENDENCIES = $(WPrefs_DEPENDENCIES)
+wmwallpaper_LDADD = $(WPrefs_LDADD)
+
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test
+wallpaper_test_SOURCES = wallpaper_test.c PanelLayout.c PanelLayout.h WallpaperChooser.h
+wallpaper_test_LDADD = $(WPrefs_LDADD)
 appearance_test_SOURCES = appearance_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 appearance_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 appearance_test_LDADD = $(WPrefs_LDADD)
@@ -127,3 +138,4 @@ check-local: $(check_PROGRAMS)
 	./font_simple_test || test $$? -eq 77
 	./menu_test || test $$? -eq 77
 	./appearance_test || test $$? -eq 77
+	./wallpaper_test || test $$? -eq 77

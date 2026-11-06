@@ -73,6 +73,7 @@ dist_tiffdata_DATA = \
 	timer5.tiff \
 	timer5s.tiff \
 	tnew.tiff \
+	wallpaper.tiff \
 	whandling.tiff \
 	windowfocus.tiff \
 	workspace.tiff \

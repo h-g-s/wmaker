@@ -72,6 +72,7 @@ dist_xpmdata_DATA = \
 	timer5.xpm \
 	timer5s.xpm \
 	tnew.xpm \
+	wallpaper.xpm \
 	whandling.xpm \
 	windowfocus.xpm \
 	workspace.xpm \

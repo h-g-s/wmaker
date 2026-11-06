@@ -16,6 +16,7 @@ dist_man_MANS = \
 	wmgenmenu.1 \
 	wmiv.1 \
 	wmmenugen.1 \
+	wmwallpaper.1 \
 	WPrefs.1 \
 	wxcopy.1 \
 	wxpaste.1
@@ -58,7 +59,7 @@ am__v_CHKOPTS_0 = @echo "  CHK      $@" ;
 am__v_CHKOPTS_1 =
 
 check-local: wmaker-args WPrefs-args wmagnify-args geticonset-args getstyle-args seticons-args setstyle-args \
-	wdread-args wdwrite-args wmcopythemes-args wmgenmenu-args wmiv-args wmmenugen-args wmsetbg-args wxcopy-args wxpaste-args
+	wdread-args wdwrite-args wmcopythemes-args wmgenmenu-args wmiv-args wmmenugen-args wmsetbg-args wmwallpaper-args wxcopy-args wxpaste-args
 
 wmaker-args:
 	$(AM_V_CHKOPTS)$(top_srcdir)/script/check-cmdline-options-doc.sh \
@@ -116,6 +117,10 @@ wmsetbg-args:
 	$(AM_V_CHKOPTS)$(top_srcdir)/script/check-cmdline-options-doc.sh \
 		--program "$(top_builddir)/util/wmsetbg" --man-page "wmsetbg.1"
 
+wmwallpaper-args:
+	$(AM_V_CHKOPTS)$(top_srcdir)/script/check-cmdline-options-doc.sh \
+		--program "$(top_builddir)/WPrefs.app/wmwallpaper" --man-page "$(top_srcdir)/doc/wmwallpaper.1"
+
 wxcopy-args:
 	$(AM_V_CHKOPTS)$(top_srcdir)/script/check-cmdline-options-doc.sh \
 		--program "$(top_builddir)/util/wxcopy" --man-page "$(top_srcdir)/doc/wxcopy.1"
@@ -125,7 +130,7 @@ wxpaste-args:
 		--program "$(top_builddir)/util/wxpaste" --man-page "$(top_srcdir)/doc/wxpaste.1"
 
 .PHONY: wmaker-args WPrefs-args wmagnify-args geticonset-args getstyle-args seticons-args setstyle-args \
-	wdread-args wdwrite-args wmcopythemes-args wmgenmenu-args wmiv-args wmmenugen-args wmsetbg-args wxcopy-args wxpaste-args
+	wdread-args wdwrite-args wmcopythemes-args wmgenmenu-args wmiv-args wmmenugen-args wmsetbg-args wmwallpaper-args wxcopy-args wxpaste-args
 
 
 ################################################################################

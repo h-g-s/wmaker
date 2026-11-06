@@ -27,6 +27,8 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/Preferences.c \
 	$(top_srcdir)/WPrefs.app/TexturePanel.c \
 	$(top_srcdir)/WPrefs.app/WPrefs.c \
+	$(top_srcdir)/WPrefs.app/Wallpaper.c \
+	$(top_srcdir)/WPrefs.app/WallpaperChooser.c \
 	$(top_srcdir)/WPrefs.app/WindowHandling.c \
 	$(top_srcdir)/WPrefs.app/Workspace.c \
 	$(top_srcdir)/WPrefs.app/double.c \

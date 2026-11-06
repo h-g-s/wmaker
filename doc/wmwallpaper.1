@@ -1,0 +1,43 @@
+.TH wmwallpaper 1 "2025" "Window Maker"
+.SH NAME
+wmwallpaper \- choose the Window Maker desktop wallpaper
+.SH SYNOPSIS
+.B wmwallpaper
+.RI [ options ]
+.RI [ folder ]
+.SH DESCRIPTION
+.B wmwallpaper
+shows the images found in a folder (and up to three levels of its
+subfolders) as a list of miniatures, with a preview of how the selected
+image will look on the screen using the chosen placement (scaled, tiled,
+centered, fit or fill).
+.PP
+When more than one monitor is present, the wallpaper can be applied either
+to all monitors, setting \fBWorkspaceBack\fP, or only to the monitor under
+the pointer, setting its entry in \fBMonitorSpecificBack\fP.
+.PP
+If no \fIfolder\fP is given, \fI~/GNUstep/Library/WindowMaker/Backgrounds\fP
+is used, falling back to the system Window Maker or desktop wallpaper
+folders when it is missing or empty.
+The same chooser is available as the Wallpaper panel of \fBWPrefs\fP(1).
+.SH OPTIONS
+.TP
+.BI \-display " host:display.screen"
+specify display to use.
+.TP
+.BR \-\-help " | " \-h
+print a help message with the list of options and exit
+.TP
+.BR \-\-version " | " \-v
+print the version of Window Maker from which the program comes and exit
+.SH FILES
+.TP
+.B ~/GNUstep/Defaults/WindowMaker
+Window Maker defaults, where the wallpaper settings are stored.
+.TP
+.B $XDG_CACHE_HOME/WindowMaker/wallpapers
+cached miniatures (\fI~/.cache\fP is used if \fBXDG_CACHE_HOME\fP is not set).
+.SH SEE ALSO
+.BR WPrefs (1),
+.BR wmsetbg (1),
+.BR wmaker (1)

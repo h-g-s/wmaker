@@ -167,6 +167,7 @@ Panel *InitMouseSettings(WMWidget *parent);
 Panel *InitPaths(WMWidget *parent);
 Panel *InitPreferences(WMWidget *parent);
 Panel *InitWindowHandling(WMWidget *parent);
+Panel *InitWallpaper(WMWidget *parent);
 Panel *InitWorkspace(WMWidget *parent);
 
 

@@ -621,6 +621,7 @@ void Initialize(WMScreen * scr)
 	InitMouseSettings(WPrefs.banner);
 
 	InitAppearance(WPrefs.banner);
+	InitWallpaper(WPrefs.banner);
 
 	InitFontSimple(WPrefs.banner);
 
