@@ -404,6 +404,7 @@ static void testImageButton(WMScreen *screen)
 {
 	WMWindow *window = WMCreateWindow(screen, "imageButtonTest");
 	WMButton *button = WMCreateButton(window, WBTToggle);
+	WMLabel *label = WMCreateLabel(window);
 	WMFont *small = WMSystemFontOfSize(screen, 11);
 	WMFont *large = WMSystemFontOfSize(screen, 32);
 	WMPixmap *image = WMCreatePixmap(screen, 60, 20, screen->depth, False);
@@ -429,6 +430,15 @@ static void testImageButton(WMScreen *screen)
 	WPrefsSetImageButtonFont(button, small, image, image);
 	assert(WMGetButtonPreferredSize(button).width == baseline.width);
 	assert(WMGetButtonPreferredSize(button).height == baseline.height);
+	WMSetLabelImagePosition(label, WIPImageOnly);
+	WPrefsSetImageLabelFont(label, small, image);
+	assert(WMGetLabelImage(label) == image);
+	WPrefsSetImageLabelFont(label, large, image);
+	enlarged = WMGetPixmapSize(WMGetLabelImage(label));
+	assert(enlarged.width > 60 && enlarged.height > 20);
+	assert(abs(enlarged.width - enlarged.height * 3) <= 2);
+	WPrefsSetImageLabelFont(label, small, image);
+	assert(WMGetLabelImage(label) == image);
 	WMReleasePixmap(image);
 	WMReleaseFont(small);
 	WMReleaseFont(large);

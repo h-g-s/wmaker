@@ -78,6 +78,16 @@ DoubleTest *CreateDoubleTest(WMWidget * parent, const char *text)
 	return dPtr;
 }
 
+WMSize GetDoubleTestPreferredSize(DoubleTest *tester)
+{
+	WMFont *font = WMDefaultSystemFont(WMWidgetScreen(tester));
+	int width = tester->text ? WMWidthOfString(font, tester->text, strlen(tester->text)) : 0;
+	WMSize size = wmksize(width + 20, WMFontHeight(font) + 10);
+
+	WMReleaseFont(font);
+	return size;
+}
+
 static void paintDoubleTest(_DoubleTest * dPtr)
 {
 	W_Screen *scr = dPtr->view->screen;

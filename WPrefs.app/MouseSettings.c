@@ -20,6 +20,8 @@
  */
 
 #include "WPrefs.h"
+#include "FontControls.h"
+#include "PanelLayout.h"
 
 #include <X11/Xutil.h>
 #include <X11/XKBlib.h>
@@ -114,9 +116,6 @@ typedef struct _Panel {
 #define ICON_FILE "mousesettings"
 
 #define SPEED_ICON_FILE "mousespeed"
-
-#define DELAY_ICON "timer%i"
-#define DELAY_ICON_S "timer%is"
 
 /* need access to the double click variables */
 #include <WINGs/WINGsP.h>
@@ -310,8 +309,10 @@ static void showData(_Panel * panel)
 		if (DELAY(i) == b)
 			a = i;
 	}
+	for (i = 0; i < wlengthof(panel->ddelaB); i++)
+		WMSetButtonSelected(panel->ddelaB[i], False);
 	if (a >= 0)
-		WMPerformButtonClick(panel->ddelaB[a]);
+		WMSetButtonSelected(panel->ddelaB[a], True);
 	sprintf(buffer, "%i", b);
 	WMSetTextFieldText(panel->ddelaT, buffer);
 
@@ -430,193 +431,165 @@ static void fillModifierPopUp(WMPopUpButton * pop)
 		XFreeModifiermap(mapping);
 }
 
+static void showPanel(_Panel *panel)
+{
+	for (int i = 0; i < wlengthof(panel->ddelaB); i++)
+		if (WMGetButtonSelected(panel->ddelaB[i])) {
+			WINGsConfiguration.doubleClickDelay = DELAY(i);
+			break;
+		}
+}
+
 static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMColor *textColor = WMDarkGrayColor(scr);
+	WPrefsGroup speed, grab, delay, actions;
+	WMBox *columns, *left, *right, *row;
 	WMPixmap *icon;
-	char *buf1, *buf2;
-	int i;
-	RColor color;
+	int i, labelWidth = 0;
+	int unit = WMAX(17, WMFontHeight(font));
+	RColor color = WMGetRColorFromColor(WMGetWidgetBackgroundColor(panel->parent));
 	char *path;
 
-	color.red = 0xae;
-	color.green = 0xaa;
-	color.blue = 0xae;
-
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
     /**************** Mouse Speed ****************/
-	panel->speedF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->speedF, 219, 85);
-	WMMoveWidget(panel->speedF, 9, 54);
-	WMSetFrameTitle(panel->speedF, _("Mouse Speed"));
+	speed = WPrefsCreateGroup(left, _("Mouse Speed"));
+	panel->speedF = speed.frame;
+	row = WMCreateBox(speed.content);
+	WMSetBoxHorizontal(row, True);
 
-	panel->speedL = WMCreateLabel(panel->speedF);
-	WMResizeWidget(panel->speedL, 40, 46);
-	WMMoveWidget(panel->speedL, 8, 10);
+	panel->speedL = WMCreateLabel(row);
 	WMSetLabelImagePosition(panel->speedL, WIPImageOnly);
 	path = LocateImage(SPEED_ICON_FILE);
 	if (path) {
 		icon = WMCreateBlendedPixmapFromFile(scr, path, &color);
 		if (icon) {
-			WMSetLabelImage(panel->speedL, icon);
+			WPrefsSetImageLabelFont(panel->speedL, font, icon);
 			WMReleasePixmap(icon);
 		} else {
 			wwarning(_("could not load icon %s"), path);
 		}
 		wfree(path);
 	}
+	WPrefsPackLabel(row, panel->speedL, 10);
 
-	panel->speedS = WMCreateSlider(panel->speedF);
-	WMResizeWidget(panel->speedS, 150, 15);
-	WMMoveWidget(panel->speedS, 58, 30);
+	panel->speedS = WMCreateSlider(row);
 	WMSetSliderMinValue(panel->speedS, 0);
 	WMSetSliderMaxValue(panel->speedS, 40);
 	WMSetSliderContinuous(panel->speedS, False);
 	WMSetSliderAction(panel->speedS, speedChange, panel);
+	WMPackBoxSubview(row, panel->speedS, wmksize(150 * unit / 17, 20 * unit / 17), True, 0);
+	WMPackBoxSubview(speed.content, row, WMGetBoxMinimumSize(row), False, 10);
+	WMMapSubwidgets(row);
 
-	panel->acceL = WMCreateLabel(panel->speedF);
-	WMResizeWidget(panel->acceL, 50, 16);
-	WMMoveWidget(panel->acceL, 8, 58);
+	row = WMCreateBox(speed.content);
+	WMSetBoxHorizontal(row, True);
+	panel->acceL = WMCreateLabel(row);
 	WMSetLabelTextAlignment(panel->acceL, WARight);
 	WMSetLabelText(panel->acceL, _("Accel.:"));
+	WPrefsPackLabel(row, panel->acceL, 8);
 
-	panel->acceT = WMCreateTextField(panel->speedF);
-	WMResizeWidget(panel->acceT, 40, 20);
-	WMMoveWidget(panel->acceT, 58, 56);
+	panel->acceT = WMCreateTextField(row);
+	WMPackBoxSubview(row, panel->acceT, WMGetTextFieldPreferredSize(panel->acceT, 5), False, 10);
 	WMAddNotificationObserver(returnPressed, panel, WMTextDidEndEditingNotification, panel->acceT);
 
-	panel->threL = WMCreateLabel(panel->speedF);
-	WMResizeWidget(panel->threL, 80, 16);
-	WMMoveWidget(panel->threL, 98, 58);
+	panel->threL = WMCreateLabel(row);
 	WMSetLabelTextAlignment(panel->threL, WARight);
 	WMSetLabelText(panel->threL, _("Threshold:"));
+	WPrefsPackLabel(row, panel->threL, 8);
 
-	panel->threT = WMCreateTextField(panel->speedF);
-	WMResizeWidget(panel->threT, 30, 20);
-	WMMoveWidget(panel->threT, 178, 56);
+	panel->threT = WMCreateTextField(row);
+	WMPackBoxSubview(row, panel->threT, WMGetTextFieldPreferredSize(panel->threT, 5), False, 0);
 	WMAddNotificationObserver(returnPressed, panel, WMTextDidEndEditingNotification, panel->threT);
 
-	WMMapSubwidgets(panel->speedF);
+	WMPackBoxSubview(speed.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
 
 	/* ************** Grab Modifier **************** */
-	panel->grabF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->grabF, 219, 46);
-	WMMoveWidget(panel->grabF, 9, 5);
-	WMSetFrameTitle(panel->grabF, _("Mouse Grab Modifier"));
+	grab = WPrefsCreateGroup(left, _("Mouse Grab Modifier"));
+	panel->grabF = grab.frame;
 
 	WMSetBalloonTextForView(_("Keyboard modifier to use for actions that\n"
 				  "involve dragging windows with the mouse,\n"
 				  "clicking inside the window."), WMWidgetView(panel->grabF));
 
-	panel->grabP = WMCreatePopUpButton(panel->grabF);
-	WMResizeWidget(panel->grabP, 178, 20);
-	WMMoveWidget(panel->grabP, 20, 17);
+	panel->grabP = WMCreatePopUpButton(grab.content);
 
 	fillModifierPopUp(panel->grabP);
-	WMMapSubwidgets(panel->grabF);
+	WMPackBoxSubview(grab.content, panel->grabP, WMGetPopUpButtonPreferredSize(panel->grabP), False, 0);
+	WPrefsPackGroup(left, &grab, False, 12);
+	WPrefsPackGroup(left, &speed, False, 12);
 
 	/***************** Doubleclick Delay ****************/
 
-	panel->ddelaF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->ddelaF, 219, 80);
-	WMMoveWidget(panel->ddelaF, 9, 142);
-	WMSetFrameTitle(panel->ddelaF, _("Double-Click Delay"));
-
-	buf1 = wmalloc(strlen(DELAY_ICON) + 2);
-	buf2 = wmalloc(strlen(DELAY_ICON_S) + 2);
+	delay = WPrefsCreateGroup(left, _("Double-Click Delay"));
+	panel->ddelaF = delay.frame;
+	row = WMCreateBox(delay.content);
+	WMSetBoxHorizontal(row, True);
 
 	for (i = 0; i < wlengthof(panel->ddelaB); i++) {
-		panel->ddelaB[i] = WMCreateCustomButton(panel->ddelaF, WBBStateChangeMask);
-		WMResizeWidget(panel->ddelaB[i], 25, 25);
-		WMMoveWidget(panel->ddelaB[i], 18 + (40 * i), 18);
-		WMSetButtonBordered(panel->ddelaB[i], False);
-		WMSetButtonImagePosition(panel->ddelaB[i], WIPImageOnly);
+		panel->ddelaB[i] = WMCreateCustomButton(row, WBBStateChangeMask);
+		WPrefsSetClockButtonFont(panel->ddelaB[i], font, i + 1);
 		WMSetButtonAction(panel->ddelaB[i], doubleClick, panel);
 		if (i > 0) {
 			WMGroupButtons(panel->ddelaB[0], panel->ddelaB[i]);
 		}
-		sprintf(buf1, DELAY_ICON, i + 1);
-		sprintf(buf2, DELAY_ICON_S, i + 1);
-		path = LocateImage(buf1);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonImage(panel->ddelaB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-		path = LocateImage(buf2);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonAltImage(panel->ddelaB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
+		WMPackBoxSubview(row, panel->ddelaB[i], WMGetViewSize(WMWidgetView(panel->ddelaB[i])),
+				 True, i == 4 ? 0 : 8);
 	}
-	wfree(buf1);
-	wfree(buf2);
-
-	panel->tester = CreateDoubleTest(panel->ddelaF, _("Test"));
-	WMResizeWidget(panel->tester, 84, 24);
-	WMMoveWidget(panel->tester, 20, 48);
-
-	panel->ddelaT = WMCreateTextField(panel->ddelaF);
-	WMResizeWidget(panel->ddelaT, 40, 20);
-	WMMoveWidget(panel->ddelaT, 130, 50);
-
-	panel->ddelaL = WMCreateLabel(panel->ddelaF);
-	WMResizeWidget(panel->ddelaL, 40, 16);
-	WMMoveWidget(panel->ddelaL, 173, 54);
-	{
-		WMFont *font;
-		WMColor *color;
-
-		font = WMSystemFontOfSize(scr, 10);
-		color = WMDarkGrayColor(scr);
-		WMSetLabelTextColor(panel->ddelaL, color);
-		WMSetLabelFont(panel->ddelaL, font);
-		WMReleaseFont(font);
-		WMReleaseColor(color);
-	}
+	WMPackBoxSubview(delay.content, row, WMGetBoxMinimumSize(row), False, 10);
+	WMMapSubwidgets(row);
+	row = WMCreateBox(delay.content);
+	WMSetBoxHorizontal(row, True);
+	panel->tester = CreateDoubleTest(row, _("Test"));
+	WMPackBoxSubview(row, panel->tester, GetDoubleTestPreferredSize(panel->tester), True, 12);
+	panel->ddelaT = WMCreateTextField(row);
+	WMPackBoxSubview(row, panel->ddelaT, WMGetTextFieldPreferredSize(panel->ddelaT, 5), False, 8);
+	panel->ddelaL = WMCreateLabel(row);
+	WMSetLabelTextColor(panel->ddelaL, textColor);
 	WMSetLabelText(panel->ddelaL, _("ms"));
-
-	WMMapSubwidgets(panel->ddelaF);
+	WPrefsPackLabel(row, panel->ddelaL, 0);
+	WMPackBoxSubview(delay.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	row = WMCreateBox(delay.content);
+	WMPackBoxSubview(delay.content, row, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(left, &delay, True, 0);
 
 	/* ************** Workspace Action Buttons **************** */
 
-	panel->menuF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->menuF, 276, 217);
-	WMMoveWidget(panel->menuF, 236, 5);
-	WMSetFrameTitle(panel->menuF, _("Workspace Mouse Actions"));
+	actions = WPrefsCreateGroup(right, _("Workspace Mouse Actions"));
+	panel->menuF = actions.frame;
 
-	panel->disaB = WMCreateSwitchButton(panel->menuF);
-	WMResizeWidget(panel->disaB, 254, 18);
-	WMMoveWidget(panel->disaB, 10, 15);
+	panel->disaB = WMCreateSwitchButton(actions.content);
 	WMSetButtonText(panel->disaB, _("Disable mouse actions"));
 	WMSetButtonAction(panel->disaB, toggle_disabling_of_mouse_actions, panel);
+	WPrefsPackButton(actions.content, panel->disaB, 10);
+	for (i = 0; i < wlengthof(button_list); i++)
+		labelWidth = WMAX(labelWidth, WMWidthOfString(font, _(button_list[i].display_label),
+							    strlen(_(button_list[i].display_label))) + 8);
 
 	for (i = 0; i < wlengthof(button_list); i++) {
 		int j;
+		WMSize size;
 
-		panel->mouse_action[i].label = WMCreateLabel(panel->menuF);
-		WMResizeWidget(panel->mouse_action[i].label, 115, 20);
-		WMMoveWidget(panel->mouse_action[i].label, 4, 37 + 25 * i);
+		row = WMCreateBox(actions.content);
+		WMSetBoxHorizontal(row, True);
+		panel->mouse_action[i].label = WMCreateLabel(row);
 		WMSetLabelTextAlignment(panel->mouse_action[i].label, WARight);
 		WMSetLabelText(panel->mouse_action[i].label, _(button_list[i].display_label));
+		size = WMGetLabelPreferredSize(panel->mouse_action[i].label);
+		size.width = WMAX(size.width, labelWidth);
+		WMPackBoxSubview(row, panel->mouse_action[i].label, size, False, 8);
 
-		panel->mouse_action[i].popup = WMCreatePopUpButton(panel->menuF);
-		WMResizeWidget(panel->mouse_action[i].popup, 145, 20);
-		WMMoveWidget(panel->mouse_action[i].popup, 121, 37 + 25 * i);
+		panel->mouse_action[i].popup = WMCreatePopUpButton(row);
 
 		if (button_list[i].type == T_BUTTON) {
 			for (j = 0; j < wlengthof(button_actions); j++)
@@ -625,8 +598,23 @@ static void createPanel(Panel * p)
 			for (j = 0; j < wlengthof(wheel_actions); j++)
 				WMAddPopUpButtonItem(panel->mouse_action[i].popup, _(wheel_actions[j].label));
 		}
+		WMPackBoxSubview(row, panel->mouse_action[i].popup,
+				 WMGetPopUpButtonPreferredSize(panel->mouse_action[i].popup), True, 0);
+		WMPackBoxSubview(actions.content, row, WMGetBoxMinimumSize(row), False,
+				 i == wlengthof(button_list) - 1 ? 0 : 8);
+		WMMapSubwidgets(row);
 	}
-	WMMapSubwidgets(panel->menuF);
+	row = WMCreateBox(actions.content);
+	WMPackBoxSubview(actions.content, row, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(right, &actions, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
+	WMReleaseColor(textColor);
+	WMReleaseFont(font);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -789,6 +777,8 @@ Panel *InitMouseSettings(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
+	panel->callbacks.showPanel = showPanel;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

@@ -34,6 +34,7 @@ void WPrefsSetPreviewButtonFont(WMButton *button, WMFont *font, WMPixmap *normal
 
 /* Scale each source at its original aspect ratio; preserve caption and image position. */
 void WPrefsSetImageButtonFont(WMButton *button, WMFont *font, WMPixmap *normal, WMPixmap *selected);
+void WPrefsSetImageLabelFont(WMLabel *label, WMFont *font, WMPixmap *source);
 
 void WPrefsCreateIconPositionControl(WPrefsIconPositionControl *control, WMWidget *parent, WMFont *font);
 void WPrefsSetIconPositionControlFont(WPrefsIconPositionControl *control, WMFont *font);

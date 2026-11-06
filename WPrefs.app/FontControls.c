@@ -75,6 +75,18 @@ void WPrefsSetImageButtonFont(WMButton *button, WMFont *font, WMPixmap *normal, 
 	WMResizeWidget(button, size.width, size.height);
 }
 
+void WPrefsSetImageLabelFont(WMLabel *label, WMFont *font, WMPixmap *source)
+{
+	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(label));
+	WMPixmap *image = source ? resizePreview(source, scaledSize(font, source->width),
+						 scaledSize(font, source->height), background) : NULL;
+
+	WMSetLabelFont(label, font);
+	WMSetLabelImage(label, image);
+	if (image)
+		WMReleasePixmap(image);
+}
+
 static WMPixmap *drawSpeedImage(WMButton *button, WMFont *font, int value, Bool selected)
 {
 	enum { samples = 4 };

@@ -136,6 +136,7 @@ char *capture_shortcut(Display *dpy, Bool *capturing, Bool convert_case);
 typedef struct W_DoubleTest DoubleTest;
 
 DoubleTest *CreateDoubleTest(WMWidget *parent, const char *text);
+WMSize GetDoubleTestPreferredSize(DoubleTest *tester);
 
 
 /* ---[ main.c ] --------------------------------------------------------- */
