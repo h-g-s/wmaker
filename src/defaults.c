@@ -129,6 +129,8 @@ static WDECallbackUpdate setUTitleBack;
 static WDECallbackUpdate setResizebarBack;
 static WDECallbackUpdate setWorkspaceBack;
 static time_t workspace_back_applied;
+static Bool workspace_back_applied_in_pass;
+static WDECallbackUpdate setMonitorSpecificBack;
 static WDECallbackUpdate setWorkspaceSpecificBack;
 static WDECallbackUpdate setMenuTitleColor;
 static WDECallbackUpdate setMenuTextColor;
@@ -564,6 +566,9 @@ WDefaultEntry optionList[] = {
 	 * specified and 2 copies of wmsetbg will be launched */
 	{"WorkspaceBack", "(solid, \"rgb:50/50/75\")", NULL,
 	    NULL, getWSBackground, setWorkspaceBack, NULL, NULL},
+	/* After WorkspaceBack, so a reload changing both renders only once. */
+	{"MonitorSpecificBack", "{}", NULL,
+	    NULL, getPropList, setMonitorSpecificBack, NULL, NULL},
 	{"SmoothWorkspaceBack", "NO", NULL,
 	    NULL, getBool, NULL, NULL, NULL},
 	{"IconBack", "(dgradient, \"rgb:a6/a6/b6\", \"rgb:51/55/61\")", NULL,
@@ -1234,6 +1239,7 @@ void wReadDefaults(WScreen * scr, WMPropList * new_dict)
 	WMPropList *old_dict = (w_global.domain.wmaker->dictionary != new_dict ? w_global.domain.wmaker->dictionary : NULL);
 
 	needs_refresh = 0;
+	workspace_back_applied_in_pass = False;
 
 	for (i = 0; i < wlengthof(optionList); i++) {
 		entry = &optionList[i];
@@ -3284,6 +3290,7 @@ static int setWorkspaceBack(WScreen * scr, WDefaultEntry * entry, void *tdata, v
 	(void) bar;
 
 	workspace_back_applied = time(NULL);
+	workspace_back_applied_in_pass = True;
 
 	if (scr->flags.backimage_helper_launched) {
 		char *str;
@@ -3323,6 +3330,29 @@ static int setWorkspaceBack(WScreen * scr, WDefaultEntry * entry, void *tdata, v
 	}
 	WMReleasePropList(value);
 
+	return 0;
+}
+
+static void reapplyWorkspaceBack(WScreen *scr);
+
+/*
+ * wmsetbg reads the per-monitor textures from the defaults file itself and
+ * draws them over the workspace texture, so only a re-render is needed.
+ */
+static int setMonitorSpecificBack(WScreen *scr, WDefaultEntry *entry, void *tdata, void *bar)
+{
+	WMPropList *value = tdata;
+
+	(void) entry;
+	(void) bar;
+
+	if (!WMIsPLDictionary(value))
+		wwarning(_("MonitorSpecificBack must be a dictionary of monitor names and textures"));
+	else if (scr->flags.backimage_helper_launched)
+		SendHelperMessage(scr, 'M', scr->current_workspace + 1, NULL);
+	else if (!workspace_back_applied_in_pass)
+		reapplyWorkspaceBack(scr);
+	WMReleasePropList(value);
 	return 0;
 }
 

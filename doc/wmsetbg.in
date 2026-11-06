@@ -46,11 +46,20 @@ scales the specified \fIimage\fP to fill screen while preserving aspect ratio
 .BR \-\-help | \-h
 print a help message with the list of options
 .TP
+.BR \-\-list\-monitors | \-L
+print one line per monitor as "x y width height name" and exit
+.TP
 .BR \-\-match | \-m
 use the best-matching-color algorithm when converting image to indexed color palette
 .TP
 .BR \-\-maxscale | \-a
 scales the specified \fIimage\fP to fit inside the screen preserving its aspect ratio
+.TP
+.BR \-\-monitor | \-M " \fIname\fP"
+set the background only for the monitor called \fIname\fP (as printed by
+\fB\-\-list\-monitors\fP). With \fB\-u\fP the texture is stored in the
+\fIMonitorSpecificBack\fP dictionary of the Window Maker defaults; such an
+entry takes precedence over the workspace background on that monitor
 .TP
 .BR \-\-parse | \-p " \fItexture\fP"
 parses the specified \fItexture\fP as a \fIproplist style texture\fP

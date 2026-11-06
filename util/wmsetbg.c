@@ -77,6 +77,17 @@ int scrX, scrY;
 
 WXineramaInfo xineInfo;
 
+typedef struct {
+	WMRect rect;
+	char *name;
+} MonitorInfo;
+
+/* Heads with stable names, used to match MonitorSpecificBack entries. */
+static MonitorInfo *monitors;
+static int monitorCount;
+static WMPropList *monitorBacks;
+static Bool composingMonitor;
+
 Bool smooth = False;
 #if defined(USE_XINERAMA) || defined(USE_RANDR)
 Bool xineStretch = False;
@@ -86,6 +97,8 @@ Pixmap CurrentPixmap = None;
 char *PixmapPath = NULL;
 
 static const char *prog_name;
+
+static WMPropList *getValueForKey(const char *domain, const char *keyName);
 
 typedef struct BackgroundTexture {
 	int refcount;
@@ -106,7 +119,7 @@ static noreturn void quit(int rcode)
 	exit(rcode);
 }
 
-static void initXinerama(void)
+static void initHeads(void)
 {
 	if (xineInfo.screens)
 		wfree(xineInfo.screens);
@@ -187,6 +200,137 @@ static void initXinerama(void)
 		XRRFreeScreenResources(resources);
 	}
 #endif
+}
+
+static Bool sameRect(const WMRect *rect, int x, int y, unsigned int width, unsigned int height)
+{
+	return rect->pos.x == x && rect->pos.y == y &&
+	       rect->size.width == width && rect->size.height == height;
+}
+
+static char *randrMonitorName(const WMRect *rect)
+{
+	char *name = NULL;
+#ifdef USE_RANDR
+	int major = 1, minor = 2;
+	int i;
+
+	if (!XRRQueryVersion(dpy, &major, &minor) || major < 1 || (major == 1 && minor < 2))
+		return NULL;
+# if RANDR_MAJOR > 1 || (RANDR_MAJOR == 1 && RANDR_MINOR >= 5)
+	if (major > 1 || minor >= 5) {
+		XRRMonitorInfo *info;
+		int count = 0;
+
+		info = XRRGetMonitors(dpy, root, True, &count);
+		for (i = 0; info && i < count && !name; i++) {
+			if (sameRect(rect, info[i].x, info[i].y, info[i].width, info[i].height)) {
+				char *atom = XGetAtomName(dpy, info[i].name);
+
+				if (atom) {
+					name = wstrdup(atom);
+					XFree(atom);
+				}
+			}
+		}
+		if (info)
+			XRRFreeMonitors(info);
+		if (name)
+			return name;
+	}
+# endif
+	{
+		XRRScreenResources *resources = XRRGetScreenResourcesCurrent(dpy, root);
+
+		if (!resources)
+			return NULL;
+		for (i = 0; i < resources->ncrtc && !name; i++) {
+			XRRCrtcInfo *crtc = XRRGetCrtcInfo(dpy, resources, resources->crtcs[i]);
+
+			if (crtc && crtc->mode != None && crtc->noutput > 0 &&
+			    sameRect(rect, crtc->x, crtc->y, crtc->width, crtc->height)) {
+				XRROutputInfo *output = XRRGetOutputInfo(dpy, resources, crtc->outputs[0]);
+
+				if (output) {
+					name = wstrdup(output->name);
+					XRRFreeOutputInfo(output);
+				}
+			}
+			if (crtc)
+				XRRFreeCrtcInfo(crtc);
+		}
+		XRRFreeScreenResources(resources);
+	}
+#else
+	(void) rect;
+#endif
+	return name;
+}
+
+static void initMonitors(void)
+{
+	int i;
+
+	for (i = 0; i < monitorCount; i++)
+		wfree(monitors[i].name);
+	if (monitors)
+		wfree(monitors);
+
+	monitorCount = xineInfo.count > 0 ? xineInfo.count : 1;
+	monitors = wmalloc(sizeof(MonitorInfo) * monitorCount);
+	for (i = 0; i < monitorCount; i++) {
+		if (xineInfo.count > 0) {
+			monitors[i].rect = xineInfo.screens[i];
+		} else {
+			monitors[i].rect.pos.x = 0;
+			monitors[i].rect.pos.y = 0;
+			monitors[i].rect.size.width = scrWidth;
+			monitors[i].rect.size.height = scrHeight;
+		}
+		monitors[i].name = randrMonitorName(&monitors[i].rect);
+		if (!monitors[i].name) {
+			char buffer[32];
+
+			snprintf(buffer, sizeof(buffer), "Monitor-%d", i + 1);
+			monitors[i].name = wstrdup(buffer);
+		}
+	}
+}
+
+static void initXinerama(void)
+{
+	initHeads();
+	initMonitors();
+}
+
+/* Returns the texture description for monitor i, or NULL to use the workspace texture. */
+static char *monitorTextureSpec(int i)
+{
+	WMPropList *key, *value;
+
+	if (!monitorBacks || !WMIsPLDictionary(monitorBacks))
+		return NULL;
+	key = WMCreatePLString(monitors[i].name);
+	value = WMGetFromPLDictionary(monitorBacks, key);
+	WMReleasePropList(key);
+	if (!value || !WMIsPLArray(value) || WMGetPropListItemCount(value) < 2)
+		return NULL;
+	return WMGetPropListDescription(value, False);
+}
+
+static Bool hasMonitorTextures(void)
+{
+	int i;
+
+	for (i = 0; i < monitorCount; i++) {
+		char *spec = monitorTextureSpec(i);
+
+		if (spec) {
+			wfree(spec);
+			return True;
+		}
+	}
+	return False;
 }
 
 static RImage *loadImage(RContext * rc, const char *file)
@@ -308,7 +452,7 @@ applyImage(RContext * rc, BackgroundTexture * texture, RImage * image, char type
 	}
 }
 
-static BackgroundTexture *parseTexture(RContext * rc, char *text)
+static BackgroundTexture *parseBaseTexture(RContext *rc, const char *text)
 {
 	BackgroundTexture *texture = NULL;
 	WMPropList *texarray;
@@ -747,7 +891,7 @@ static BackgroundTexture *parseTexture(RContext * rc, char *text)
 	return NULL;
 }
 
-static void freeTexture(BackgroundTexture * texture)
+static void freeTextureColor(BackgroundTexture *texture)
 {
 	if (texture->solid) {
 		unsigned long pixel[1];
@@ -757,12 +901,92 @@ static void freeTexture(BackgroundTexture * texture)
 		if (pixel[0] != BlackPixelOfScreen(DefaultScreenOfDisplay(dpy))
 		    && pixel[0] != WhitePixelOfScreen(DefaultScreenOfDisplay(dpy)))
 			XFreeColors(dpy, DefaultColormap(dpy, scr), pixel, 1, 0);
+		texture->solid = 0;
 	}
+}
+
+static void freeTexture(BackgroundTexture * texture)
+{
+	freeTextureColor(texture);
 	if (texture->pixmap) {
 		XFreePixmap(dpy, texture->pixmap);
 	}
 	wfree(texture->spec);
 	wfree(texture);
+}
+
+/*
+ * Render each monitor-specific texture as if its monitor were the whole
+ * screen, then place it over the workspace texture in a full-screen pixmap.
+ */
+static void composeMonitorTextures(RContext *rc, BackgroundTexture *texture)
+{
+	int savedWidth = scrWidth, savedHeight = scrHeight, savedCount = xineInfo.count;
+	XGCValues gcv;
+	Pixmap full;
+	GC gc;
+	int i;
+
+	full = XCreatePixmap(dpy, root, scrWidth, scrHeight, DefaultDepth(dpy, scr));
+	gcv.fill_style = FillTiled;
+	gcv.tile = texture->pixmap;
+	gc = XCreateGC(dpy, full, GCFillStyle | GCTile, &gcv);
+	XFillRectangle(dpy, full, gc, 0, 0, scrWidth, scrHeight);
+
+	composingMonitor = True;
+	for (i = 0; i < monitorCount; i++) {
+		WMRect *rect = &monitors[i].rect;
+		BackgroundTexture *monitor;
+		char *spec = monitorTextureSpec(i);
+
+		if (!spec)
+			continue;
+		scrWidth = rect->size.width;
+		scrHeight = rect->size.height;
+		xineInfo.count = 0;
+		monitor = parseBaseTexture(rc, spec);
+		scrWidth = savedWidth;
+		scrHeight = savedHeight;
+		xineInfo.count = savedCount;
+		wfree(spec);
+		if (!monitor) {
+			wwarning("could not render background for monitor %s", monitors[i].name);
+			continue;
+		}
+		XSetTile(dpy, gc, monitor->pixmap);
+		XSetTSOrigin(dpy, gc, rect->pos.x, rect->pos.y);
+		XFillRectangle(dpy, full, gc, rect->pos.x, rect->pos.y, rect->size.width, rect->size.height);
+		freeTexture(monitor);
+	}
+	composingMonitor = False;
+	XFreeGC(dpy, gc);
+
+	freeTextureColor(texture);
+	XFreePixmap(dpy, texture->pixmap);
+	texture->pixmap = full;
+	texture->width = scrWidth;
+	texture->height = scrHeight;
+}
+
+static BackgroundTexture *parseTexture(RContext *rc, const char *text)
+{
+	BackgroundTexture *texture = parseBaseTexture(rc, text);
+
+	if (texture && !composingMonitor && hasMonitorTextures())
+		composeMonitorTextures(rc, texture);
+	return texture;
+}
+
+static void loadMonitorTextures(const char *domain)
+{
+	if (monitorBacks)
+		WMReleasePropList(monitorBacks);
+	monitorBacks = getValueForKey(domain, "MonitorSpecificBack");
+	if (monitorBacks && !WMIsPLDictionary(monitorBacks)) {
+		wwarning("MonitorSpecificBack must be a dictionary of monitor names and textures");
+		WMReleasePropList(monitorBacks);
+		monitorBacks = NULL;
+	}
 }
 
 static void setupTexture(RContext * rc, BackgroundTexture ** textures, int *maxTextures, int workspace, char *texture)
@@ -1014,11 +1238,12 @@ static int readmsg(int fd, char *buffer, int size)
  * sizeCn - change background texture to the one for workspace n
  * sizeRn - re-render backgrounds for the current geometry and select workspace n
  * sizePpath - set the pixmap search path
+ * sizeMn - reload MonitorSpecificBack, re-render and select workspace n
  *
  * n is 4 bytes
  * size = 4 bytes for length of the message data
  */
-static noreturn void helperLoop(RContext * rc)
+static noreturn void helperLoop(RContext *rc, const char *domain)
 {
 	BackgroundTexture *textures[WORKSPACE_COUNT];
 	int maxTextures = 0;
@@ -1085,6 +1310,9 @@ static noreturn void helperLoop(RContext * rc)
 			setupTexture(rc, textures, &maxTextures, workspace, &buffer[5]);
 			break;
 
+		case 'M':
+			loadMonitorTextures(domain);
+			/* fall through */
 		case 'R':
 			refreshTextures(rc, textures, maxTextures);
 			/* fall through */
@@ -1304,6 +1532,8 @@ static void print_help(void)
 	puts(" -c, --colors <cpc>            colors per channel to use");
 	puts(" -p, --parse <texture>         proplist style texture specification");
 	puts(" -w, --workspace <workspace>   update background for the specified workspace");
+	puts(" -M, --monitor <name>          set background only for the named monitor");
+	puts(" -L, --list-monitors           list monitors as \"x y width height name\" and exit");
 	puts(" -v, --version                 show version of wmsetbg and exit");
 	puts(" -h, --help                    show this help and exit");
 }
@@ -1349,6 +1579,57 @@ static void changeTextureForWorkspace(const char *domain, char *texture, int wor
 	WMReleasePropList(array);
 }
 
+/*
+ * Store texture for monitor in MonitorSpecificBack. Returns the workspace
+ * texture to render under it; with update the process is replaced by wdwrite.
+ */
+static char *setMonitorTexture(const char *domain, const char *monitor, const char *texture, int update)
+{
+	WMPropList *value, *key, *base;
+	char *description;
+	int i;
+
+	value = WMCreatePropListFromDescription(texture);
+	if (!value || !WMIsPLArray(value) || WMGetPropListItemCount(value) < 2) {
+		wfatal("could not parse texture %s", texture);
+		quit(1);
+	}
+	for (i = 0; i < monitorCount; i++) {
+		if (strcmp(monitors[i].name, monitor) == 0)
+			break;
+	}
+	if (i == monitorCount)
+		wwarning("monitor %s is not connected; its background will be used when it is", monitor);
+
+	if (monitorBacks) {
+		WMPropList *copy = WMDeepCopyPropList(monitorBacks);
+
+		WMReleasePropList(monitorBacks);
+		monitorBacks = copy;
+	} else {
+		monitorBacks = WMCreatePLDictionary(NULL, NULL);
+	}
+	key = WMCreatePLString(monitor);
+	WMPutInPLDictionary(monitorBacks, key, value);
+	WMReleasePropList(key);
+	WMReleasePropList(value);
+
+	if (update) {
+		description = WMGetPropListDescription(monitorBacks, False);
+		updateDomain(domain, "MonitorSpecificBack", description);
+		wfree(description);
+	}
+
+	base = getValueForKey(domain, "WorkspaceBack");
+	if (base && WMIsPLArray(base) && WMGetPropListItemCount(base) >= 2)
+		description = WMGetPropListDescription(base, False);
+	else
+		description = wstrdup("(solid, \"rgb:50/50/75\")");
+	if (base)
+		WMReleasePropList(base);
+	return description;
+}
+
 int main(int argc, char **argv)
 {
 	int i;
@@ -1362,6 +1643,8 @@ int main(int argc, char **argv)
 	int update = 0, cpc = 4, obey_user = 0;
 	RRenderingMode render_mode = RDitheredRendering;
 	char *texture = NULL;
+	char *monitor = NULL;
+	int listMonitors = 0;
 	int workspace = -1;
 
 	signal(SIGINT, SIG_DFL);
@@ -1454,6 +1737,15 @@ int main(int argc, char **argv)
 				wfatal("bad value for workspace number: \"%s\"", argv[i]);
 				quit(1);
 			}
+		} else if (strcmp(argv[i], "-M") == 0 || strcmp(argv[i], "--monitor") == 0) {
+			i++;
+			if (i >= argc) {
+				wfatal("too few arguments for %s", argv[i - 1]);
+				quit(1);
+			}
+			monitor = argv[i];
+		} else if (strcmp(argv[i], "-L") == 0 || strcmp(argv[i], "--list-monitors") == 0) {
+			listMonitors = 1;
 		} else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
 			printf("%s (Window Maker %s)\n", prog_name, VERSION);
 			quit(0);
@@ -1468,7 +1760,11 @@ int main(int argc, char **argv)
 			quit(1);
 		}
 	}
-	if (!image_name && !texture && !helperMode) {
+	if (monitor && workspace >= 0) {
+		printf("%s: --monitor cannot be combined with --workspace\n", prog_name);
+		quit(1);
+	}
+	if (!image_name && !texture && !helperMode && !listMonitors) {
 		printf("%s: you must specify a image file name or a texture\n", prog_name);
 		printf("Try '%s --help' for more information\n", prog_name);
 		quit(1);
@@ -1507,6 +1803,13 @@ int main(int argc, char **argv)
 
 	initXinerama();
 
+	if (listMonitors) {
+		for (i = 0; i < monitorCount; i++)
+			printf("%d %d %u %u %s\n", monitors[i].rect.pos.x, monitors[i].rect.pos.y,
+			       monitors[i].rect.size.width, monitors[i].rect.size.height, monitors[i].name);
+		quit(0);
+	}
+
 	if (!obey_user && DefaultDepth(dpy, scr) <= 8)
 		render_mode = RDitheredRendering;
 
@@ -1535,7 +1838,8 @@ int main(int argc, char **argv)
 		if (result == -1)
 			wwarning("error could not nice process");
 
-		helperLoop(rc);
+		loadMonitorTextures(domain);
+		helperLoop(rc, domain);
 	} else {
 		BackgroundTexture *tex;
 		char buffer[4098];
@@ -1547,7 +1851,10 @@ int main(int argc, char **argv)
 			texture = (char *)buffer;
 		}
 
-		if (update && workspace < 0) {
+		loadMonitorTextures(domain);
+		if (monitor) {
+			texture = setMonitorTexture(domain, monitor, texture, update);
+		} else if (update && workspace < 0) {
 			updateDomain(domain, "WorkspaceBack", texture);
 		}
 

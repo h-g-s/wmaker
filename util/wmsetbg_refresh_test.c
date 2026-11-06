@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <X11/Xutil.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 static void send_message(int fd, const char *message)
 {
@@ -62,6 +64,62 @@ static void wait_background_size(unsigned int expected_width, unsigned int expec
 	assert(!"background helper did not publish the expected pixmap size");
 }
 
+static unsigned long pixel_at(Pixmap pixmap, int x, int y)
+{
+	XImage *image = XGetImage(dpy, pixmap, x, y, 1, 1, AllPlanes, ZPixmap);
+	unsigned long pixel;
+
+	assert(image);
+	pixel = XGetPixel(image, 0, 0);
+	XDestroyImage(image);
+	return pixel;
+}
+
+static unsigned long named_pixel(const char *name)
+{
+	XColor color;
+
+	assert(XAllocNamedColor(dpy, DefaultColormap(dpy, scr), name, &color, &color));
+	return color.pixel;
+}
+
+/* Split the screen into two heads that do not match any RandR monitor. */
+static void use_test_monitors(int width, int height)
+{
+	scrWidth = width;
+	scrHeight = height;
+	if (xineInfo.screens)
+		wfree(xineInfo.screens);
+	xineInfo.count = 2;
+	xineInfo.screens = wmalloc(sizeof(WMRect) * 2);
+	xineInfo.screens[0] = (WMRect){ { 0, 0 }, { width / 2, height } };
+	xineInfo.screens[1] = (WMRect){ { width / 2, 0 }, { width - width / 2, height } };
+	initMonitors();
+}
+
+static void wait_background_halves(int width, int height, const char *left, const char *right)
+{
+	Atom property = XInternAtom(dpy, "_XROOTPMAP_ID", False);
+	unsigned long left_pixel = named_pixel(left), right_pixel = named_pixel(right);
+	int attempt;
+
+	for (attempt = 0; attempt < 200; attempt++) {
+		Pixmap published;
+		Bool matches = False;
+
+		XGrabServer(dpy);
+		if (getRootPixmapAtom(property, &published) && published != None)
+			matches = pixel_at(published, 0, 0) == left_pixel &&
+			          pixel_at(published, width - 1, height - 1) == right_pixel;
+		XUngrabServer(dpy);
+		XSync(dpy, False);
+		if (matches)
+			return;
+		usleep(10000);
+	}
+	assert(!"background helper did not publish the expected monitor backgrounds");
+}
+
 int main(int argc, char **argv)
 {
 	RContext *rc;
@@ -89,7 +147,13 @@ int main(int argc, char **argv)
 	scrHeight = attrs.height / 2;
 	if (argc == 2 && strcmp(argv[1], "--helper") == 0) {
 		alarm(10);
-		helperLoop(rc);
+		helperLoop(rc, "WindowMaker");
+	}
+	if (argc == 2 && strcmp(argv[1], "--monitor-helper") == 0) {
+		alarm(10);
+		use_test_monitors(attrs.width, attrs.height);
+		loadMonitorTextures("WindowMaker");
+		helperLoop(rc, "WindowMaker");
 	}
 	setupTexture(rc, textures, &maxTextures, 0, "(dgradient, red, blue)");
 	setupTexture(rc, textures, &maxTextures, 3, "(solid, green)");
@@ -178,6 +242,85 @@ int main(int argc, char **argv)
 		close(pipe_fd[1]);
 		assert(waitpid(child, &status, 0) == child);
 		assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	}
+
+	/* Monitor-specific textures cover only their monitor; unknown names are ignored. */
+	{
+		BackgroundTexture *texture;
+		int w = attrs.width, h = attrs.height;
+
+		use_test_monitors(w, h);
+		assert(strcmp(monitors[0].name, "Monitor-1") == 0);
+		assert(strcmp(monitors[1].name, "Monitor-2") == 0);
+		monitorBacks = WMCreatePropListFromDescription(
+			"{\"Monitor-2\" = (vgradient, green, green); Unplugged = (solid, white);}");
+		assert(monitorBacks);
+		texture = parseTexture(rc, "(solid, red)");
+		assert(texture && !texture->solid);
+		assert(texture->width == w && texture->height == h);
+		assert(pixel_at(texture->pixmap, 0, 0) == named_pixel("red"));
+		assert(pixel_at(texture->pixmap, w / 2 - 1, h - 1) == named_pixel("red"));
+		assert(pixel_at(texture->pixmap, w / 2, 0) == named_pixel("green"));
+		assert(pixel_at(texture->pixmap, w - 1, h - 1) == named_pixel("green"));
+		assert(scrWidth == w && scrHeight == h && xineInfo.count == 2);
+		freeTexture(texture);
+		WMReleasePropList(monitorBacks);
+		monitorBacks = NULL;
+	}
+
+	/* The helper reloads monitor textures from the defaults on 'M'. */
+	{
+		char root_template[] = "/tmp/wmsetbg-monitor-XXXXXX";
+		char path[PATH_MAX];
+		FILE *file;
+		int pipe_fd[2], status;
+		pid_t child;
+
+		assert(mkdtemp(root_template));
+		setenv("WMAKER_USER_ROOT", root_template, 1);
+		snprintf(path, sizeof(path), "%s/Defaults", root_template);
+		assert(mkdir(path, 0700) == 0);
+		snprintf(path, sizeof(path), "%s/Defaults/WindowMaker", root_template);
+		file = fopen(path, "w");
+		assert(file);
+		fputs("{MonitorSpecificBack = {\"Monitor-1\" = (solid, blue);};}\n", file);
+		fclose(file);
+
+		assert(pipe(pipe_fd) == 0);
+		child = fork();
+		assert(child >= 0);
+		if (child == 0) {
+			close(pipe_fd[1]);
+			assert(dup2(pipe_fd[0], STDIN_FILENO) >= 0);
+			close(pipe_fd[0]);
+			execl(argv[0], argv[0], "--monitor-helper", NULL);
+			_exit(1);
+		}
+		close(pipe_fd[0]);
+		send_message(pipe_fd[1], "S   0(solid, red)");
+		send_message(pipe_fd[1], "C   1");
+		wait_background_halves(attrs.width, attrs.height, "blue", "red");
+
+		/* Reloading also re-reads the server's real monitors. */
+		scrWidth = attrs.width;
+		scrHeight = attrs.height;
+		initXinerama();
+		assert(monitorCount >= 1);
+		file = fopen(path, "w");
+		assert(file);
+		fprintf(file, "{MonitorSpecificBack = {\"%s\" = (solid, green);};}\n", monitors[0].name);
+		fclose(file);
+		send_message(pipe_fd[1], "M   1");
+		wait_background_halves(monitors[0].rect.size.width, monitors[0].rect.size.height,
+		                       "green", "green");
+		send_message(pipe_fd[1], "K");
+		close(pipe_fd[1]);
+		assert(waitpid(child, &status, 0) == child);
+		assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+		unlink(path);
+		snprintf(path, sizeof(path), "%s/Defaults", root_template);
+		rmdir(path);
+		rmdir(root_template);
 	}
 
 	if (xineInfo.screens)
