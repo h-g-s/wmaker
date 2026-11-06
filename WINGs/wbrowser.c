@@ -205,7 +205,8 @@ void WMSetBrowserMaxVisibleColumns(WMBrowser * bPtr, int columns)
 		}
 		/* browser loaded and columns < curMaxVisibleColumns */
 	} else {
-		newFirstVisibleColumn = bPtr->firstVisibleColumn;
+		/* Keep the deepest (current) column in view. */
+		newFirstVisibleColumn = WMAX(bPtr->firstVisibleColumn, bPtr->usedColumnCount - columns);
 		if (newFirstVisibleColumn + columns >= bPtr->usedColumnCount) {
 			removeColumn(bPtr, newFirstVisibleColumn + columns);
 		}
@@ -934,9 +935,14 @@ static void scrollToColumn(WMBrowser * bPtr, int column, Bool updateScroller)
 	for (i = 0; i < bPtr->columnCount; i++) {
 		if (COLUMN_IS_VISIBLE(bPtr, i)) {
 			WMMoveWidget(bPtr->columns[i], x, WMWidgetView(bPtr->columns[i])->pos.y);
+			Bool wasMapped = WMWidgetView(bPtr->columns[i])->flags.mapped;
+
 			if (!WMWidgetView(bPtr->columns[i])->flags.realized)
 				WMRealizeWidget(bPtr->columns[i]);
 			WMMapWidget(bPtr->columns[i]);
+			/* A column shown again (e.g. after the browser grew) may get no Expose. */
+			if (!wasMapped)
+				WMRedisplayWidget(bPtr->columns[i]);
 			x += bPtr->columnSize.width + COLUMN_SPACING;
 		} else {
 			WMUnmapWidget(bPtr->columns[i]);

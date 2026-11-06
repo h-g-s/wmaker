@@ -40,6 +40,20 @@ typedef struct W_FilePanel {
 	char **fileTypes;
 
 	struct {
+		int margin;
+		int titleHeight;
+		int fieldHeight;
+		int buttonHeight;
+		int iconButton;
+		int labelWidth;
+		int okWidth;
+		int cancelWidth;
+		int columnWidth;
+		int width;
+		int height;
+	} metrics;
+
+	struct {
 		unsigned int canExit:1;
 		unsigned int canceled:1;	/* clicked on cancel */
 		unsigned int filtered:1;
@@ -60,6 +74,13 @@ typedef struct W_FilePanel {
 #define PWIDTH		330
 #define PHEIGHT 	360
 
+/* Default size, in WMScaleX/WMScaleY units, before limiting to the screen. */
+#define DEFAULT_PWIDTH	600
+#define DEFAULT_PHEIGHT	460
+
+/* Prefer the default size, but keep the panel within 85% of the screen. */
+#define WMMIN_SCREEN(size, screen, minimum) WMAX((minimum), WMIN((size), (int)(screen) * 85 / 100))
+
 static void listDirectoryOnColumn(WMFilePanel * panel, int column, const char *path);
 static void browserClick(WMWidget *widget, void *p_panel);
 static void browserDClick(WMWidget *widget, void *p_panel);
@@ -76,6 +97,7 @@ static void buttonClick(WMWidget *widget, void *p_panel);
 static char *getCurrentFileName(WMFilePanel * panel);
 
 static void handleEvents(XEvent * event, void *data);
+static void layoutFilePanel(WMFilePanel *fPtr, int width, int height);
 
 static WMBrowserDelegate browserDelegate = {
 	NULL,			/* data */
@@ -166,15 +188,11 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	fPtr = wmalloc(sizeof(WMFilePanel));
 
 	fPtr->win = WMCreateWindowWithStyle(scrPtr, name, WMTitledWindowMask | WMResizableWindowMask);
-	WMResizeWidget(fPtr->win, PWIDTH, PHEIGHT);
 	WMSetWindowTitle(fPtr->win, "");
 
 	WMCreateEventHandler(WMWidgetView(fPtr->win), StructureNotifyMask, handleEvents, fPtr);
-	WMSetWindowMinSize(fPtr->win, PWIDTH, PHEIGHT);
 
 	fPtr->iconLabel = WMCreateLabel(fPtr->win);
-	WMResizeWidget(fPtr->iconLabel, 64, 64);
-	WMMoveWidget(fPtr->iconLabel, 0, 0);
 	WMSetLabelImagePosition(fPtr->iconLabel, WIPImageOnly);
 	icon = WMCreateApplicationIconBlendedPixmap(scrPtr, (RColor *) NULL);
 	if (icon) {
@@ -185,16 +203,11 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	}
 
 	fPtr->titleLabel = WMCreateLabel(fPtr->win);
-	WMResizeWidget(fPtr->titleLabel, PWIDTH - 64, 64);
-	WMMoveWidget(fPtr->titleLabel, 64, 0);
 	largeFont = WMBoldSystemFontOfSize(scrPtr, 24);
 	WMSetLabelFont(fPtr->titleLabel, largeFont);
-	WMReleaseFont(largeFont);
 	WMSetLabelText(fPtr->titleLabel, title);
 
 	fPtr->line = WMCreateFrame(fPtr->win);
-	WMMoveWidget(fPtr->line, 0, 64);
-	WMResizeWidget(fPtr->line, PWIDTH, 2);
 	WMSetFrameRelief(fPtr->line, WRGroove);
 
 	fPtr->browser = WMCreateBrowser(fPtr->win);
@@ -202,24 +215,16 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetBrowserDelegate(fPtr->browser, &browserDelegate);
 	WMSetBrowserAction(fPtr->browser, browserClick, fPtr);
 	WMSetBrowserDoubleAction(fPtr->browser, browserDClick, fPtr);
-	WMMoveWidget(fPtr->browser, 7, 72);
-	WMResizeWidget(fPtr->browser, PWIDTH - 14, 200);
 	WMHangData(fPtr->browser, fPtr);
 
 	fPtr->nameLabel = WMCreateLabel(fPtr->win);
-	WMMoveWidget(fPtr->nameLabel, 7, 282);
-	WMResizeWidget(fPtr->nameLabel, 55, 14);
 	WMSetLabelText(fPtr->nameLabel, _("Name:"));
 
 	fPtr->fileField = WMCreateTextField(fPtr->win);
-	WMMoveWidget(fPtr->fileField, 60, 278);
-	WMResizeWidget(fPtr->fileField, PWIDTH - 60 - 10, 24);
 	WMAddNotificationObserver(textEditedObserver, fPtr, WMTextDidEndEditingNotification, fPtr->fileField);
 	WMAddNotificationObserver(textChangedObserver, fPtr, WMTextDidChangeNotification, fPtr->fileField);
 
 	fPtr->okButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->okButton, 245, 325);
-	WMResizeWidget(fPtr->okButton, 75, 28);
 	WMSetButtonText(fPtr->okButton, _("OK"));
 	WMSetButtonImage(fPtr->okButton, scrPtr->buttonArrow);
 	WMSetButtonAltImage(fPtr->okButton, scrPtr->pushedButtonArrow);
@@ -227,14 +232,10 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetButtonAction(fPtr->okButton, buttonClick, fPtr);
 
 	fPtr->cancelButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->cancelButton, 165, 325);
-	WMResizeWidget(fPtr->cancelButton, 75, 28);
 	WMSetButtonText(fPtr->cancelButton, _("Cancel"));
 	WMSetButtonAction(fPtr->cancelButton, buttonClick, fPtr);
 
 	fPtr->trashcanButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->trashcanButton, 7, 325);
-	WMResizeWidget(fPtr->trashcanButton, 28, 28);
 	WMSetButtonImagePosition(fPtr->trashcanButton, WIPImageOnly);
 	WMSetButtonImage(fPtr->trashcanButton, scrPtr->trashcanIcon);
 	WMSetButtonAltImage(fPtr->trashcanButton, scrPtr->altTrashcanIcon);
@@ -242,8 +243,6 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetBalloonTextForView(_("Delete the selected file or directory"), WMWidgetView(fPtr->trashcanButton));
 
 	fPtr->createDirButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->createDirButton, 37, 325);
-	WMResizeWidget(fPtr->createDirButton, 28, 28);
 	WMSetButtonImagePosition(fPtr->createDirButton, WIPImageOnly);
 	WMSetButtonImage(fPtr->createDirButton, scrPtr->createDirIcon);
 	WMSetButtonAltImage(fPtr->createDirButton, scrPtr->altCreateDirIcon);
@@ -251,13 +250,46 @@ static WMFilePanel *makeFilePanel(WMScreen * scrPtr, const char *name, const cha
 	WMSetBalloonTextForView(_("Create a directory"), WMWidgetView(fPtr->createDirButton));
 
 	fPtr->homeButton = WMCreateCommandButton(fPtr->win);
-	WMMoveWidget(fPtr->homeButton, 67, 325);
-	WMResizeWidget(fPtr->homeButton, 28, 28);
 	WMSetButtonImagePosition(fPtr->homeButton, WIPImageOnly);
 	WMSetButtonImage(fPtr->homeButton, scrPtr->homeIcon);
 	WMSetButtonAltImage(fPtr->homeButton, scrPtr->altHomeIcon);
 	WMSetButtonAction(fPtr->homeButton, goHome, fPtr);
 	WMSetBalloonTextForView(_("Go to your home directory"), WMWidgetView(fPtr->homeButton));
+
+	{
+		int wmScaleWidth, wmScaleHeight, fontHeight = WMFontHeight(scrPtr->normalFont);
+		int minWidth, minHeight, width, height, arrow = 0;
+		const char *text;
+
+		WMGetScaleBaseFromSystemFont(scrPtr, &wmScaleWidth, &wmScaleHeight);
+		fPtr->metrics.margin = WMAX(7, WMScaleX(7));
+		fPtr->metrics.titleHeight = WMAX(64, WMFontHeight(largeFont) + 2 * fPtr->metrics.margin);
+		fPtr->metrics.fieldHeight = WMAX(24, fontHeight + 10);
+		fPtr->metrics.buttonHeight = WMAX(28, fontHeight + 14);
+		fPtr->metrics.iconButton = fPtr->metrics.buttonHeight;
+		text = _("Name:");
+		fPtr->metrics.labelWidth = WMWidthOfString(scrPtr->normalFont, text, strlen(text)) + fPtr->metrics.margin;
+		if (scrPtr->buttonArrow)
+			arrow = WMGetPixmapSize(scrPtr->buttonArrow).width + fPtr->metrics.margin;
+		text = _("OK");
+		fPtr->metrics.okWidth = WMAX(75, WMWidthOfString(scrPtr->normalFont, text, strlen(text)) + arrow + 3 * fPtr->metrics.margin);
+		text = _("Cancel");
+		fPtr->metrics.cancelWidth = WMAX(75, WMWidthOfString(scrPtr->normalFont, text, strlen(text)) + 3 * fPtr->metrics.margin);
+		fPtr->metrics.columnWidth = WMAX(140, WMScaleX(160));
+
+		minWidth = WMAX(PWIDTH, 3 * fPtr->metrics.iconButton + fPtr->metrics.okWidth + fPtr->metrics.cancelWidth
+				+ 8 * fPtr->metrics.margin);
+		minWidth = WMAX(minWidth, fPtr->metrics.columnWidth * 2 + 2 * fPtr->metrics.margin);
+		minHeight = WMAX(PHEIGHT, fPtr->metrics.titleHeight + 2 + WMScaleY(160) + fPtr->metrics.fieldHeight
+				 + fPtr->metrics.buttonHeight + 6 * fPtr->metrics.margin);
+		width = WMMIN_SCREEN(WMAX(minWidth, WMScaleX(DEFAULT_PWIDTH)), WMScreenWidth(scrPtr), minWidth);
+		height = WMMIN_SCREEN(WMAX(minHeight, WMScaleY(DEFAULT_PHEIGHT)), WMScreenHeight(scrPtr), minHeight);
+
+		WMSetWindowMinSize(fPtr->win, minWidth, minHeight);
+		WMResizeWidget(fPtr->win, width, height);
+		layoutFilePanel(fPtr, width, height);
+	}
+	WMReleaseFont(largeFont);
 
 	WMRealizeWidget(fPtr->win);
 	WMMapSubwidgets(fPtr->win);
@@ -729,33 +761,64 @@ static void goHome(WMWidget *widget, void *p_panel)
 	WMSetFilePanelDirectory(panel, home);
 }
 
+static void layoutFilePanel(WMFilePanel *fPtr, int width, int height)
+{
+	int m = fPtr->metrics.margin;
+	int title = fPtr->metrics.titleHeight;
+	int buttonY = height - m - fPtr->metrics.buttonHeight;
+	int fieldY = buttonY - m - fPtr->metrics.fieldHeight;
+	int browserY = title + 2 + m;
+	int x, columns;
+
+	fPtr->metrics.width = width;
+	fPtr->metrics.height = height;
+	WMResizeWidget(fPtr->iconLabel, 64, title);
+	WMMoveWidget(fPtr->iconLabel, 0, 0);
+	WMResizeWidget(fPtr->titleLabel, width - 64, title);
+	WMMoveWidget(fPtr->titleLabel, 64, 0);
+	WMResizeWidget(fPtr->line, width, 2);
+	WMMoveWidget(fPtr->line, 0, title);
+
+	WMMoveWidget(fPtr->browser, m, browserY);
+	WMResizeWidget(fPtr->browser, width - 2 * m, fieldY - m - browserY);
+	columns = WMAX(2, (width - 2 * m) / fPtr->metrics.columnWidth);
+	WMSetBrowserMaxVisibleColumns(fPtr->browser, columns);
+
+	WMResizeWidget(fPtr->nameLabel, fPtr->metrics.labelWidth, fPtr->metrics.fieldHeight);
+	WMMoveWidget(fPtr->nameLabel, m, fieldY);
+	WMResizeWidget(fPtr->fileField, width - 2 * m - fPtr->metrics.labelWidth, fPtr->metrics.fieldHeight);
+	WMMoveWidget(fPtr->fileField, m + fPtr->metrics.labelWidth, fieldY);
+
+	x = m;
+	WMResizeWidget(fPtr->trashcanButton, fPtr->metrics.iconButton, fPtr->metrics.buttonHeight);
+	WMMoveWidget(fPtr->trashcanButton, x, buttonY);
+	x += fPtr->metrics.iconButton + 2;
+	WMResizeWidget(fPtr->createDirButton, fPtr->metrics.iconButton, fPtr->metrics.buttonHeight);
+	WMMoveWidget(fPtr->createDirButton, x, buttonY);
+	x += fPtr->metrics.iconButton + 2;
+	WMResizeWidget(fPtr->homeButton, fPtr->metrics.iconButton, fPtr->metrics.buttonHeight);
+	WMMoveWidget(fPtr->homeButton, x, buttonY);
+
+	x = width - m - fPtr->metrics.okWidth;
+	WMResizeWidget(fPtr->okButton, fPtr->metrics.okWidth, fPtr->metrics.buttonHeight);
+	WMMoveWidget(fPtr->okButton, x, buttonY);
+	x -= m + fPtr->metrics.cancelWidth;
+	WMResizeWidget(fPtr->cancelButton, fPtr->metrics.cancelWidth, fPtr->metrics.buttonHeight);
+	WMMoveWidget(fPtr->cancelButton, x, buttonY);
+}
+
 static void handleEvents(XEvent * event, void *data)
 {
 	W_FilePanel *pPtr = (W_FilePanel *) data;
 	W_View *view = WMWidgetView(pPtr->win);
 
-	if (event->type == ConfigureNotify) {
-		if (event->xconfigure.width != view->size.width || event->xconfigure.height != view->size.height) {
-			unsigned int newWidth = event->xconfigure.width;
-			unsigned int newHeight = event->xconfigure.height;
-			int newColumnCount;
-
-			W_ResizeView(view, newWidth, newHeight);
-			WMResizeWidget(pPtr->line, newWidth, 2);
-			WMResizeWidget(pPtr->browser, newWidth - 14, newHeight - (PHEIGHT - 200));
-			WMResizeWidget(pPtr->fileField, newWidth - 60 - 10, 24);
-			WMMoveWidget(pPtr->nameLabel, 7, newHeight - (PHEIGHT - 282));
-			WMMoveWidget(pPtr->fileField, 60, newHeight - (PHEIGHT - 278));
-			WMMoveWidget(pPtr->okButton, newWidth - (PWIDTH - 245), newHeight - (PHEIGHT - 325));
-			WMMoveWidget(pPtr->cancelButton, newWidth - (PWIDTH - 165), newHeight - (PHEIGHT - 325));
-
-			WMMoveWidget(pPtr->trashcanButton, 7, newHeight - (PHEIGHT - 325));
-			WMMoveWidget(pPtr->createDirButton, 37, newHeight - (PHEIGHT - 325));
-			WMMoveWidget(pPtr->homeButton, 67, newHeight - (PHEIGHT - 325));
-
-			newColumnCount = (newWidth - 14) / 140;
-			WMSetBrowserMaxVisibleColumns(pPtr->browser, newColumnCount);
-		}
+	/* The window's own handler may already have updated view->size, so compare
+	 * with the size the panel was last laid out for. */
+	if (event->type == ConfigureNotify &&
+	    (event->xconfigure.width != pPtr->metrics.width || event->xconfigure.height != pPtr->metrics.height)) {
+		if (event->xconfigure.width != view->size.width || event->xconfigure.height != view->size.height)
+			W_ResizeView(view, event->xconfigure.width, event->xconfigure.height);
+		layoutFilePanel(pPtr, event->xconfigure.width, event->xconfigure.height);
 	}
 }
 

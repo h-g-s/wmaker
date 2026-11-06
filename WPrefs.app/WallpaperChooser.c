@@ -100,8 +100,10 @@ struct WallpaperChooser {
 	int monitorCount;
 	int currentMonitor;
 	WMRect desktop;
+	RImage *desktopSource;
 	RImage *desktopImage;
 	Bool desktopGrabbed;
+	WMHandlerID previewTimer;
 
 	WallpaperItem **items;
 	int itemCount;
@@ -698,7 +700,7 @@ static int ignoreXError(Display *dpy, XErrorEvent *event)
 	return 0;
 }
 
-/* The current root background, cropped to the monitors and scaled to the preview. */
+/* The current root background, cropped to the monitors. */
 static void grabDesktop(WallpaperChooser *ch)
 {
 	Display *dpy = WMScreenDisplay(ch->screen);
@@ -744,10 +746,14 @@ static void grabDesktop(WallpaperChooser *ch)
 		RReleaseImage(image);
 		image = crop;
 	}
-	if (image) {
-		ch->desktopImage = RScaleImage(image, ch->previewWidth, ch->previewHeight);
+	/* Bounded so the preview can be rescaled cheaply while the window is resized. */
+	if (image && image->width > 2048) {
+		RImage *small = RScaleImage(image, 2048, WMAX(1, (int)((long long)image->height * 2048 / image->width)));
+
 		RReleaseImage(image);
+		image = small;
 	}
+	ch->desktopSource = image;
 }
 
 static void outlineRect(RImage *image, WMRect r, const RColor *color)
@@ -795,6 +801,13 @@ static void updatePreview(WallpaperChooser *ch)
 
 	if (!all && !ch->desktopGrabbed)
 		grabDesktop(ch);
+	if (ch->desktopImage && (ch->desktopImage->width != ch->previewWidth ||
+				 ch->desktopImage->height != ch->previewHeight)) {
+		RReleaseImage(ch->desktopImage);
+		ch->desktopImage = NULL;
+	}
+	if (!all && ch->desktopSource && !ch->desktopImage)
+		ch->desktopImage = RScaleImage(ch->desktopSource, ch->previewWidth, ch->previewHeight);
 	canvas = RCreateImage(ch->previewWidth, ch->previewHeight, False);
 	if (!canvas)
 		return;
@@ -920,7 +933,7 @@ static void browseFolder(WMWidget *w, void *data)
 
 	WMSetFilePanelCanChooseDirectories(panel, True);
 	WMSetFilePanelCanChooseFiles(panel, False);
-	if (WMRunModalFilePanelForDirectory(panel, ch->parent, start, _("Select Backgrounds Folder"), NULL)) {
+	if (WMRunModalFilePanelForDirectory(panel, ch->parent, start, _("Wallpaper Folder"), NULL)) {
 		char *path = WMGetFilePanelFileName(panel);
 
 		if (path) {
@@ -1235,14 +1248,11 @@ static void packRow(WMBox *parent, WMBox *row, int space)
 	WMMapSubwidgets(row);
 }
 
-static void computeSizes(WallpaperChooser *ch)
+/* Largest preview with the desktop's proportions that fits in maxWidth x maxHeight. */
+static void fitPreview(WallpaperChooser *ch, int maxWidth, int maxHeight)
 {
-	int em = WMWidthOfString(ch->font, "M", 1), fh = WMFontHeight(ch->font);
-	int maxWidth = 24 * em, maxHeight = 15 * em;
 	WMRect d = ch->desktop;
 
-	ch->thumbHeight = WMAX(40, 3 * fh);
-	ch->thumbWidth = ch->thumbHeight * 16 / 10;
 	ch->previewWidth = maxWidth;
 	ch->previewHeight = (int)((long long)maxWidth * d.size.height / d.size.width);
 	if (ch->previewHeight > maxHeight) {
@@ -1251,6 +1261,39 @@ static void computeSizes(WallpaperChooser *ch)
 	}
 	ch->previewWidth = WMAX(1, ch->previewWidth);
 	ch->previewHeight = WMAX(1, ch->previewHeight);
+}
+
+static void computeSizes(WallpaperChooser *ch)
+{
+	int em = WMWidthOfString(ch->font, "M", 1), fh = WMFontHeight(ch->font);
+
+	ch->thumbHeight = WMAX(40, 3 * fh);
+	ch->thumbWidth = ch->thumbHeight * 16 / 10;
+	fitPreview(ch, 24 * em, 15 * em);
+}
+
+static void previewTimeout(void *data)
+{
+	WallpaperChooser *ch = data;
+
+	ch->previewTimer = NULL;
+	updatePreview(ch);
+}
+
+/* The preview grows with the window; rendering is deferred so resizing stays smooth. */
+static void previewResized(void *data, WMNotification *notification)
+{
+	WallpaperChooser *ch = data;
+	WMSize size = WMGetViewSize(WMWidgetView(ch->previewL));
+	int width = ch->previewWidth, height = ch->previewHeight;
+
+	(void)notification;
+	fitPreview(ch, (int)size.width - 4, (int)size.height - 4);
+	if (width == ch->previewWidth && height == ch->previewHeight)
+		return;
+	if (ch->previewTimer)
+		WMDeleteTimerHandler(ch->previewTimer);
+	ch->previewTimer = WMAddTimerHandler(120, previewTimeout, ch);
 }
 
 static WallpaperChooser *createChooser(WMWidget *parent, WallpaperMonitor *monitors, int count, int current)
@@ -1359,13 +1402,15 @@ static WallpaperChooser *createChooser(WMWidget *parent, WallpaperMonitor *monit
 	ch->previewL = WMCreateLabel(column);
 	WMSetLabelImagePosition(ch->previewL, WIPImageOnly);
 	WMSetLabelRelief(ch->previewL, WRSunken);
-	WMPackBoxSubview(column, ch->previewL, wmksize(ch->previewWidth + 4, ch->previewHeight + 4), False, gap / 2);
+	WMPackBoxSubview(column, ch->previewL, wmksize(ch->previewWidth + 4, ch->previewHeight + 4), True, gap / 2);
 	ch->captionL = WMCreateLabel(column);
 	WMSetLabelWraps(ch->captionL, True);
 	WMSetLabelTextAlignment(ch->captionL, WACenter);
 	WMPackBoxSubview(column, ch->captionL, wmksize(ch->previewWidth + 4, 2 * fh + 4), False, 0);
 	size = WMGetBoxMinimumSize(column);
-	WMPackBoxSubview(main, column, size, False, 0);
+	WMPackBoxSubview(main, column, size, True, 0);
+	WMSetViewNotifySizeChanges(WMWidgetView(ch->previewL), True);
+	WMAddNotificationObserver(previewResized, ch, WMViewSizeDidChangeNotification, WMWidgetView(ch->previewL));
 	WMMapSubwidgets(column);
 	WMPackBoxSubview(ch->box, main, WMGetBoxMinimumSize(main), True, gap);
 	WMMapSubwidgets(main);
@@ -1404,8 +1449,12 @@ void WallpaperChooserDestroy(WallpaperChooser *ch)
 	WMRemoveNotificationObserver(ch);
 	freeItems(ch);
 	clearSelection(ch);
+	if (ch->previewTimer)
+		WMDeleteTimerHandler(ch->previewTimer);
 	if (ch->desktopImage)
 		RReleaseImage(ch->desktopImage);
+	if (ch->desktopSource)
+		RReleaseImage(ch->desktopSource);
 	for (i = 0; i < ch->monitorCount; i++)
 		if (ch->monitors[i].name)
 			wfree(ch->monitors[i].name);
