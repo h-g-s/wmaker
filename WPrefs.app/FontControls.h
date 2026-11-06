@@ -16,6 +16,8 @@ typedef struct {
 	WMFrame *marker;
 	int position;
 	int unit;
+	int buttonSize;
+	int gap;
 } WPrefsIconPositionControl;
 
 void WPrefsCreateSpeedControl(WPrefsSpeedControl *control, WMWidget *parent, WMFont *font);

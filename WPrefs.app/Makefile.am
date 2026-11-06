@@ -78,14 +78,18 @@ WPrefs_LDADD = \
 	@FCLIBS@ \
 	@INTLIBS@
 
-check_PROGRAMS = font_controls_test window_handling_test
+check_PROGRAMS = font_controls_test window_handling_test icons_test
 font_controls_test_SOURCES = font_controls_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 font_controls_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 font_controls_test_LDADD = $(WPrefs_LDADD)
 window_handling_test_SOURCES = window_handling_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 window_handling_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 window_handling_test_LDADD = $(WPrefs_LDADD)
+icons_test_SOURCES = icons_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
+icons_test_CPPFLAGS = $(AM_CPPFLAGS)
+icons_test_LDADD = $(WPrefs_LDADD)
 
-check-local: font_controls_test window_handling_test
+check-local: font_controls_test window_handling_test icons_test
 	./font_controls_test || test $$? -eq 77
 	./window_handling_test || test $$? -eq 77
+	./icons_test || test $$? -eq 77

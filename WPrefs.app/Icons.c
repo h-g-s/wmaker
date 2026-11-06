@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 
 static const struct {
@@ -62,14 +64,7 @@ typedef struct _Panel {
 	WMWidget *parent;
 
 	WMFrame *posF;
-	WMFrame *posVF;
-	WMFrame *posV;
-
-	struct {
-		int width, height;
-	} icon_position;
-
-	WMButton *posB[wlengthof_nocheck(icon_position_dbvalue)];
+	WPrefsIconPositionControl position;
 
 	WMFrame *animF;
 	WMPopUpButton *animP;
@@ -89,7 +84,6 @@ typedef struct _Panel {
 	WMFrame *sizeF;
 	WMPopUpButton *sizeP;
 
-	int iconPos;
 } _Panel;
 
 /*
@@ -103,44 +97,6 @@ static const int minipreview_minimum_size = 2 * 24 - 1;
 static const int minipreview_maximum_size = 512;	/* Arbitrary limit for the slider */
 
 #define ICON_FILE	"iconprefs"
-
-static void showIconLayout(WMWidget * widget, void *data)
-{
-	_Panel *panel = (_Panel *) data;
-	int w, h;
-	int i;
-
-	for (i = 0; i < wlengthof(panel->posB); i++) {
-		if (panel->posB[i] == widget) {
-			panel->iconPos = i;
-			break;
-		}
-	}
-
-	if (panel->iconPos & 1) {
-		w = 32;
-		h = 8;
-	} else {
-		w = 8;
-		h = 32;
-	}
-	WMResizeWidget(panel->posV, w, h);
-
-	switch (panel->iconPos & ~1) {
-	case 0:
-		WMMoveWidget(panel->posV, 2, 2);
-		break;
-	case 2:
-		WMMoveWidget(panel->posV, panel->icon_position.width - 2 - w, 2);
-		break;
-	case 4:
-		WMMoveWidget(panel->posV, 2, panel->icon_position.height - 2 - h);
-		break;
-	default:
-		WMMoveWidget(panel->posV, panel->icon_position.width - 2 - w, panel->icon_position.height - 2 - h);
-		break;
-	}
-}
 
 static void minipreview_slider_changed(WMWidget *w, void *data)
 {
@@ -179,15 +135,15 @@ static void showData(_Panel * panel)
 	if (str != NULL) {
 		for (i = 0; i < wlengthof(icon_position_dbvalue); i++)
 			if (strcmp(str, icon_position_dbvalue[i]) == 0) {
-				panel->iconPos = i;
+				panel->position.position = i;
 				goto found_position_value;
 			}
 		wwarning(_("bad value \"%s\" for option %s, using default \"%s\""),
 		         str, "IconPosition", icon_position_dbvalue[5]);
 	}
-	panel->iconPos = 5;
+	panel->position.position = 5;
  found_position_value:
-	WMPerformButtonClick(panel->posB[panel->iconPos]);
+	WPrefsSetIconPositionControlValue(&panel->position, panel->position.position);
 
 	i = GetIntegerForKey("IconSize");
 	i = (i - 24) / 8;
@@ -236,193 +192,126 @@ static void showData(_Panel * panel)
 static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
-	WMScreen *scr;
-	WMColor *color;
+	WMScreen *scr = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMBox *columns, *left, *right, *row, *sliderRow;
+	WPrefsGroup position, size, preview, animation, options;
+	WMSize labelSize = wmksize(0, 0), current;
 	int i;
 	char buf[16];
-	int swidth, sheight;
-	int width, height;
-	int startx, starty;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
     /***************** Positioning of Icons *****************/
-	panel->posF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->posF, 268, 155);
-	WMMoveWidget(panel->posF, 12, 6);
-	WMSetFrameTitle(panel->posF, _("Icon Positioning"));
-
-	/*
-	 * There is an available area of 240 x 122, starting at x=14 y=20
-	 * We have to keep 14 pixels on each side for the buttons,
-	 * and an extra pixel for spacing. We also want the final dimension
-	 * to be an even number so we can have the 2 buttons per side of
-	 * the same size.
-	 * In this area, we want to have a rectangle with the same aspect
-	 * ratio as the screen.
-	 */
-	scr = WMWidgetScreen(panel->parent);
-	swidth = WidthOfScreen(DefaultScreenOfDisplay(WMScreenDisplay(scr)));
-	sheight = HeightOfScreen(DefaultScreenOfDisplay(WMScreenDisplay(scr)));
-
-	width = swidth * (122 - 15 * 2) / sheight;
-	if (width <= (240 - 15 * 2)) {
-		height = 122 - 15 * 2;
-	} else {
-		width = 240 - 15 * 2;
-		height = sheight * (240 - 15 * 2) / swidth;
-	}
-
-	panel->icon_position.width  = width;
-	panel->icon_position.height = height;
-
-	startx = 14 + (240 - 15 * 2 - width) / 2;
-	starty = 20 + (122 - 15 * 2 - height) / 2;
-
-	for (i = 0; i < wlengthof(icon_position_dbvalue); i++) {
-		int x, y, w, h;
-
-		panel->posB[i] = WMCreateButton(panel->posF, WBTOnOff);
-		WMSetButtonAction(panel->posB[i], showIconLayout, panel);
-
-		if (i > 0)
-			WMGroupButtons(panel->posB[0], panel->posB[i]);
-
-		if (i & 1) { /* 0=Vertical, 1=Horizontal */
-			w = width / 2;
-			h = 14;
-		} else {
-			w = 14;
-			h = height / 2;
-		}
-		WMResizeWidget(panel->posB[i], w, h);
-
-		x = startx;
-		y = starty;
-		switch (i) {
-		case 0: x +=  0;         y += 15;          break;
-		case 1: x += 15;         y +=  0;          break;
-		case 2: x += 15 + width; y += 15;          break;
-		case 3: x += 15 + w;     y +=  0;          break;
-		case 4: x +=  0;         y += 15 + h;      break;
-		case 5: x += 15;         y += 15 + height; break;
-		case 6: x += 15 + width; y += 15 + h;      break;
-		case 7: x += 15 + w;     y += 15 + height; break;
-		}
-		WMMoveWidget(panel->posB[i], x, y);
-	}
-
-	color = WMCreateRGBColor(WMWidgetScreen(panel->parent), 0x5100, 0x5100, 0x7100, True);
-	panel->posVF = WMCreateFrame(panel->posF);
-	WMResizeWidget(panel->posVF, width, height);
-	WMMoveWidget(panel->posVF, startx + 15, starty + 15);
-	WMSetFrameRelief(panel->posVF, WRSunken);
-	WMSetWidgetBackgroundColor(panel->posVF, color);
-	WMReleaseColor(color);
-
-	panel->posV = WMCreateFrame(panel->posVF);
-	WMSetFrameRelief(panel->posV, WRSimple);
-
-	WMMapSubwidgets(panel->posF);
+	position = WPrefsCreateGroup(left, _("Icon Positioning"));
+	panel->posF = position.frame;
+	WPrefsCreateIconPositionControl(&panel->position, position.content, font);
+	WMPackBoxSubview(position.content, panel->position.box,
+			 WMGetViewSize(WMWidgetView(panel->position.box)), True, 0);
+	WPrefsPackGroup(left, &position, True, 12);
+	row = WMCreateBox(left);
+	WMSetBoxHorizontal(row, True);
 
     /***************** Icon Size ****************/
-	panel->sizeF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->sizeF, 100, 52);
-	WMMoveWidget(panel->sizeF, 12, 168);
-	WMSetFrameTitle(panel->sizeF, _("Icon Size"));
+	size = WPrefsCreateGroup(row, _("Icon Size"));
+	panel->sizeF = size.frame;
 
 	WMSetBalloonTextForView(_("The size of the dock/application icon and miniwindows"),
 				WMWidgetView(panel->sizeF));
 
-	panel->sizeP = WMCreatePopUpButton(panel->sizeF);
-	WMResizeWidget(panel->sizeP, 80, 20);
-	WMMoveWidget(panel->sizeP, 10, 19);
+	panel->sizeP = WMCreatePopUpButton(size.content);
 	for (i = 24; i <= 256; i += 8) {
 		sprintf(buf, "%ix%i", i, i);
 		WMAddPopUpButtonItem(panel->sizeP, buf);
 	}
 
-	WMMapSubwidgets(panel->sizeF);
+	WMPackBoxSubview(size.content, panel->sizeP, WMGetPopUpButtonPreferredSize(panel->sizeP), False, 0);
+	WPrefsPackGroup(row, &size, True, 12);
 
 	/***************** Mini-Previews ****************/
-	panel->minipreview.frame = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->minipreview.frame, 156, 52);
-	WMMoveWidget(panel->minipreview.frame, 124, 168);
-	WMSetFrameTitle(panel->minipreview.frame, _("Mini-Previews for Icons"));
+	preview = WPrefsCreateGroup(row, _("Mini-Previews for Icons"));
+	panel->minipreview.frame = preview.frame;
 
 	WMSetBalloonTextForView(_("The Mini-Preview provides a small view of the content of the\n"
 	                          "window when the mouse is placed over the icon."),
 	                        WMWidgetView(panel->minipreview.frame));
 
-	panel->minipreview.slider = WMCreateSlider(panel->minipreview.frame);
-	WMResizeWidget(panel->minipreview.slider, 109, 15);
-	WMMoveWidget(panel->minipreview.slider, 11, 23);
+	sliderRow = WMCreateBox(preview.content);
+	WMSetBoxHorizontal(sliderRow, True);
+	panel->minipreview.slider = WMCreateSlider(sliderRow);
+	WMSetSliderFont(panel->minipreview.slider, font);
 	WMSetSliderMinValue(panel->minipreview.slider, minipreview_minimum_size);
 	WMSetSliderMaxValue(panel->minipreview.slider, minipreview_maximum_size);
 	WMSetSliderAction(panel->minipreview.slider, minipreview_slider_changed, panel);
 
-	panel->minipreview.label = WMCreateLabel(panel->minipreview.frame);
-	WMResizeWidget(panel->minipreview.label, 33, 15);
-	WMMoveWidget(panel->minipreview.label, 120, 23);
-	WMSetLabelText(panel->minipreview.label, _("OFF"));
-
-	WMMapSubwidgets(panel->minipreview.frame);
+	panel->minipreview.label = WMCreateLabel(sliderRow);
+	for (i = minipreview_minimum_size; i <= minipreview_maximum_size; i++) {
+		WMSetSliderValue(panel->minipreview.slider, i);
+		minipreview_slider_changed(NULL, panel);
+		current = WMGetLabelPreferredSize(panel->minipreview.label);
+		labelSize.width = WMAX(labelSize.width, current.width);
+		labelSize.height = WMAX(labelSize.height, current.height);
+	}
+	WMPackBoxSubview(sliderRow, panel->minipreview.slider,
+			 WMGetSliderPreferredSize(panel->minipreview.slider), True, 8);
+	WMPackBoxSubview(sliderRow, panel->minipreview.label, labelSize, False, 0);
+	WMPackBoxSubview(preview.content, sliderRow, WMGetBoxMinimumSize(sliderRow), False, 0);
+	WMMapSubwidgets(sliderRow);
+	WPrefsPackGroup(row, &preview, True, 0);
+	WMPackBoxSubview(left, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
 
     /***************** Animation ****************/
-	panel->animF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->animF, 215, 52);
-	WMMoveWidget(panel->animF, 292, 6);
-	WMSetFrameTitle(panel->animF, _("Iconification Animation"));
+	animation = WPrefsCreateGroup(right, _("Iconification Animation"));
+	panel->animF = animation.frame;
 
-	panel->animP = WMCreatePopUpButton(panel->animF);
-	WMResizeWidget(panel->animP, 195, 20);
-	WMMoveWidget(panel->animP, 10, 19);
+	panel->animP = WMCreatePopUpButton(animation.content);
 	for (i = 0; i < wlengthof(icon_animation); i++)
 		WMAddPopUpButtonItem(panel->animP, _(icon_animation[i].label));
 
-	WMMapSubwidgets(panel->animF);
+	WMPackBoxSubview(animation.content, panel->animP, WMGetPopUpButtonPreferredSize(panel->animP), False, 0);
+	WPrefsPackGroup(right, &animation, False, 12);
 
     /***************** Options ****************/
-	panel->optF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->optF, 215, 148);
-	WMMoveWidget(panel->optF, 292, 72);
-	/*    WMSetFrameTitle(panel->optF, _("Icon Display")); */
-	starty = 8 + 14;   /* the last term centers the checkboxes within the panel; subtract 13 for a new option */
+	options = WPrefsCreateGroup(right, "");
+	panel->optF = options.frame;
 
-	panel->arrB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->arrB, 198, 26);
-	WMMoveWidget(panel->arrB, 12, starty);
-	starty += 26;
+	panel->arrB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->arrB, _("Auto-arrange icons"));
 
 	WMSetBalloonTextForView(_("Keep icons and miniwindows arranged all the time."), WMWidgetView(panel->arrB));
 
-	panel->omnB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->omnB, 198, 26);
-	WMMoveWidget(panel->omnB, 12, starty);
-	starty += 26;
+	panel->omnB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->omnB, _("Omnipresent miniwindows"));
 
 	WMSetBalloonTextForView(_("Make miniwindows be present in all workspaces."), WMWidgetView(panel->omnB));
 
-	panel->sclB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->sclB, 198, 26);
-	WMMoveWidget(panel->sclB, 12, starty);
-	starty += 26;
+	panel->sclB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->sclB, _("Single click activation"));
 
 	WMSetBalloonTextForView(_("Launch applications and restore windows with a single click."), WMWidgetView(panel->sclB));
 
-	panel->marginB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->marginB, 198, 26);
-	WMMoveWidget(panel->marginB, 12, starty);
-	starty += 26;
+	panel->marginB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->marginB, _("Enforce icon margin"));
 
 	WMSetBalloonTextForView(_("Make sure that the icon image does not protrude into the icon frame."), WMWidgetView(panel->marginB));
 
-	WMMapSubwidgets(panel->optF);
+	WPrefsPackButton(options.content, panel->arrB, 8);
+	WPrefsPackButton(options.content, panel->omnB, 8);
+	WPrefsPackButton(options.content, panel->sclB, 8);
+	WPrefsPackButton(options.content, panel->marginB, 0);
+	WPrefsPackGroup(right, &options, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
+	WMReleaseFont(font);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -441,7 +330,7 @@ static void storeData(_Panel * panel)
 
 	SetIntegerForKey(WMGetPopUpButtonSelectedItem(panel->sizeP) * 8 + 24, "IconSize");
 
-	SetStringForKey(icon_position_dbvalue[panel->iconPos], "IconPosition");
+	SetStringForKey(icon_position_dbvalue[panel->position.position], "IconPosition");
 
 	i = WMGetSliderValue(panel->minipreview.slider);
 	if (i <= minipreview_minimum_size) {
@@ -476,6 +365,7 @@ Panel *InitIcons(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

@@ -417,21 +417,24 @@ static void iconPositionChanged(WMWidget *widget, void *data)
 	}
 }
 
-void WPrefsSetIconPositionControlFont(WPrefsIconPositionControl *control, WMFont *font)
+static void arrangeIconPosition(WPrefsIconPositionControl *control)
 {
 	WMScreen *screen = WMWidgetScreen(control->box);
 	int screenWidth = WMScreenWidth(screen);
 	int screenHeight = WMScreenHeight(screen);
-	int outerWidth = scaledSize(font, 240), outerHeight = scaledSize(font, 122);
-	int button = scaledSize(font, 14), gap = scaledSize(font, 1);
+	int outerWidth = WMWidgetWidth(control->box), outerHeight = WMWidgetHeight(control->box);
+	int button = control->buttonSize, gap = control->gap;
 	int step = button + gap;
-	int width = outerWidth - 2 * step, height = outerHeight - 2 * step;
+	int width = WMAX(4 * control->unit + 4, outerWidth - 2 * step);
+	int height = WMAX(4 * control->unit + 4, outerHeight - 2 * step);
 	int startx, starty, i;
 
 	if ((long)width * screenHeight > (long)height * screenWidth)
 		width = height * screenWidth / screenHeight;
 	else
 		height = width * screenHeight / screenWidth;
+	width = WMAX(4 * control->unit + 4, width);
+	height = WMAX(4 * control->unit + 4, height);
 	startx = (outerWidth - width - 2 * step) / 2;
 	starty = (outerHeight - height - 2 * step) / 2;
 	for (i = 0; i < 8; i++) {
@@ -439,7 +442,6 @@ void WPrefsSetIconPositionControlFont(WPrefsIconPositionControl *control, WMFont
 		int h = i & 1 ? button : height / 2;
 		int x = startx, y = starty;
 
-		WMSetButtonFont(control->buttons[i], font);
 		WMResizeWidget(control->buttons[i], w, h);
 		switch (i) {
 		case 0: y += step; break;
@@ -453,11 +455,32 @@ void WPrefsSetIconPositionControlFont(WPrefsIconPositionControl *control, WMFont
 		}
 		WMMoveWidget(control->buttons[i], x, y);
 	}
-	WMResizeWidget(control->box, outerWidth, outerHeight);
 	WMResizeWidget(control->screen, width, height);
 	WMMoveWidget(control->screen, startx + step, starty + step);
-	control->unit = scaledSize(font, 8);
 	WPrefsSetIconPositionControlValue(control, control->position);
+}
+
+static void iconPositionResized(void *data, WMNotification *notification)
+{
+	(void)notification;
+	arrangeIconPosition(data);
+}
+
+static void iconPositionEvents(XEvent *event, void *data)
+{
+	if (event->type == DestroyNotify)
+		WMRemoveNotificationObserver(data);
+}
+
+void WPrefsSetIconPositionControlFont(WPrefsIconPositionControl *control, WMFont *font)
+{
+	control->unit = scaledSize(font, 8);
+	control->buttonSize = scaledSize(font, 14);
+	control->gap = scaledSize(font, 1);
+	for (int i = 0; i < 8; i++)
+		WMSetButtonFont(control->buttons[i], font);
+	WMResizeWidget(control->box, scaledSize(font, 240), scaledSize(font, 122));
+	arrangeIconPosition(control);
 }
 
 void WPrefsCreateIconPositionControl(WPrefsIconPositionControl *control, WMWidget *parent, WMFont *font)
@@ -481,6 +504,10 @@ void WPrefsCreateIconPositionControl(WPrefsIconPositionControl *control, WMWidge
 	control->marker = WMCreateFrame(control->screen);
 	WMSetFrameRelief(control->marker, WRSimple);
 	WPrefsSetIconPositionControlFont(control, font);
+	WMAddNotificationObserver(iconPositionResized, control, WMViewSizeDidChangeNotification,
+				  WMWidgetView(control->box));
+	WMSetViewNotifySizeChanges(WMWidgetView(control->box), True);
+	WMCreateEventHandler(WMWidgetView(control->box), StructureNotifyMask, iconPositionEvents, control);
 	WMMapSubwidgets(control->screen);
 	WMMapSubwidgets(control->box);
 }
