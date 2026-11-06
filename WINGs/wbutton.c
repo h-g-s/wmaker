@@ -125,6 +125,37 @@ WMSize WMGetButtonPreferredSize(WMButton *bPtr)
 	return size;
 }
 
+WMSize WMGetButtonPreferredSizeForWidth(WMButton *bPtr, unsigned int width)
+{
+	WMFont *font = bPtr->font ? bPtr->font : bPtr->view->screen->normalFont;
+	WMSize size = WMGetButtonPreferredSize(bPtr);
+	int border = bPtr->flags.bordered ? 3 * W_ButtonBorderWidth(font) : 0;
+	int state;
+
+	size.width = width;
+	size.height = 0;
+	for (state = 0; state < 2; state++) {
+		const char *text = state && bPtr->altCaption ? bPtr->altCaption : bPtr->caption;
+		WMPixmap *image = state && bPtr->scaledAltImage ? bPtr->scaledAltImage : bPtr->scaledImage;
+		int textWidth = (int)width - border - 8;
+		int height = 0;
+		WMImagePosition position = bPtr->flags.imagePosition;
+
+		if (image && (position == WIPLeft || position == WIPRight))
+			textWidth -= image->width + 5;
+		if (text && position != WIPImageOnly)
+			height = W_GetTextHeight(font, text, WMAX(1, textWidth), True);
+		if (image && position != WIPNoImage) {
+			if (position == WIPAbove || position == WIPBelow)
+				height += image->height;
+			else
+				height = WMAX(height, image->height);
+		}
+		size.height = WMAX(size.height, height + border + 4);
+	}
+	return size;
+}
+
 
 WMButton *WMCreateCustomButton(WMWidget * parent, int behaviourMask)
 {

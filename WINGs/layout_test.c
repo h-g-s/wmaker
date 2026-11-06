@@ -51,6 +51,18 @@ static void testFontSizes(WMWindow *window)
 
 	WMSetButtonAltText(button, "An even longer alternate caption that must also fit");
 	assert(WMGetButtonPreferredSize(button).width > previous.width);
+
+	{
+		WMSize wide = WMGetButtonPreferredSizeForWidth(toggle, 300);
+		WMSize narrow = WMGetButtonPreferredSizeForWidth(toggle, 100);
+		WMSize normal = WMGetButtonPreferredSizeForWidth(button, 100);
+
+		assert(narrow.width == 100 && narrow.height > wide.height);
+		WMSetButtonAltText(button, "A much longer alternate caption which needs several more lines to fit");
+		assert(WMGetButtonPreferredSizeForWidth(button, 100).height > normal.height);
+		WMSetButtonImagePosition(toggle, WIPImageOnly);
+		assert(WMGetButtonPreferredSizeForWidth(toggle, 100).height < narrow.height);
+	}
 }
 
 static void testLabelContent(WMWindow *window)

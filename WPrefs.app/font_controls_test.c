@@ -5,6 +5,139 @@
 #undef NDEBUG
 #include <assert.h>
 
+#include "Focus.c"
+
+static WMPropList *focusDomain;
+
+char *GetStringForKey(const char *key)
+{
+	WMPropList *name = WMCreatePLString(key);
+	WMPropList *value = WMGetFromPLDictionary(focusDomain, name);
+
+	WMReleasePropList(name);
+	return value ? WMGetFromPLString(value) : NULL;
+}
+
+int GetIntegerForKey(const char *key)
+{
+	char *value = GetStringForKey(key);
+
+	return value ? atoi(value) : 0;
+}
+
+Bool GetBoolForKey(const char *key)
+{
+	char *value = GetStringForKey(key);
+
+	return value && strcmp(value, "YES") == 0;
+}
+
+void SetStringForKey(const char *value, const char *key)
+{
+	WMPropList *name = WMCreatePLString(key);
+	WMPropList *text = WMCreatePLString(value);
+
+	WMPutInPLDictionary(focusDomain, name, text);
+	WMReleasePropList(name);
+	WMReleasePropList(text);
+}
+
+void SetIntegerForKey(int value, const char *key)
+{
+	char text[32];
+
+	sprintf(text, "%d", value);
+	SetStringForKey(text, key);
+}
+
+void SetBoolForKey(Bool value, const char *key)
+{
+	SetStringForKey(value ? "YES" : "NO", key);
+}
+
+void AddSection(Panel *panel, const char *iconFile)
+{
+	(void)panel;
+	(void)iconFile;
+}
+
+static void checkFocusBounds(WMView *view)
+{
+	for (WMView *child = view->childrenList; child; child = child->nextSister) {
+		assert(child->pos.x >= 0 && child->pos.y >= 0);
+		assert(child->pos.x + child->size.width <= view->size.width);
+		assert(child->pos.y + child->size.height <= view->size.height);
+		if (child->self && WMWidgetClass(child->self) == WC_Button)
+			assert(WMGetButtonPreferredSizeForWidth(child->self, child->size.width).height
+			       <= child->size.height);
+		checkFocusBounds(child);
+	}
+}
+
+static void testFocusPanel(WMScreen *screen)
+{
+	int sizes[] = { 11, 24, 32 };
+	int presets[] = { 0, 10, 100, 350, 800 };
+	WMFont *original = WMDefaultSystemFont(screen);
+	WMSize previous = { 0, 0 };
+
+	focusDomain = WMCreatePLDictionary(NULL, NULL);
+	for (int i = 0; i < 3; i++) {
+		WMFont *font = WMSystemFontOfSize(screen, sizes[i]);
+		WMWindow *window;
+		_Panel *panel;
+		WMSize size;
+
+		WMSetWidgetDefaultFont(screen, font);
+		WMReleaseFont(font);
+		SetStringForKey("clicktofocus", "FocusMode");
+		SetStringForKey("focusfollowsmouse", "ColormapMode");
+		SetIntegerForKey(137, "RaiseDelay");
+		window = WMCreateWindow(screen, "focusTest");
+		WMRealizeWidget(window);
+		panel = (_Panel *)InitFocus(window);
+		assert(panel->callbacks.automaticLayout);
+		createPanel((Panel *)panel);
+		size = WMGetBoxMinimumSize(panel->box);
+		assert(size.width > previous.width && size.height > previous.height);
+		previous = size;
+		WMResizeWidget(window, size.width + 4, size.height + 4);
+		checkFocusBounds(WMWidgetView(panel->box));
+		assert(WMGetButtonSelected(panel->kfocB[0]));
+		assert(WMGetButtonSelected(panel->autB));
+		for (int j = 0; j < 5; j++)
+			assert(!WMGetButtonSelected(panel->raisB[j]));
+		storeData(panel);
+		assert(GetIntegerForKey("RaiseDelay") == 137);
+		for (int j = 0; j < 5; j++) {
+			WMPerformButtonClick(panel->raisB[j]);
+			storeData(panel);
+			assert(GetIntegerForKey("RaiseDelay") == presets[j]);
+		}
+		WMSetTextFieldText(panel->raisT, "4321");
+		WMPostNotificationName(WMTextDidChangeNotification, panel->raisT, NULL);
+		for (int j = 0; j < 5; j++)
+			assert(!WMGetButtonSelected(panel->raisB[j]));
+		WMPerformButtonClick(panel->kfocB[1]);
+		WMPerformButtonClick(panel->manB);
+		WMSetButtonSelected(panel->ignB, True);
+		WMSetButtonSelected(panel->newB, True);
+		WMSetButtonSelected(panel->craisB, True);
+		storeData(panel);
+		assert(GetIntegerForKey("RaiseDelay") == 4321);
+		assert(strcmp(GetStringForKey("FocusMode"), "sloppy") == 0);
+		assert(strcmp(GetStringForKey("ColormapMode"), "manual") == 0);
+		assert(GetBoolForKey("IgnoreFocusClick") && GetBoolForKey("AutoFocus") &&
+		       GetBoolForKey("CirculateRaise"));
+		WMRemoveNotificationObserver(panel);
+		WMDestroyWidget(window);
+		wfree(panel);
+	}
+	WMSetWidgetDefaultFont(screen, original);
+	WMReleaseFont(original);
+	WMReleasePropList(focusDomain);
+}
+
 char *LocateImage(const char *name)
 {
 	char *path = wmalloc(strlen(TEST_IMAGE_PATH) + strlen(name) + 7);
@@ -273,6 +406,7 @@ int main(int argc, char **argv)
 	if (!gallery) {
 		testPanelLayout(screen);
 		testPreviewButton(screen);
+		testFocusPanel(screen);
 	}
 	window = WMCreateWindow(screen, "fontControls");
 	WMSetWindowTitle(window, "Font-aware sliders, speed choices, and icon positioning");

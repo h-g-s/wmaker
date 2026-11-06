@@ -19,6 +19,8 @@
  */
 
 #include "WPrefs.h"
+#include "PanelLayout.h"
+#include "FontControls.h"
 
 typedef struct _Panel {
 	WMBox *box;
@@ -52,9 +54,6 @@ typedef struct _Panel {
 } _Panel;
 
 #define ICON_FILE	"windowfocus"
-
-#define DELAY_ICON "timer%i"
-#define DELAY_ICON_S "timer%is"
 
 static void showData(_Panel * panel)
 {
@@ -182,47 +181,38 @@ static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
+	WMFont *font = WMDefaultSystemFont(scr);
+	WMColor *color = WMDarkGrayColor(scr);
+	WPrefsGroup input, colormap, delay, options;
+	WMBox *columns, *left, *right, *row;
+	int choiceWidth = 226 * WMAX(17, WMFontHeight(font)) / 17;
 	int i;
-	char *buf1, *buf2;
-	WMPixmap *icon;
-	WMColor *color;
-	WMFont *font;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
+	columns = WMCreateBox(panel->box);
+	WMSetBoxHorizontal(columns, True);
+	left = WMCreateBox(columns);
+	right = WMCreateBox(columns);
 
     /***************** Input Focus Mode *****************/
-	panel->kfocF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->kfocF, 240, 125);
-	WMMoveWidget(panel->kfocF, 15, 10);
-	WMSetFrameTitle(panel->kfocF, _("Input Focus Mode"));
-
-	{
-		WMBox *box = WMCreateBox(panel->kfocF);
-		WMSetViewExpandsToParent(WMWidgetView(box), 10, 15, 10, 10);
-		WMSetBoxHorizontal(box, False);
-
-		panel->kfocB[0] = WMCreateRadioButton(box);
-		WMSetButtonText(panel->kfocB[0], _("Manual:  Click on the window to set "
-		                                   "keyboard input focus"));
-		WMAddBoxSubview(box, WMWidgetView(panel->kfocB[0]), True, True, 20, 0, 0);
-
-		panel->kfocB[1] = WMCreateRadioButton(box);
-		WMGroupButtons(panel->kfocB[0], panel->kfocB[1]);
-		WMSetButtonText(panel->kfocB[1], _("Auto:  Set keyboard input focus to "
-		                                   "the window under the mouse pointer"));
-		WMAddBoxSubview(box, WMWidgetView(panel->kfocB[1]), True, True, 20, 0, 0);
-
-		WMMapSubwidgets(box);
-		WMMapWidget(box);
-	}
+	input = WPrefsCreateGroup(left, _("Input Focus Mode"));
+	panel->kfocF = input.frame;
+	panel->kfocB[0] = WMCreateRadioButton(input.content);
+	WMSetButtonText(panel->kfocB[0], _("Manual:  Click on the window to set "
+	                                   "keyboard input focus"));
+	panel->kfocB[1] = WMCreateRadioButton(input.content);
+	WMGroupButtons(panel->kfocB[0], panel->kfocB[1]);
+	WMSetButtonText(panel->kfocB[1], _("Auto:  Set keyboard input focus to "
+	                                   "the window under the mouse pointer"));
+	for (i = 0; i < 2; i++)
+		WMPackBoxSubview(input.content, panel->kfocB[i],
+				 WMGetButtonPreferredSizeForWidth(panel->kfocB[i], choiceWidth), False, i ? 0 : 8);
+	WPrefsPackGroup(left, &input, False, 12);
 
     /***************** Colormap Installation Mode ****************/
 
-	panel->cfocF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->cfocF, 240, 77);
-	WMMoveWidget(panel->cfocF, 15, 143);
-	WMSetFrameTitle(panel->cfocF, _("Install colormap from the window..."));
+	colormap = WPrefsCreateGroup(left, _("Install colormap from the window..."));
+	panel->cfocF = colormap.frame;
 
 	WMSetBalloonTextForView(_("This option is for screens that can display only a limited number\n"
 	                          "of colors at a time, so they use an indexed table of colors (called\n"
@@ -233,108 +223,76 @@ static void createPanel(Panel * p)
 	                          "panel as the 'visual'."),
 	                        WMWidgetView(panel->cfocF));
 
-	panel->manB = WMCreateRadioButton(panel->cfocF);
-	WMResizeWidget(panel->manB, 226, 24);
-	WMMoveWidget(panel->manB, 9, 18);
+	panel->manB = WMCreateRadioButton(colormap.content);
 	WMSetButtonText(panel->manB, _("...that has the input focus"));
 
-	panel->autB = WMCreateRadioButton(panel->cfocF);
-	WMResizeWidget(panel->autB, 226, 24);
-	WMMoveWidget(panel->autB, 9, 43);
+	panel->autB = WMCreateRadioButton(colormap.content);
 	WMSetButtonText(panel->autB, _("...that's under the mouse pointer"));
 	WMGroupButtons(panel->manB, panel->autB);
 
-	WMMapSubwidgets(panel->cfocF);
+	WMPackBoxSubview(colormap.content, panel->manB,
+			 WMGetButtonPreferredSizeForWidth(panel->manB, choiceWidth), False, 8);
+	WMPackBoxSubview(colormap.content, panel->autB,
+			 WMGetButtonPreferredSizeForWidth(panel->autB, choiceWidth), False, 0);
+	WPrefsPackGroup(left, &colormap, True, 0);
 
     /***************** Automatic window raise delay *****************/
-	panel->raisF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->raisF, 245, 68);
-	WMMoveWidget(panel->raisF, 265, 10);
-	WMSetFrameTitle(panel->raisF, _("Automatic Window Raise Delay"));
-
-	buf1 = wmalloc(strlen(DELAY_ICON) + 1);
-	buf2 = wmalloc(strlen(DELAY_ICON_S) + 1);
+	delay = WPrefsCreateGroup(right, _("Automatic Window Raise Delay"));
+	panel->raisF = delay.frame;
+	row = WMCreateBox(delay.content);
+	WMSetBoxHorizontal(row, True);
 
 	for (i = 0; i < 5; i++) {
-		char *path;
-
-		panel->raisB[i] = WMCreateCustomButton(panel->raisF, WBBStateChangeMask);
-		WMResizeWidget(panel->raisB[i], 25, 25);
-		WMMoveWidget(panel->raisB[i], 12 + (30 * i), 25);
-		WMSetButtonBordered(panel->raisB[i], False);
-		WMSetButtonImagePosition(panel->raisB[i], WIPImageOnly);
+		panel->raisB[i] = WMCreateCustomButton(row, WBBStateChangeMask);
+		WPrefsSetClockButtonFont(panel->raisB[i], font, i);
 		WMSetButtonAction(panel->raisB[i], pushDelayButton, panel);
 		if (i > 0)
 			WMGroupButtons(panel->raisB[0], panel->raisB[i]);
-		sprintf(buf1, DELAY_ICON, i);
-		sprintf(buf2, DELAY_ICON_S, i);
-		path = LocateImage(buf1);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonImage(panel->raisB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
-		path = LocateImage(buf2);
-		if (path) {
-			icon = WMCreatePixmapFromFile(scr, path);
-			if (icon) {
-				WMSetButtonAltImage(panel->raisB[i], icon);
-				WMReleasePixmap(icon);
-			} else {
-				wwarning(_("could not load icon file %s"), path);
-			}
-			wfree(path);
-		}
+		WMPackBoxSubview(row, panel->raisB[i], WMGetViewSize(WMWidgetView(panel->raisB[i])),
+				 False, i == 4 ? 12 : 2);
 	}
-	wfree(buf1);
-	wfree(buf2);
 
-	panel->raisT = WMCreateTextField(panel->raisF);
-	WMResizeWidget(panel->raisT, 36, 20);
-	WMMoveWidget(panel->raisT, 165, 28);
+	panel->raisT = WMCreateTextField(row);
+	WMPackBoxSubview(row, panel->raisT, WMGetTextFieldPreferredSize(panel->raisT, 5), False, 8);
 	WMAddNotificationObserver(raiseTextChanged, panel, WMTextDidChangeNotification, panel->raisT);
 
-	color = WMDarkGrayColor(scr);
-	font = WMSystemFontOfSize(scr, 10);
-
-	panel->raisL = WMCreateLabel(panel->raisF);
-	WMResizeWidget(panel->raisL, 36, 16);
-	WMMoveWidget(panel->raisL, 205, 32);
+	panel->raisL = WMCreateLabel(row);
 	WMSetLabelText(panel->raisL, _("ms"));
 	WMSetLabelTextColor(panel->raisL, color);
 	WMSetLabelFont(panel->raisL, font);
-
-	WMReleaseColor(color);
-	WMReleaseFont(font);
-
-	WMMapSubwidgets(panel->raisF);
+	WPrefsPackLabel(row, panel->raisL, 0);
+	WMPackBoxSubview(delay.content, row, WMGetBoxMinimumSize(row), False, 0);
+	WMMapSubwidgets(row);
+	WPrefsPackGroup(right, &delay, False, 12);
 
     /***************** Options ****************/
-	panel->optF = WMCreateFrame(panel->box);
-	WMResizeWidget(panel->optF, 245, 132);
-	WMMoveWidget(panel->optF, 265, 88);
+	options = WPrefsCreateGroup(right, "");
+	panel->optF = options.frame;
 
-	panel->ignB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->ignB, 228, 50-2);
-	WMMoveWidget(panel->ignB, 10, 4);
+	panel->ignB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->ignB, _("Do not let applications receive the click used to focus windows"));
 
-	panel->newB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->newB, 228, 35);
-	WMMoveWidget(panel->newB, 10, 52);
+	panel->newB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->newB, _("Automatically focus new windows"));
 
-	panel->craisB = WMCreateSwitchButton(panel->optF);
-	WMResizeWidget(panel->craisB, 228, 36);
-	WMMoveWidget(panel->craisB, 10, 87);
+	panel->craisB = WMCreateSwitchButton(options.content);
 	WMSetButtonText(panel->craisB, _("Raise window when switching focus with keyboard"));
 
-	WMMapSubwidgets(panel->optF);
+	WMPackBoxSubview(options.content, panel->ignB,
+			 WMGetButtonPreferredSizeForWidth(panel->ignB, choiceWidth), False, 8);
+	WMPackBoxSubview(options.content, panel->newB,
+			 WMGetButtonPreferredSizeForWidth(panel->newB, choiceWidth), False, 8);
+	WMPackBoxSubview(options.content, panel->craisB,
+			 WMGetButtonPreferredSizeForWidth(panel->craisB, choiceWidth), False, 0);
+	WPrefsPackGroup(right, &options, True, 0);
+	WMPackBoxSubview(columns, left, WMGetBoxMinimumSize(left), True, 12);
+	WMPackBoxSubview(columns, right, WMGetBoxMinimumSize(right), True, 0);
+	WMPackBoxSubview(panel->box, columns, WMGetBoxMinimumSize(columns), True, 0);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(right);
+	WMMapSubwidgets(columns);
+	WMReleaseColor(color);
+	WMReleaseFont(font);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -353,6 +311,7 @@ Panel *InitFocus(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeData;
 
 	AddSection(panel, ICON_FILE);

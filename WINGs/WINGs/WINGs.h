@@ -1083,6 +1083,9 @@ const char *WMGetButtonText(WMButton *bPtr);
 
 WMSize WMGetButtonPreferredSize(WMButton *bPtr);
 
+/* Measures wrapped text at width, including normal and alternate images. */
+WMSize WMGetButtonPreferredSizeForWidth(WMButton *bPtr, unsigned int width);
+
 void WMSetButtonAltText(WMButton *bPtr, const char *text);
 
 void WMSetButtonTextColor(WMButton *bPtr, WMColor *color);
