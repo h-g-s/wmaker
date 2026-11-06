@@ -746,6 +746,21 @@ static void didResize(struct W_ViewDelegate *deleg, WMView * view)
 	rearrange(view->self);
 }
 
+WMSize WMGetTabViewPreferredSize(WMTabView *tPtr, WMSize content)
+{
+	int tabs = 2 * NORMAL_SIDE_OFFSET + 10;
+	int border = tPtr->flags.bordered ? 3 : 0;
+
+	recalcTabWidth(tPtr);
+	if (tPtr->flags.tabbed) {
+		for (int i = 0; i < tPtr->itemCount; i++)
+			tabs += W_TabViewItemTabWidth(tPtr->items[i]) - 10;
+	} else {
+		tabs = 0;
+	}
+	return wmksize(WMAX(content.width + border, tabs), content.height + tPtr->tabHeight + border);
+}
+
 static void destroyTabView(TabView * tPtr)
 {
 	int i;

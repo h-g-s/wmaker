@@ -1798,6 +1798,9 @@ void WMSetTabViewEnabled(WMTabView *tPtr, Bool flag);
 
 void WMSetTabViewFont(WMTabView *tPtr, WMFont *font);
 
+/* Size needed for content and all tab labels without overflow. */
+WMSize WMGetTabViewPreferredSize(WMTabView *tPtr, WMSize content);
+
 void WMAddItemInTabView(WMTabView *tPtr, WMTabViewItem *item);
 
 void WMInsertItemInTabView(WMTabView *tPtr, int index, WMTabViewItem *item);
