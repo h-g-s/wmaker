@@ -125,6 +125,15 @@ static void testPanel(WMScreen *screen)
 		previous = size;
 		WMResizeWidget(window, size.width + 4, size.height + 4);
 		checkBounds(WMWidgetView(panel->box));
+		{
+			int width = WMWidgetWidth(panel->porigF);
+			int height = WMWidgetHeight(panel->porigF);
+
+			WMResizeWidget(window, size.width + 304, size.height + 304);
+			assert(WMWidgetWidth(panel->porigF) > width);
+			assert(WMWidgetHeight(panel->porigF) > height);
+			checkBounds(WMWidgetView(panel->box));
+		}
 		assert(WMWidgetWidth(panel->porigW) > previousMarker);
 		assert(WMWidgetWidth(panel->opaqB) > previousPreview);
 		previousMarker = WMWidgetWidth(panel->porigW);

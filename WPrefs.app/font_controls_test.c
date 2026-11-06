@@ -349,15 +349,19 @@ static void testPreviewButton(WMScreen *screen)
 	WMFont *large = WMSystemFontOfSize(screen, 32);
 	char *path = LocateImage("dock-preview");
 	WMPixmap *normal = WMCreatePixmapFromFile(screen, path);
-	WMPixmap *disabled = WMCreatePixmap(screen, 192, 192, screen->depth, False);
+	WMPixmap *disabled = WMCreatePixmap(screen, 192, 192, screen->depth, True);
 	WMSize baseline;
 	GC gc;
 
 	wfree(path);
 	assert(normal && disabled);
 	gc = XCreateGC(screen->display, disabled->pixmap, 0, NULL);
-	XSetForeground(screen->display, gc, WMColorPixel(screen->white));
+	XSetForeground(screen->display, gc, WMColorPixel(screen->black));
 	XFillRectangle(screen->display, disabled->pixmap, gc, 0, 0, 192, 192);
+	XFreeGC(screen->display, gc);
+	gc = XCreateGC(screen->display, disabled->mask, 0, NULL);
+	XSetForeground(screen->display, gc, 0);
+	XFillRectangle(screen->display, disabled->mask, gc, 0, 0, 192, 192);
 	XFreeGC(screen->display, gc);
 	WPrefsSetPreviewButtonFont(button, small, disabled, normal);
 	baseline = WMGetButtonPreferredSize(button);
@@ -367,6 +371,23 @@ static void testPreviewButton(WMScreen *screen)
 	assert(WMGetButtonPreferredSize(button).width > baseline.width);
 	assert(WMWidgetWidth(button) == WMGetButtonPreferredSize(button).width);
 	WMRealizeWidget(window);
+	WMSetButtonSelected(button, False);
+	WMMapWidget(button);
+	WMMapWidget(window);
+	XSync(screen->display, False);
+	drainEvents(screen->display);
+	{
+		RImage *pixels = RCreateImageFromDrawable(screen->rcontext, WMWidgetXID(button), None);
+		RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(button));
+		unsigned char *pixel;
+
+		assert(pixels);
+		pixel = pixels->data + 3 * ((pixels->height / 2) * pixels->width + pixels->width / 2);
+		assert(abs(pixel[0] - background.red) <= 2);
+		assert(abs(pixel[1] - background.green) <= 2);
+		assert(abs(pixel[2] - background.blue) <= 2);
+		RReleaseImage(pixels);
+	}
 	WMSetButtonSelected(button, True);
 	WMSetButtonSelected(button, False);
 	WPrefsSetPreviewButtonFont(button, small, disabled, normal);

@@ -39,6 +39,8 @@ typedef struct _Panel {
 	WMLabel *porigvL;
 	WMFrame *porigF;
 	WMLabel *porigW;
+	WMFrame *placementArea;
+	int placementSliderSize;
 
 	WMSlider *vsli;
 	WMSlider *hsli;
@@ -331,6 +333,46 @@ static void packValueSlider(WMBox *parent, WMSlider *slider, WMLabel *label, WMF
 	WMPackBoxSubview(parent, label, size, False, 0);
 }
 
+static void arrangePlacement(_Panel *panel)
+{
+	int swidth = WMGetSliderMaxValue(panel->hsli);
+	int sheight = WMGetSliderMaxValue(panel->vsli);
+	int thickness = panel->placementSliderSize;
+	int availableWidth = WMAX(1, (int)WMWidgetWidth(panel->placementArea) - thickness - 2);
+	int availableHeight = WMAX(1, (int)WMWidgetHeight(panel->placementArea) - thickness - 2);
+	int width = availableWidth;
+	int height = sheight * width / swidth;
+	int x, y;
+
+	if (height > availableHeight) {
+		height = availableHeight;
+		width = swidth * height / sheight;
+	}
+	width = WMAX(width, (int)WMWidgetWidth(panel->porigW) + 4);
+	height = WMAX(height, (int)WMWidgetHeight(panel->porigW) + 4);
+	x = WMAX(0, (availableWidth - width) / 2);
+	y = WMAX(0, (availableHeight - height) / 2);
+	WMResizeWidget(panel->porigF, width, height);
+	WMMoveWidget(panel->porigF, x, y);
+	WMResizeWidget(panel->hsli, width, thickness);
+	WMMoveWidget(panel->hsli, x, y + height + 2);
+	WMResizeWidget(panel->vsli, thickness, height);
+	WMMoveWidget(panel->vsli, x + width + 2, y);
+	sliderCallback(NULL, panel);
+}
+
+static void placementEvents(XEvent *event, void *data)
+{
+	if (event->type == DestroyNotify)
+		WMRemoveNotificationObserver(data);
+}
+
+static void placementResized(void *data, WMNotification *notification)
+{
+	(void)notification;
+	arrangePlacement(data);
+}
+
 static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
 {
 	WMScreen *screen = WMWidgetScreen(panel->parent);
@@ -338,7 +380,6 @@ static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
 	int scale = WMAX(17, WMFontHeight(font));
 	int width = 191 * scale / 17, height = 96 * scale / 17;
 	WMBox *row = WMCreateBox(group->content);
-	WMBox *diagram, *top, *bottom;
 	WMColor *color;
 	WMPixmap *image;
 	WMSize size;
@@ -364,10 +405,9 @@ static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
 		width = swidth * height / sheight;
 	else
 		height = sheight * width / swidth;
-	diagram = WMCreateBox(group->content);
-	top = WMCreateBox(diagram);
-	WMSetBoxHorizontal(top, True);
-	panel->porigF = WMCreateFrame(top);
+	panel->placementArea = WMCreateFrame(group->content);
+	WMSetFrameRelief(panel->placementArea, WRFlat);
+	panel->porigF = WMCreateFrame(panel->placementArea);
 	color = WMCreateRGBColor(screen, 0x5100, 0x5100, 0x7100, True);
 	WMSetWidgetBackgroundColor(panel->porigF, color);
 	WMReleaseColor(color);
@@ -375,9 +415,14 @@ static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
 	panel->porigW = WMCreateLabel(panel->porigF);
 	image = loadPreview(screen, PLACEMENT_WINDOW_PIXMAP);
 	if (image && scale > 17) {
-		RImage *source = RCreateImageFromDrawable(WMScreenRContext(screen), image->pixmap, None);
-		RImage *scaled = source ? RSmoothScaleImage(source, image->width * scale / 17,
-							  image->height * scale / 17) : NULL;
+		RImage *source = RCreateImageFromDrawable(WMScreenRContext(screen), image->pixmap, image->mask);
+		RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(panel->porigF));
+		RImage *scaled;
+
+		if (source)
+			RCombineImageWithColor(source, &background);
+		scaled = source ? RSmoothScaleImage(source, image->width * scale / 17,
+						   image->height * scale / 17) : NULL;
 		WMPixmap *result = scaled ? WMCreatePixmapFromRImage(screen, scaled, 127) : NULL;
 
 		if (source)
@@ -401,29 +446,27 @@ static void createPlacement(_Panel *panel, WPrefsGroup *group, WMFont *font)
 	WMResizeWidget(panel->porigW, size.width, size.height);
 	width = WMAX(width, (int)size.width + 4);
 	height = WMAX(height, (int)size.height + 4);
-	WMPackBoxSubview(top, panel->porigF, wmksize(width, height), False, 2);
-	panel->vsli = WMCreateSlider(top);
+	panel->vsli = WMCreateSlider(panel->placementArea);
 	WMSetSliderFont(panel->vsli, font);
 	size = WMGetSliderPreferredSize(panel->vsli);
 	WMSetSliderMinValue(panel->vsli, 0);
 	WMSetSliderMaxValue(panel->vsli, sheight);
 	WMSetSliderAction(panel->vsli, sliderCallback, panel);
-	WMPackBoxSubview(top, panel->vsli, wmksize(size.height, height), False, 0);
-	WMPackBoxSubview(diagram, top, WMGetBoxMinimumSize(top), False, 2);
-	bottom = WMCreateBox(diagram);
-	WMSetBoxHorizontal(bottom, True);
-	panel->hsli = WMCreateSlider(bottom);
+	panel->placementSliderSize = size.height;
+	panel->hsli = WMCreateSlider(panel->placementArea);
 	WMSetSliderFont(panel->hsli, font);
 	WMSetSliderMinValue(panel->hsli, 0);
 	WMSetSliderMaxValue(panel->hsli, swidth);
 	WMSetSliderAction(panel->hsli, sliderCallback, panel);
-	WMPackBoxSubview(bottom, panel->hsli, wmksize(width, size.height), False, 0);
-	WMPackBoxSubview(diagram, bottom, WMGetBoxMinimumSize(bottom), False, 0);
-	WMPackBoxSubview(group->content, diagram, WMGetBoxMinimumSize(diagram), False, 0);
+	WMPackBoxSubview(group->content, panel->placementArea,
+			 wmksize(width + size.height + 2, height + size.height + 2), True, 0);
+	arrangePlacement(panel);
+	WMAddNotificationObserver(placementResized, panel, WMViewSizeDidChangeNotification,
+				  WMWidgetView(panel->placementArea));
+	WMSetViewNotifySizeChanges(WMWidgetView(panel->placementArea), True);
+	WMCreateEventHandler(WMWidgetView(panel->placementArea), StructureNotifyMask, placementEvents, panel);
 	WMMapSubwidgets(panel->porigF);
-	WMMapSubwidgets(top);
-	WMMapSubwidgets(bottom);
-	WMMapSubwidgets(diagram);
+	WMMapSubwidgets(panel->placementArea);
 }
 
 static void createPanel(Panel *p)

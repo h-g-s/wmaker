@@ -7,7 +7,7 @@ static int scaledSize(WMFont *font, int size)
 	return size * WMAX(17, WMFontHeight(font)) / 17;
 }
 
-static WMPixmap *resizePreview(WMPixmap *source, int side)
+static WMPixmap *resizePreview(WMPixmap *source, int side, RColor background)
 {
 	RImage *image, *scaled;
 	WMPixmap *result;
@@ -16,9 +16,10 @@ static WMPixmap *resizePreview(WMPixmap *source, int side)
 		return NULL;
 	if (source->width == side && source->height == side)
 		return WMRetainPixmap(source);
-	image = RCreateImageFromDrawable(source->screen->rcontext, source->pixmap, None);
+	image = RCreateImageFromDrawable(source->screen->rcontext, source->pixmap, source->mask);
 	if (!image)
 		goto failed;
+	RCombineImageWithColor(image, &background);
 	scaled = RSmoothScaleImage(image, side, side);
 	RReleaseImage(image);
 	if (!scaled)
@@ -35,8 +36,9 @@ failed:
 void WPrefsSetPreviewButtonFont(WMButton *button, WMFont *font, WMPixmap *normal, WMPixmap *selected)
 {
 	int side = scaledSize(font, 48);
-	WMPixmap *image = resizePreview(normal, side);
-	WMPixmap *altImage = resizePreview(selected, side);
+	RColor background = WMGetRColorFromColor(WMGetWidgetBackgroundColor(button));
+	WMPixmap *image = resizePreview(normal, side, background);
+	WMPixmap *altImage = resizePreview(selected, side, background);
 	WMSize size;
 
 	WMSetButtonFont(button, font);
