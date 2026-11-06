@@ -21,6 +21,8 @@
  */
 
 #include "WPrefs.h"
+#include "FontControls.h"
+#include "PanelLayout.h"
 
 /* This structure containts the list of all the check-buttons to display in the
  * expert tab of the window with the corresponding information for effect
@@ -159,8 +161,11 @@ typedef struct _Panel {
 	WMButton *swi[wlengthof_nocheck(expert_options)];
 
 	WMTextField *textfield[wlengthof_nocheck(expert_options)];
+	WMButton *up[wlengthof_nocheck(expert_options)];
+	WMButton *down[wlengthof_nocheck(expert_options)];
 	WMScrollView *sv;
 	WMWidget *frame;
+	WMSize contentSize;
 
 } _Panel;
 
@@ -324,37 +329,56 @@ static int cmpExpertOptions(const void *v1, const void *v2)
 	return 0;
 }
 
+static void resizeOptions(void *data, WMNotification *notification)
+{
+	_Panel *panel = data;
+	WMRect visible = WMGetScrollViewVisibleRect(panel->sv);
+
+	(void)notification;
+	WMResizeWidget(panel->frame, WMAX(panel->contentSize.width, visible.size.width),
+		       panel->contentSize.height);
+}
+
+static void setArrowImage(WMButton *button, WMFont *font, int normal, int selected)
+{
+	WMScreen *screen = WMWidgetScreen(button);
+	WMPixmap *image = WMGetSystemPixmap(screen, normal);
+	WMPixmap *alt = WMGetSystemPixmap(screen, selected);
+
+	WMSetButtonImagePosition(button, WIPImageOnly);
+	WPrefsSetImageButtonFont(button, font, image, alt);
+	WMReleasePixmap(image);
+	WMReleasePixmap(alt);
+}
+
 static void createPanel(Panel *p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScrollView *sv;
-	WMFrame *f;
+	WMBox *f;
 	WMUserDefaults *udb;
+	WMFont *font = WMDefaultSystemFont(WMWidgetScreen(panel->parent));
+	int rowWidth = 480 * WMAX(17, WMFontHeight(font)) / 17;
 	int i, state;
 
-	panel->box = WMCreateBox(panel->parent);
-	WMSetViewExpandsToParent(WMWidgetView(panel->box), 2, 2, 2, 2);
+	panel->box = WPrefsCreatePanelBox(panel->parent);
 
 	sv = WMCreateScrollView(panel->box);
-	WMResizeWidget(sv, 500, 215);
-	WMMoveWidget(sv, 12, 10);
 	WMSetScrollViewRelief(sv, WRSunken);
 	WMSetScrollViewHasVerticalScroller(sv, True);
 	WMSetScrollViewHasHorizontalScroller(sv, False);
 
-	f = WMCreateFrame(panel->box);
-	WMResizeWidget(f, 495, wlengthof(expert_options) * 25 + 8);
-	WMSetFrameRelief(f, WRFlat);
+	f = WMCreateBox(panel->box);
+	WMSetBoxBorderWidth(f, 5);
 
 	udb = WMGetStandardUserDefaults();
 	qsort(expert_options, wlengthof(expert_options), sizeof(expert_options[0]), cmpExpertOptions);
 	for (i = 0; i < wlengthof(expert_options); i++) {
 		if (expert_options[i].class != OPTION_WMAKER_INT) {
 			panel->swi[i] = WMCreateSwitchButton(f);
-			WMResizeWidget(panel->swi[i], FRAME_WIDTH - 40, 25);
-			WMMoveWidget(panel->swi[i], 5, 5 + i * 25);
-
 			WMSetButtonText(panel->swi[i], _(expert_options[i].label));
+			WMPackBoxSubview(f, panel->swi[i],
+					 WMGetButtonPreferredSizeForWidth(panel->swi[i], rowWidth), False, 6);
 		}
 
 		switch (expert_options[i].class) {
@@ -379,35 +403,36 @@ static void createPanel(Panel *p)
 
 		case OPTION_WMAKER_INT:
 		{
-			char tmp[10];
+			char tmp[32];
 			WMButton *up, *down;
 			WMLabel *label;
+			WMBox *row = WMCreateBox(f);
+			WMSize labelSize;
+			int controlsWidth;
 
-			panel->textfield[i] = WMCreateTextField(f);
-			WMResizeWidget(panel->textfield[i], 41, 20);
-			WMMoveWidget(panel->textfield[i], 22, 7 + i * 25);
+			WMSetBoxHorizontal(row, True);
+			panel->textfield[i] = WMCreateTextField(row);
 
-			down = WMCreateCommandButton(f);
-			WMSetButtonImage(down, WMGetSystemPixmap(WMWidgetScreen(down), WSIArrowDown));
-			WMSetButtonAltImage(down,
-					    WMGetSystemPixmap(WMWidgetScreen(down), WSIHighlightedArrowDown));
-			WMSetButtonImagePosition(down, WIPImageOnly);
+			down = panel->down[i] = WMCreateCommandButton(row);
+			setArrowImage(down, font, WSIArrowDown, WSIHighlightedArrowDown);
 			WMSetButtonAction(down, downButtonCallback, panel->textfield[i]);
-			WMResizeWidget(down, 16, 16);
-			WMMoveWidget(down, 5, 9 + i * 25);
+			WPrefsPackButton(row, down, 4);
+			WMPackBoxSubview(row, panel->textfield[i],
+					 WMGetTextFieldPreferredSize(panel->textfield[i], 5), False, 4);
 
-			up = WMCreateCommandButton(f);
-			WMSetButtonImage(up, WMGetSystemPixmap(WMWidgetScreen(up), WSIArrowUp));
-			WMSetButtonAltImage(up, WMGetSystemPixmap(WMWidgetScreen(up), WSIHighlightedArrowUp));
-			WMSetButtonImagePosition(up, WIPImageOnly);
+			up = panel->up[i] = WMCreateCommandButton(row);
+			setArrowImage(up, font, WSIArrowUp, WSIHighlightedArrowUp);
 			WMSetButtonAction(up, upButtonCallback, panel->textfield[i]);
-			WMResizeWidget(up, 16, 16);
-			WMMoveWidget(up, 64, 9 + i * 25);
+			WPrefsPackButton(row, up, 10);
+			controlsWidth = WMGetBoxMinimumSize(row).width;
 
-			label = WMCreateLabel(f);
+			label = WMCreateLabel(row);
 			WMSetLabelText(label, _(expert_options[i].label));
-			WMResizeWidget(label, FRAME_WIDTH - 99, 25);
-			WMMoveWidget(label, 85, 5 + i * 25);
+			WMSetLabelWraps(label, True);
+			labelSize = WMGetLabelPreferredSizeForWidth(label, WMAX(1, rowWidth - controlsWidth));
+			WMPackBoxSubview(row, label, labelSize, True, 0);
+			WMPackBoxSubview(f, row, WMGetBoxMinimumSize(row), False, 6);
+			WMMapSubwidgets(row);
 
 			if (GetStringForKey(expert_options[i].op_name))
 				state = GetIntegerForKey(expert_options[i].op_name);
@@ -432,14 +457,23 @@ static void createPanel(Panel *p)
 			WMSetButtonSelected(panel->swi[i], state);
 	}
 
-	WMMapSubwidgets(panel->box);
+	panel->contentSize = WMGetBoxMinimumSize(f);
+	WMResizeWidget(f, panel->contentSize.width, panel->contentSize.height);
 	WMSetScrollViewContentView(sv, WMWidgetView(f));
+	WMPackBoxSubview(panel->box, sv,
+			 wmksize(panel->contentSize.width + 24, 10 * (WMFontHeight(font) + 10)), True, 0);
+	WMMapSubwidgets(f);
+	WMMapSubwidgets(panel->box);
 	/* keep references for the wheel handler and register it */
 	panel->sv = sv;
 	panel->frame = f;
+	WMAddNotificationObserver(resizeOptions, panel, WMViewSizeDidChangeNotification, WMWidgetView(sv));
+	WMSetViewNotifySizeChanges(WMWidgetView(sv), True);
 	WMCreateEventHandler(WMWidgetView(sv), ButtonPressMask, scrollViewWheelHandler, panel);
 	WMAddNotificationObserver(scrollViewRealizeObserver, panel, WMViewRealizedNotification, WMWidgetView(sv));
 	WMRealizeWidget(panel->box);
+	resizeOptions(panel, NULL);
+	WMReleaseFont(font);
 }
 
 static void storeDefaults(_Panel *panel)
@@ -498,6 +532,7 @@ Panel *InitExpert(WMWidget *parent)
 	panel->parent = parent;
 
 	panel->callbacks.createWidgets = createPanel;
+	panel->callbacks.automaticLayout = True;
 	panel->callbacks.updateDomain = storeDefaults;
 	panel->callbacks.prepareForClose = scrollViewPrepareForClose;
 

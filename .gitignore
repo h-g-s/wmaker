@@ -91,6 +91,7 @@ WPrefs.app/configurations_test
 WPrefs.app/keyboard_shortcuts_test
 WPrefs.app/hot_corner_test
 WPrefs.app/mouse_settings_test
+WPrefs.app/expert_test
 
 # These files are generated from make rules
 wrlib/wrlib.pc
