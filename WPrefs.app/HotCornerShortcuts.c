@@ -250,6 +250,8 @@ static void createPanel(Panel *p)
 	WMSetLabelWraps(panel->hcdescL, False);
 	WMSetLabelText(panel->hcdescL, _("Instructions:\n\n"
 					" - assign command to corner\n"
+					" - or enter WindowOverview\n"
+					"   to open Window Overview\n"
 					" - or leave it empty\n"));
 	WPrefsPackLabel(instructions.content, panel->hcdescL, 0);
 	row = WMCreateBox(instructions.content);

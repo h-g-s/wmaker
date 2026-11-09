@@ -2353,10 +2353,19 @@ static inline int get_corner(WMRect rect, WMPoint p)
 static void hotCornerDelay(void *data)
 {
 	WScreen *scr = (WScreen *) data;
-	if (scr->flags.in_hot_corner && wPreferences.hot_corner_actions[scr->flags.in_hot_corner - 1])
-		ExecuteShellCommand(scr, wPreferences.hot_corner_actions[scr->flags.in_hot_corner - 1]);
+	const char *action = scr->flags.in_hot_corner
+		? wPreferences.hot_corner_actions[scr->flags.in_hot_corner - 1] : NULL;
+
+	/* The overview runs a nested event loop, so retire this timer first. */
 	WMDeleteTimerHandler(scr->hot_corner_timer);
 	scr->hot_corner_timer = NULL;
+
+	if (action) {
+		if (strcasecmp(action, "WindowOverview") == 0)
+			StartWindowOverview(scr);
+		else
+			ExecuteShellCommand(scr, action);
+	}
 }
 
 static void handleMotionNotify(XEvent *event)

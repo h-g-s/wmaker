@@ -189,6 +189,12 @@ static void testPanel(WMScreen *screen)
 		text = WMGetTextFieldText(panel->hcactionsT[2]);
 		assert(!*text);
 		wfree(text);
+		WMSetTextFieldText(panel->hcactionsT[1], "WindowOverview");
+		storeData(panel);
+		showData(panel);
+		text = WMGetTextFieldText(panel->hcactionsT[1]);
+		assert(strcmp(text, "WindowOverview") == 0);
+		wfree(text);
 		array = WMCreatePropListFromDescription("(one, (invalid), three, four)");
 		assert(array);
 		SetObjectForKey(array, "HotCornerActions");
