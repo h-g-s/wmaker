@@ -466,6 +466,57 @@ static void transactionTests(Display *dpy)
 	MonitorLayoutFree(before);
 }
 
+static void savedLayoutTests(Display *dpy, const char *path)
+{
+	MonitorEditor editor = { 0 };
+	WMPropList *invalid;
+	char error[512];
+	int beforeAlerts = alerts;
+
+	assert(unlink(path) == 0);
+	editor.dpy = dpy;
+	editor.root = DefaultRootWindow(dpy);
+	editor.screen = WMCreateScreen(dpy, DefaultScreen(dpy));
+	editor.path = (char *)path;
+	editor.selected = editor.dragging = -1;
+	editor.draft = MonitorLayoutQuery(dpy, editor.root, error, sizeof(error));
+	assert(editor.draft);
+	createEditor(&editor);
+	assert(!WMGetButtonEnabled(editor.load));
+	saveLayout(NULL, &editor);
+	assert(alerts == beforeAlerts && access(path, F_OK) == 0);
+	assert(WMGetButtonEnabled(editor.load));
+
+	editor.rollback = MonitorLayoutCopy(editor.live);
+	updateButtons(&editor);
+	assert(!WMGetButtonEnabled(editor.load));
+	MonitorLayoutFree(editor.rollback);
+	editor.rollback = NULL;
+	updateButtons(&editor);
+	assert(WMGetButtonEnabled(editor.load));
+
+	invalid = WMCreatePLString("invalid");
+	assert(WMWritePropListToFile(invalid, path));
+	WMReleasePropList(invalid);
+	loadLayout(NULL, &editor);
+	assert(alerts == ++beforeAlerts && !editor.dirty);
+	assert(WMGetButtonEnabled(editor.load));
+	assert(unlink(path) == 0);
+	loadLayout(NULL, &editor);
+	assert(alerts == ++beforeAlerts && !editor.dirty);
+	assert(!WMGetButtonEnabled(editor.load));
+	saveLayout(NULL, &editor);
+	assert(alerts == beforeAlerts && WMGetButtonEnabled(editor.load));
+
+	freeBackgrounds(&editor);
+	MonitorLayoutFree(editor.live);
+	MonitorLayoutFree(editor.draft);
+	WMDestroyWidget(editor.options);
+	WMDestroyWidget(editor.confirmation);
+	WMDestroyWidget(editor.window);
+	wfree(editor.rects);
+}
+
 static void timeoutTests(Display *dpy, const char *path)
 {
 	MonitorEditor editor = { 0 };
@@ -524,6 +575,7 @@ int main(int argc, char **argv)
 		editorTests(dpy, path, 11);
 		editorTests(dpy, path, 24);
 		editorTests(dpy, path, 32);
+		savedLayoutTests(dpy, path);
 		timeoutTests(dpy, path);
 		XCloseDisplay(dpy);
 		puts("Monitor layout, persistence, rollback and WINGs interaction tests passed");

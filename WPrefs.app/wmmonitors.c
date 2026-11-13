@@ -7,6 +7,8 @@
 #include <X11/Xatom.h>
 #include <X11/Xlocale.h>
 #include <ctype.h>
+#include <errno.h>
+#include <unistd.h>
 
 #ifdef USE_RANDR
 
@@ -563,10 +565,11 @@ static void paint(MonitorEditor *editor)
 static void updateButtons(MonitorEditor *editor)
 {
 	Bool pending = editor->rollback != NULL;
+	Bool missing = access(editor->path, F_OK) < 0 && (errno == ENOENT || errno == ENOTDIR);
 
 	WMSetButtonEnabled(editor->apply, !pending && editor->dirty);
 	WMSetButtonEnabled(editor->save, !pending && !editor->dirty);
-	WMSetButtonEnabled(editor->load, !pending);
+	WMSetButtonEnabled(editor->load, !pending && !missing);
 	WMSetButtonEnabled(editor->refresh, !pending);
 	WMSetButtonEnabled(editor->keep, pending);
 	WMSetButtonEnabled(editor->revert, pending);
@@ -958,11 +961,13 @@ static void saveLayout(WMWidget *widget, void *data)
 	}
 	MonitorLayoutFree(current);
 	if (!MonitorLayoutSave(editor->live, editor->path, error, sizeof(error))) {
+		updateButtons(editor);
 		report(editor, error);
 		return;
 	}
 	snprintf(text, sizeof(text), _("Layout saved to %s. Load Layout stages it; Apply activates it."), editor->path);
 	WMSetLabelText(editor->status, text);
+	updateButtons(editor);
 }
 
 static void loadLayout(WMWidget *widget, void *data)
@@ -976,6 +981,7 @@ static void loadLayout(WMWidget *widget, void *data)
 					    _("Load Layout"), _("Cancel"), NULL) != WAPRDefault)
 		return;
 	if (!MonitorLayoutLoad(editor->draft, editor->path, error, sizeof(error))) {
+		updateButtons(editor);
 		report(editor, error);
 		return;
 	}
