@@ -150,6 +150,114 @@ static void assertBefore(WMWidget *above, WMWidget *below)
 	assert(first.y + (int)WMWidgetHeight(above) <= second.y);
 }
 
+static void assertAlertButtonVisible(WMAlertPanel *panel, WMButton *button)
+{
+	Display *display = WMScreenDisplay(WMWidgetScreen(button));
+	WMPoint position;
+	Window child;
+	XWindowAttributes attrs;
+
+	assert(XTranslateCoordinates(display, WMWidgetXID(button), WMWidgetXID(panel->win),
+				     0, 0, &position.x, &position.y, &child));
+	assert(position.x >= 0 && position.y >= 0);
+	assert(position.x + (int)WMWidgetWidth(button) <= (int)WMWidgetWidth(panel->win));
+	assert(position.y + (int)WMWidgetHeight(button) <= (int)WMWidgetHeight(panel->win));
+	assert(XGetWindowAttributes(display, WMWidgetXID(button), &attrs));
+	/* A window manager may not have mapped the alert's frame yet. */
+	assert(attrs.map_state != IsUnmapped);
+}
+
+typedef struct {
+	WMAlertPanel *panel;
+	WMButton *button;
+	KeySym key;
+} AlertAction;
+
+static void sendAlertAction(void *data)
+{
+	AlertAction *action = data;
+	Display *display = WMScreenDisplay(WMWidgetScreen(action->panel->win));
+	XEvent event = { 0 };
+
+	if (action->key) {
+		event.xkey.type = KeyPress;
+		event.xkey.display = display;
+		event.xkey.window = WMWidgetXID(action->panel->win);
+		event.xkey.keycode = XKeysymToKeycode(display, action->key);
+		event.xkey.same_screen = True;
+		assert(XSendEvent(display, event.xkey.window, False, KeyPressMask, &event));
+	} else {
+		assertAlertButtonVisible(action->panel, action->button);
+		event.xbutton.type = ButtonPress;
+		event.xbutton.display = display;
+		event.xbutton.window = WMWidgetXID(action->button);
+		event.xbutton.button = Button1;
+		event.xbutton.x = WMWidgetWidth(action->button) / 2;
+		event.xbutton.y = WMWidgetHeight(action->button) / 2;
+		event.xbutton.same_screen = True;
+		assert(XSendEvent(display, event.xbutton.window, False, ButtonPressMask, &event));
+		event.xbutton.type = ButtonRelease;
+		event.xbutton.state = Button1Mask;
+		assert(XSendEvent(display, event.xbutton.window, False, ButtonReleaseMask, &event));
+	}
+	XFlush(display);
+}
+
+static void testAlertAction(WMAlertPanel *panel, WMButton *button, KeySym key, int result)
+{
+	AlertAction action = { panel, button, key };
+
+	panel->result = -1;
+	WMMapWidget(panel->win);
+	WMAddTimerHandler(10, sendAlertAction, &action);
+	WMRunModalLoop(WMWidgetScreen(panel->win), WMWidgetView(panel->win));
+	assert(panel->result == result);
+	WMUnmapWidget(panel->win);
+}
+
+static void testAlertPanels(WMWindow *owner)
+{
+	WMScreen *screen = WMWidgetScreen(owner);
+	WMFont *original = WMDefaultSystemFont(screen);
+	int sizes[] = { 12, 24, 32 };
+	unsigned int i;
+	int scaled;
+
+	WMRealizeWidget(owner);
+	WMMapWidget(owner);
+	for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+		WMFont *font = WMSystemFontOfSize(screen, sizes[i]);
+
+		WMSetWidgetDefaultFont(screen, font);
+		WMReleaseFont(font);
+		for (scaled = 0; scaled < 2; scaled++) {
+			WMAlertPanel *panel = scaled ?
+				WMCreateScaledAlertPanel(screen, owner, "Discard changes?",
+							"Close without applying your staged changes?", "Close", "Cancel", "Help") :
+				WMCreateAlertPanel(screen, owner, "Discard changes?",
+						  "Close without applying your staged changes?", "Close", "Cancel", NULL);
+
+			WMMapWidget(panel->win);
+			XSync(WMScreenDisplay(screen), False);
+			assertBefore(panel->mLbl, panel->hbox);
+			assertAlertButtonVisible(panel, panel->defBtn);
+			assertAlertButtonVisible(panel, panel->altBtn);
+			if (panel->othBtn)
+				assertAlertButtonVisible(panel, panel->othBtn);
+			testAlertAction(panel, panel->defBtn, 0, WAPRDefault);
+			testAlertAction(panel, panel->altBtn, 0, WAPRAlternate);
+			if (panel->othBtn)
+				testAlertAction(panel, panel->othBtn, 0, WAPROther);
+			testAlertAction(panel, NULL, XK_Return, WAPRDefault);
+			testAlertAction(panel, NULL, XK_Escape, panel->othBtn ? WAPROther : WAPRAlternate);
+			WMDestroyAlertPanel(panel);
+		}
+	}
+	WMSetWidgetDefaultFont(screen, original);
+	WMReleaseFont(original);
+	WMUnmapWidget(owner);
+}
+
 typedef struct {
 	WMInputPanel *panel;
 	KeySym key;
@@ -596,6 +704,7 @@ int main(int argc, char **argv)
 	testLabelContent(window);
 	testNestedBoxes(window);
 	testWrappedLabel(window);
+	testAlertPanels(window);
 	testInputPanels(screen);
 	testContentOverflow(screen);
 	testNestedListKeys(screen);

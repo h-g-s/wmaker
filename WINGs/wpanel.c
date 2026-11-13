@@ -37,6 +37,13 @@ static void handleKeyPress(XEvent * event, void *clientData)
 	}
 }
 
+static void sizeAlertPanelToContents(WMAlertPanel *panel)
+{
+	WMSize minimum = WMGetBoxMinimumSize(panel->vbox);
+
+	WMResizeWidget(panel->win, WMWidgetWidth(panel->win), WMAX(WMWidgetHeight(panel->win), minimum.height));
+}
+
 int
 WMRunAlertPanel(WMScreen * scrPtr, WMWindow * owner,
 		const char *title, const char *msg, const char *defaultButton, const char *alternateButton, const char *otherButton)
@@ -230,6 +237,7 @@ WMAlertPanel *WMCreateAlertPanel(WMScreen * scrPtr, WMWindow * owner,
 
 	WMCreateEventHandler(W_VIEW(panel->win), KeyPressMask, handleKeyPress, panel);
 
+	sizeAlertPanelToContents(panel);
 	WMRealizeWidget(panel->win);
 	WMMapSubwidgets(panel->win);
 
@@ -396,6 +404,7 @@ WMAlertPanel *WMCreateScaledAlertPanel(WMScreen * scrPtr, WMWindow * owner,
 
 	WMCreateEventHandler(W_VIEW(panel->win), KeyPressMask, handleKeyPress, panel);
 
+	sizeAlertPanelToContents(panel);
 	WMRealizeWidget(panel->win);
 	WMMapSubwidgets(panel->win);
 
