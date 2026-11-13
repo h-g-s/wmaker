@@ -296,12 +296,39 @@ static int mirrorOffset(MonitorEditor *editor, int index)
 	return count * (WMAX(24, (int)WMFontHeight(editor->font) + 8) + 8);
 }
 
+static int controlSize(MonitorEditor *editor)
+{
+	return WMAX(24, (int)WMFontHeight(editor->font) + 8);
+}
+
+static const char *controlLabel(Bool primary)
+{
+	return primary ? _("primary") : _("active");
+}
+
+static int controlLabelWidth(MonitorEditor *editor, Bool primary)
+{
+	const char *label = controlLabel(primary);
+
+	return WMWidthOfString(editor->font, label, strlen(label));
+}
+
+static int controlMinimumWidth(MonitorEditor *editor)
+{
+	return 2 * controlSize(editor) + controlLabelWidth(editor, True) + controlLabelWidth(editor, False) + 24;
+}
+
+static int inactiveCardWidth(MonitorEditor *editor)
+{
+	return WMAX(WMAX(160, 8 * (int)WMFontHeight(editor->font)), controlMinimumWidth(editor));
+}
+
 static void fitCanvas(MonitorEditor *editor)
 {
 	WMSize size = WMGetViewSize(WMWidgetView(editor->canvas));
 	int i, minX = 0, minY = 0, maxX = 1, maxY = 1, disabled = 0;
 	int fontHeight = WMFontHeight(editor->font), side = WMAX(24, fontHeight + 8);
-	int cardWidth = WMAX(160, 8 * fontHeight), cardHeight = 4 * fontHeight + side + 20;
+	int cardWidth = inactiveCardWidth(editor), cardHeight = 4 * fontHeight + side + 20;
 	int columns = WMAX(1, ((int)size.width - 24) / (cardWidth + 8));
 	int activeHeight, stagger = 0;
 
@@ -334,11 +361,6 @@ static void fitCanvas(MonitorEditor *editor)
 	editor->offsetY = (activeHeight - (maxY - minY) * editor->scale + stagger) / 2;
 }
 
-static int controlSize(MonitorEditor *editor)
-{
-	return WMAX(24, (int)WMFontHeight(editor->font) + 8);
-}
-
 static WMRect monitorControlRect(MonitorEditor *editor, int index, Bool primary)
 {
 	WMRect r = editor->rects[index];
@@ -346,6 +368,17 @@ static WMRect monitorControlRect(MonitorEditor *editor, int index, Bool primary)
 
 	return wmkrect(primary ? r.pos.x + 4 : r.pos.x + (int)r.size.width - side - 4,
 		       r.pos.y + (int)r.size.height - side - 4, side, side);
+}
+
+static WMRect monitorControlHitRect(MonitorEditor *editor, int index, Bool primary)
+{
+	WMRect r = monitorControlRect(editor, index, primary);
+	int labelWidth = controlLabelWidth(editor, primary) + 4;
+
+	if (!primary)
+		r.pos.x -= labelWidth;
+	r.size.width += labelWidth;
+	return r;
 }
 
 static Bool containsPoint(WMRect rect, int x, int y)
@@ -406,7 +439,7 @@ static void paint(MonitorEditor *editor)
 	Drawable drawable;
 	int i, disabled = 0;
 	int textHeight = WMFontHeight(editor->font), side = controlSize(editor);
-	int cardWidth = WMAX(160, 8 * textHeight), cardHeight = 4 * textHeight + side + 20;
+	int cardWidth = inactiveCardWidth(editor), cardHeight = 4 * textHeight + side + 20;
 	int columns = WMAX(1, ((int)size.width - 24) / (cardWidth + 8));
 
 	if (!window || !size.width || !size.height)
@@ -456,7 +489,7 @@ static void paint(MonitorEditor *editor)
 		if (o->enabled) {
 			*r = wmkrect(editor->offsetX + (o->x - editor->originX) * editor->scale,
 				    editor->offsetY + (o->y - editor->originY) * editor->scale - mirrorOffset(editor, i),
-				    WMAX(2 * side + 12, (int)(w * editor->scale)),
+				    WMAX(controlMinimumWidth(editor), (int)(w * editor->scale)),
 				    WMAX(2 * textHeight + side + 20, (int)(h * editor->scale)));
 		} else {
 			int slot = disabled++ - editor->trayPage * columns;
@@ -499,10 +532,22 @@ static void paint(MonitorEditor *editor)
 			     r->pos.y + textHeight + 3, text, strlen(text));
 		XFillRectangle(editor->dpy, drawable, WMColorGC(editor->black), r->pos.x,
 			       r->pos.y + (int)r->size.height - side - 8, r->size.width, side + 8);
-		if (WMWidthOfString(editor->font, o->name, strlen(o->name)) + 2 * side + 16 < (int)r->size.width)
-			WMDrawString(editor->screen, drawable, editor->white, editor->font,
-				     r->pos.x + side + 8, r->pos.y + (int)r->size.height - side - 4,
-				     o->name, strlen(o->name));
+		{
+			WMRect primary = monitorControlRect(editor, i, True), active = monitorControlRect(editor, i, False);
+			int primaryX = primary.pos.x + side + 4;
+			int activeX = active.pos.x - controlLabelWidth(editor, False) - 4;
+			int textY = primary.pos.y + (side - textHeight) / 2;
+			int middleX = primaryX + controlLabelWidth(editor, True) + 8;
+			int nameWidth = WMWidthOfString(editor->font, o->name, strlen(o->name));
+
+			WMDrawString(editor->screen, drawable, o->enabled && !editor->rollback ? editor->white : editor->starGray,
+				     editor->font, primaryX, textY, controlLabel(True), strlen(controlLabel(True)));
+			WMDrawString(editor->screen, drawable, o->nmode > 0 && !editor->rollback ? editor->white : editor->starGray,
+				     editor->font, activeX, textY, controlLabel(False), strlen(controlLabel(False)));
+			if (middleX + nameWidth + 8 < activeX)
+				WMDrawString(editor->screen, drawable, editor->white, editor->font,
+					     middleX + (activeX - middleX - nameWidth) / 2, textY, o->name, strlen(o->name));
+		}
 		drawStar(editor, drawable, monitorControlRect(editor, i, True),
 			 o->enabled && o->id == effectivePrimary(editor), o->enabled && !editor->rollback);
 		drawCheckbox(editor, drawable, monitorControlRect(editor, i, False),
@@ -709,9 +754,9 @@ static void canvasEvent(XEvent *event, void *data)
 				showOptions(editor, event->xbutton.x_root, event->xbutton.y_root);
 			} else if (event->xbutton.button == Button1) {
 				WMUnmapWidget(editor->options);
-				if (containsPoint(monitorControlRect(editor, i, True), event->xbutton.x, event->xbutton.y))
+				if (containsPoint(monitorControlHitRect(editor, i, True), event->xbutton.x, event->xbutton.y))
 					editor->pressedControl = 1;
-				else if (containsPoint(monitorControlRect(editor, i, False), event->xbutton.x, event->xbutton.y))
+				else if (containsPoint(monitorControlHitRect(editor, i, False), event->xbutton.x, event->xbutton.y))
 					editor->pressedControl = 2;
 				else if (editor->draft->outputs[i].enabled) {
 					editor->dragging = i;
@@ -735,7 +780,7 @@ static void canvasEvent(XEvent *event, void *data)
 		int control = editor->pressedControl;
 
 		editor->pressedControl = 0;
-		if (control && containsPoint(monitorControlRect(editor, editor->controlOutput, control == 1),
+		if (control && containsPoint(monitorControlHitRect(editor, editor->controlOutput, control == 1),
 					     event->xbutton.x, event->xbutton.y)) {
 			if (control == 1)
 				primaryChanged(editor, editor->controlOutput);
@@ -1031,7 +1076,9 @@ static void createEditor(MonitorEditor *editor)
 	editor->canvas = WMCreateFrame(editor->column);
 	WMSetFrameRelief(editor->canvas, WRFlat);
 	WMPackBoxSubview(editor->column, editor->canvas,
-			 wmksize(560, WMAX(360, 10 * (int)WMFontHeight(editor->font) + 2 * controlSize(editor) + 100)),
+			 wmksize(WMAX(560, 3 * controlMinimumWidth(editor) + 48),
+				 WMAX(360, 10 * (int)WMFontHeight(editor->font) + 2 * controlSize(editor) + 100 +
+				      (controlLabelWidth(editor, True) + controlLabelWidth(editor, False)) / 2)),
 			 True, 8);
 	WMCreateEventHandler(WMWidgetView(editor->canvas),
 			     ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask | Button1MotionMask,

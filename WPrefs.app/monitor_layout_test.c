@@ -233,6 +233,27 @@ static Bool starIsGold(MonitorEditor *editor, int index)
 	return gold;
 }
 
+static Bool controlLabelHasInk(MonitorEditor *editor, int index, Bool primary)
+{
+	WMRect r = monitorControlRect(editor, index, primary);
+	int width = controlLabelWidth(editor, primary), height = WMFontHeight(editor->font);
+	int left = primary ? r.pos.x + (int)r.size.width + 4 : r.pos.x - width - 4;
+	int top = r.pos.y + ((int)r.size.height - height) / 2;
+	RImage *image = RCreateImageFromDrawable(WMScreenRContext(editor->screen), WMWidgetXID(editor->canvas), None);
+	int x, y, ink = 0;
+
+	assert(image);
+	for (y = top; y < top + height; y++)
+		for (x = left; x < left + width; x++) {
+			unsigned char *pixel = image->data + (y * image->width + x) * (image->format == RRGBAFormat ? 4 : 3);
+
+			if (pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200)
+				ink++;
+		}
+	RReleaseImage(image);
+	return ink > 4;
+}
+
 static void editorTests(Display *dpy, const char *path, int fontSize)
 {
 	MonitorEditor editor = { 0 };
@@ -284,13 +305,22 @@ static void editorTests(Display *dpy, const char *path, int fontSize)
 	checkBounds(WMWidgetView(editor.window));
 	assert(WMGetViewSize(WMWidgetView(editor.canvas)).height >= 360);
 	assert(starIsGold(&editor, 0) && !starIsGold(&editor, 1));
+	assert(controlLabelHasInk(&editor, 0, True) && controlLabelHasInk(&editor, 0, False));
 	/* Canvas controls stage changes without starting a drag. */
 	clickCanvas(&editor, monitorControlRect(&editor, 1, True));
 	assert(editor.draft->primary == 2 && editor.live->primary == 1);
 	assert(starIsGold(&editor, 1) && !starIsGold(&editor, 0));
+	rect = monitorControlHitRect(&editor, 0, True);
+	rect.pos.x += controlSize(&editor);
+	rect.size.width -= controlSize(&editor);
+	clickCanvas(&editor, rect);
+	assert(editor.draft->primary == 1 && editor.dragging < 0);
+	clickCanvas(&editor, monitorControlRect(&editor, 1, True));
 	clickCanvas(&editor, monitorControlRect(&editor, 2, True));
 	assert(editor.draft->primary == 2 && !editor.draft->outputs[2].enabled);
-	clickCanvas(&editor, monitorControlRect(&editor, 2, False));
+	rect = monitorControlHitRect(&editor, 2, False);
+	rect.size.width -= controlSize(&editor);
+	clickCanvas(&editor, rect);
 	assert(editor.draft->outputs[2].enabled && editor.draft->outputs[2].x == 3840);
 	clickCanvas(&editor, monitorControlRect(&editor, 1, False));
 	assert(!editor.draft->outputs[1].enabled && editor.draft->primary == 1);
@@ -382,7 +412,7 @@ static void editorTests(Display *dpy, const char *path, int fontSize)
 	clickCanvas(&editor, monitorControlRect(&editor, 3, False));
 	assert(!editor.draft->outputs[3].enabled);
 	editor.draft->outputs[2].enabled = False;
-	WMResizeWidget(editor.canvas, 200, 360);
+	WMResizeWidget(editor.canvas, WMAX(200, controlMinimumWidth(&editor) + 32), 360);
 	paint(&editor);
 	assert(editor.trayPages == 2 && editor.rects[2].size.width && !editor.rects[3].size.width);
 	clickCanvas(&editor, trayArrowRect(&editor, True));
