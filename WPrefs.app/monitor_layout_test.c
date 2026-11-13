@@ -20,9 +20,27 @@ static XRRCrtcInfo allocation_info;
 #undef XRRSetCrtcConfig
 #undef XRRGetCrtcInfo
 #undef XRRFreeCrtcInfo
+static int alerts;
+static int testAlertPanel(WMScreen *, WMWindow *, const char *, const char *, const char *,
+			  const char *, const char *);
+#define WMRunAlertPanel testAlertPanel
 #define main monitorEditorMain
 #include "wmmonitors.c"
 #undef main
+#undef WMRunAlertPanel
+
+static int testAlertPanel(WMScreen *screen, WMWindow *window, const char *title, const char *message,
+			  const char *button, const char *alternate, const char *other)
+{
+	(void)screen;
+	(void)window;
+	(void)title;
+	(void)alternate;
+	(void)other;
+	assert(message && button);
+	alerts++;
+	return WAPRDefault;
+}
 
 static Status testSetCrtcConfig(Display *dpy, XRRScreenResources *resources, RRCrtc crtc,
 				Time time, int x, int y, RRMode mode, Rotation rotation,
@@ -186,7 +204,36 @@ static void checkBounds(WMView *view)
 	}
 }
 
-static void editorTests(Display *dpy, const char *path)
+static void clickCanvas(MonitorEditor *editor, WMRect rect)
+{
+	XEvent event = { 0 };
+
+	event.xbutton.type = ButtonPress;
+	event.xbutton.button = Button1;
+	event.xbutton.x = rect.pos.x + rect.size.width / 2;
+	event.xbutton.y = rect.pos.y + rect.size.height / 2;
+	canvasEvent(&event, editor);
+	assert(editor->dragging < 0);
+	event.xbutton.type = ButtonRelease;
+	canvasEvent(&event, editor);
+}
+
+static Bool starIsGold(MonitorEditor *editor, int index)
+{
+	WMRect r = monitorControlRect(editor, index, True);
+	RImage *image = RCreateImageFromDrawable(WMScreenRContext(editor->screen), WMWidgetXID(editor->canvas), None);
+	unsigned char *pixel;
+	Bool gold;
+
+	assert(image);
+	pixel = image->data + ((r.pos.y + (int)r.size.height / 2) * image->width +
+			      r.pos.x + (int)r.size.width / 2) * (image->format == RRGBAFormat ? 4 : 3);
+	gold = pixel[0] > 240 && pixel[1] > 180 && pixel[2] < 20;
+	RReleaseImage(image);
+	return gold;
+}
+
+static void editorTests(Display *dpy, const char *path, int fontSize)
 {
 	MonitorEditor editor = { 0 };
 	WMRect rect;
@@ -206,6 +253,12 @@ static void editorTests(Display *dpy, const char *path)
 	editor.root = DefaultRootWindow(dpy);
 	editor.screen = WMCreateScreen(dpy, DefaultScreen(dpy));
 	assert(editor.screen);
+	{
+		WMFont *font = WMSystemFontOfSize(editor.screen, fontSize);
+
+		WMSetWidgetDefaultFont(editor.screen, font);
+		WMReleaseFont(font);
+	}
 	editor.path = (char *)path;
 	editor.selected = editor.dragging = -1;
 	editor.draft = fixture();
@@ -229,11 +282,59 @@ static void editorTests(Display *dpy, const char *path)
 	assert(editor.backgrounds[2] && editor.backgrounds[2]->data[0] == 0x50 &&
 	       editor.backgrounds[2]->data[2] == 0x75);
 	checkBounds(WMWidgetView(editor.window));
-	/* Button choices update only the draft, including a newly enabled monitor. */
-	WMPerformButtonClick(editor.primary[1]);
+	assert(WMGetViewSize(WMWidgetView(editor.canvas)).height >= 360);
+	assert(starIsGold(&editor, 0) && !starIsGold(&editor, 1));
+	/* Canvas controls stage changes without starting a drag. */
+	clickCanvas(&editor, monitorControlRect(&editor, 1, True));
 	assert(editor.draft->primary == 2 && editor.live->primary == 1);
-	WMPerformButtonClick(editor.enabled[2]);
+	assert(starIsGold(&editor, 1) && !starIsGold(&editor, 0));
+	clickCanvas(&editor, monitorControlRect(&editor, 2, True));
+	assert(editor.draft->primary == 2 && !editor.draft->outputs[2].enabled);
+	clickCanvas(&editor, monitorControlRect(&editor, 2, False));
 	assert(editor.draft->outputs[2].enabled && editor.draft->outputs[2].x == 3840);
+	clickCanvas(&editor, monitorControlRect(&editor, 1, False));
+	assert(!editor.draft->outputs[1].enabled && editor.draft->primary == 1);
+	assert(editor.rects[1].pos.y > editor.trayY && !starIsGold(&editor, 1));
+	clickCanvas(&editor, monitorControlRect(&editor, 1, False));
+	assert(editor.draft->outputs[1].enabled);
+	/* Returning outside the pressed control cancels the click. */
+	event.xbutton.type = ButtonPress;
+	event.xbutton.button = Button1;
+	rect = monitorControlRect(&editor, 1, True);
+	event.xbutton.x = rect.pos.x + rect.size.width / 2;
+	event.xbutton.y = rect.pos.y + rect.size.height / 2;
+	canvasEvent(&event, &editor);
+	event.xbutton.type = ButtonRelease;
+	event.xbutton.x = event.xbutton.y = 0;
+	canvasEvent(&event, &editor);
+	assert(editor.draft->primary == 1 && editor.dragging < 0);
+	editor.rollback = MonitorLayoutCopy(editor.live);
+	clickCanvas(&editor, monitorControlRect(&editor, 1, True));
+	clickCanvas(&editor, monitorControlRect(&editor, 0, False));
+	assert(editor.draft->primary == 1 && editor.draft->outputs[0].enabled);
+	MonitorLayoutFree(editor.rollback);
+	editor.rollback = NULL;
+	/* The last enabled output cannot be switched off. */
+	editor.draft->outputs[1].enabled = editor.draft->outputs[2].enabled = False;
+	paint(&editor);
+	clickCanvas(&editor, monitorControlRect(&editor, 0, False));
+	assert(editor.draft->outputs[0].enabled && alerts == 1);
+	alerts = 0;
+	editor.draft->outputs[1].enabled = editor.draft->outputs[2].enabled = True;
+	editor.draft->outputs[1].x = 1920;
+	paint(&editor);
+	/* Mirrored monitors keep both control strips exposed and clickable. */
+	editor.draft->outputs[1].x = editor.draft->outputs[0].x;
+	paint(&editor);
+	rect = monitorControlRect(&editor, 0, True);
+	assert(!containsPoint(editor.rects[1], rect.pos.x + rect.size.width / 2,
+			      rect.pos.y + rect.size.height / 2));
+	clickCanvas(&editor, monitorControlRect(&editor, 1, True));
+	assert(editor.draft->primary == 2);
+	clickCanvas(&editor, monitorControlRect(&editor, 0, True));
+	assert(editor.draft->primary == 1);
+	editor.draft->outputs[1].x = 1920;
+	paint(&editor);
 	/* Simulate dragging the third monitor below the first and edge snapping. */
 	rect = editor.rects[2];
 	event.xbutton.type = ButtonPress;
@@ -257,7 +358,7 @@ static void editorTests(Display *dpy, const char *path)
 	WMSetButtonSelected(editor.flipX, True);
 	optionChanged(NULL, &editor);
 	assert(editor.draft->outputs[2].rotation == (RR_Rotate_90 | RR_Reflect_X));
-	/* Hotplug rebuilds safely and grows the controls to a second row. */
+	/* Hotplug rebuilds the inactive cards, including outputs without usable modes. */
 	freeBackgrounds(&editor);
 	editor.live->outputs = wrealloc(editor.live->outputs, sizeof(*o) * 4);
 	editor.draft->outputs = wrealloc(editor.draft->outputs, sizeof(*o) * 4);
@@ -277,7 +378,18 @@ static void editorTests(Display *dpy, const char *path)
 	grabBackgrounds(&editor);
 	rebuild(&editor);
 	checkBounds(WMWidgetView(editor.window));
-	assert(editor.enabled[3] && !WMGetButtonEnabled(editor.enabled[3]));
+	assert(editor.rects[3].size.width && !editor.draft->outputs[3].enabled);
+	clickCanvas(&editor, monitorControlRect(&editor, 3, False));
+	assert(!editor.draft->outputs[3].enabled);
+	editor.draft->outputs[2].enabled = False;
+	WMResizeWidget(editor.canvas, 200, 360);
+	paint(&editor);
+	assert(editor.trayPages == 2 && editor.rects[2].size.width && !editor.rects[3].size.width);
+	clickCanvas(&editor, trayArrowRect(&editor, True));
+	assert(editor.trayPage == 1 && !editor.rects[2].size.width && editor.rects[3].size.width);
+	clickCanvas(&editor, trayArrowRect(&editor, False));
+	clickCanvas(&editor, monitorControlRect(&editor, 2, False));
+	assert(editor.draft->outputs[2].enabled && editor.trayPages == 1);
 	WMUnmapWidget(editor.options);
 	freeBackgrounds(&editor);
 	MonitorLayoutFree(editor.live);
@@ -285,8 +397,6 @@ static void editorTests(Display *dpy, const char *path)
 	WMDestroyWidget(editor.options);
 	WMDestroyWidget(editor.confirmation);
 	WMDestroyWidget(editor.window);
-	wfree(editor.primary);
-	wfree(editor.enabled);
 	wfree(editor.rects);
 	if (previousType != None)
 		XChangeProperty(dpy, editor.root, backgroundAtom, previousType, previousFormat, PropModeReplace,
@@ -341,6 +451,7 @@ static void timeoutTests(Display *dpy, const char *path)
 	assert(editor.draft);
 	before = MonitorLayoutCopy(editor.draft);
 	createEditor(&editor);
+	assert(starIsGold(&editor, 0));
 	editor.draft->primary = editor.draft->outputs[0].id;
 	edited(&editor);
 	applyChanges(NULL, &editor);
@@ -360,8 +471,6 @@ static void timeoutTests(Display *dpy, const char *path)
 	WMDestroyWidget(editor.options);
 	WMDestroyWidget(editor.confirmation);
 	WMDestroyWidget(editor.window);
-	wfree(editor.primary);
-	wfree(editor.enabled);
 	wfree(editor.rects);
 }
 
@@ -382,7 +491,9 @@ int main(int argc, char **argv)
 	dpy = XOpenDisplay(NULL);
 	if (dpy) {
 		transactionTests(dpy);
-		editorTests(dpy, path);
+		editorTests(dpy, path, 11);
+		editorTests(dpy, path, 24);
+		editorTests(dpy, path, 32);
 		timeoutTests(dpy, path);
 		XCloseDisplay(dpy);
 		puts("Monitor layout, persistence, rollback and WINGs interaction tests passed");

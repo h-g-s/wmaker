@@ -15,11 +15,10 @@ typedef struct {
 	Display *dpy;
 	Window root;
 	WMWindow *window, *options, *confirmation;
-	WMBox *column, *primaryBox, *enabledBox, *primaryRows, *enabledRows;
+	WMBox *column;
 	WMBox *actions;
 	WMFrame *canvas;
-	WMLabel *status, *primaryLabel, *hintLabel, *enabledLabel, *confirmationLabel;
-	WMButton **primary, **enabled;
+	WMLabel *status, *hintLabel, *confirmationLabel;
 	WMButton *apply, *save, *load, *refresh, *keep, *revert;
 	WMPopUpButton *rotation, *mode;
 	WMButton *flipX, *flipY;
@@ -27,10 +26,11 @@ typedef struct {
 	RImage **backgrounds;
 	WMRect *rects;
 	WMFont *font;
-	WMColor *white, *black, *gray, *highlight;
+	WMColor *white, *black, *gray, *highlight, *gold, *starGray;
 	WMHandlerID timer, refreshTimer;
 	int seconds, selected, dragging, dragX, dragY, outputX, outputY, eventBase;
 	int originX, originY, offsetX, offsetY;
+	int pressedControl, controlOutput, trayPage, trayPages, trayY;
 	double scale;
 	Bool dirty;
 	char *path;
@@ -260,29 +260,142 @@ static void freeBackgrounds(MonitorEditor *editor)
 	editor->backgrounds = NULL;
 }
 
+static RROutput effectivePrimary(MonitorEditor *editor)
+{
+	int i;
+	RROutput first = None;
+
+	for (i = 0; i < editor->draft->count; i++) {
+		MonitorOutput *o = &editor->draft->outputs[i];
+
+		if (!o->enabled)
+			continue;
+		if (o->id == editor->draft->primary)
+			return o->id;
+		if (first == None)
+			first = o->id;
+	}
+	return first;
+}
+
+/* Mirrored cards expose their individual control strips instead of hiding them. */
+static int mirrorOffset(MonitorEditor *editor, int index)
+{
+	MonitorOutput *o = &editor->draft->outputs[index];
+	int i, w, h, count = 0;
+
+	MonitorOutputSize(o, &w, &h);
+	for (i = 0; i < index; i++) {
+		MonitorOutput *p = &editor->draft->outputs[i];
+		int pw, ph;
+
+		MonitorOutputSize(p, &pw, &ph);
+		if (p->enabled && p->x == o->x && p->y == o->y && pw == w && ph == h)
+			count++;
+	}
+	return count * (WMAX(24, (int)WMFontHeight(editor->font) + 8) + 8);
+}
+
 static void fitCanvas(MonitorEditor *editor)
 {
 	WMSize size = WMGetViewSize(WMWidgetView(editor->canvas));
-	int i, minX = 0, minY = 0, maxX = 1, maxY = 1;
+	int i, minX = 0, minY = 0, maxX = 1, maxY = 1, disabled = 0;
+	int fontHeight = WMFontHeight(editor->font), side = WMAX(24, fontHeight + 8);
+	int cardWidth = WMAX(160, 8 * fontHeight), cardHeight = 4 * fontHeight + side + 20;
+	int columns = WMAX(1, ((int)size.width - 24) / (cardWidth + 8));
+	int activeHeight, stagger = 0;
 
 	for (i = 0; i < editor->draft->count; i++) {
 		MonitorOutput *o = &editor->draft->outputs[i];
 		int w, h;
 
-		if (!o->enabled)
+		if (!o->connected)
 			continue;
+		if (!o->enabled) {
+			disabled++;
+			continue;
+		}
 		MonitorOutputSize(o, &w, &h);
+		stagger = WMAX(stagger, mirrorOffset(editor, i));
 		minX = WMIN(minX, o->x);
 		minY = WMIN(minY, o->y);
 		maxX = WMAX(maxX, o->x + w);
 		maxY = WMAX(maxY, o->y + h);
 	}
+	editor->trayPages = (disabled + columns - 1) / columns;
+	editor->trayPage = WMAX(0, WMIN(editor->trayPage, editor->trayPages - 1));
+	editor->trayY = disabled ? (int)size.height - cardHeight - fontHeight - 28 : (int)size.height;
+	activeHeight = WMAX(1, editor->trayY);
 	editor->scale = WMIN((double)WMAX(1, (int)size.width - 100) / (maxX - minX),
-			    (double)WMAX(1, (int)size.height - 100) / (maxY - minY));
+			    (double)WMAX(1, activeHeight - 100 - stagger) / (maxY - minY));
 	editor->originX = minX;
 	editor->originY = minY;
 	editor->offsetX = ((int)size.width - (maxX - minX) * editor->scale) / 2;
-	editor->offsetY = ((int)size.height - (maxY - minY) * editor->scale) / 2;
+	editor->offsetY = (activeHeight - (maxY - minY) * editor->scale + stagger) / 2;
+}
+
+static int controlSize(MonitorEditor *editor)
+{
+	return WMAX(24, (int)WMFontHeight(editor->font) + 8);
+}
+
+static WMRect monitorControlRect(MonitorEditor *editor, int index, Bool primary)
+{
+	WMRect r = editor->rects[index];
+	int side = controlSize(editor);
+
+	return wmkrect(primary ? r.pos.x + 4 : r.pos.x + (int)r.size.width - side - 4,
+		       r.pos.y + (int)r.size.height - side - 4, side, side);
+}
+
+static Bool containsPoint(WMRect rect, int x, int y)
+{
+	return rect.size.width && rect.size.height && x >= rect.pos.x && y >= rect.pos.y &&
+	       x < rect.pos.x + (int)rect.size.width && y < rect.pos.y + (int)rect.size.height;
+}
+
+static WMRect trayArrowRect(MonitorEditor *editor, Bool next)
+{
+	int side = controlSize(editor);
+	int width = WMGetViewSize(WMWidgetView(editor->canvas)).width;
+
+	return wmkrect(width - (next ? 1 : 2) * (side + 4) - 12, editor->trayY, side, side);
+}
+
+static void drawStar(MonitorEditor *editor, Drawable drawable, WMRect rect, Bool primary, Bool sensitive)
+{
+	const int points[][2] = {
+		{50, 0}, {61, 35}, {98, 35}, {68, 57}, {79, 93},
+		{50, 71}, {21, 93}, {32, 57}, {2, 35}, {39, 35}
+	};
+	XPoint star[11];
+	int i, side = (int)rect.size.width - 4;
+
+	for (i = 0; i < wlengthof(points); i++) {
+		star[i].x = rect.pos.x + 2 + points[i][0] * side / 100;
+		star[i].y = rect.pos.y + 2 + points[i][1] * side / 100;
+	}
+	star[10] = star[0];
+	XFillPolygon(editor->dpy, drawable, WMColorGC(primary ? editor->gold : editor->starGray),
+		     star, 10, Nonconvex, CoordModeOrigin);
+	XDrawLines(editor->dpy, drawable, WMColorGC(sensitive ? editor->white : editor->gray),
+		   star, 11, CoordModeOrigin);
+}
+
+static void drawCheckbox(MonitorEditor *editor, Drawable drawable, WMRect rect, Bool enabled, Bool sensitive)
+{
+	int side = (int)rect.size.width - 8, x = rect.pos.x + 4, y = rect.pos.y + 4;
+	XPoint check[] = {
+		{ x + side / 5, y + side / 2 },
+		{ x + 2 * side / 5, y + 3 * side / 4 },
+		{ x + 4 * side / 5, y + side / 4 }
+	};
+
+	XFillRectangle(editor->dpy, drawable, WMColorGC(sensitive ? editor->white : editor->starGray),
+		       x, y, side, side);
+	XDrawRectangle(editor->dpy, drawable, WMColorGC(editor->gray), x, y, side, side);
+	if (enabled)
+		XDrawLines(editor->dpy, drawable, WMColorGC(editor->black), check, 3, CoordModeOrigin);
 }
 
 static void paint(MonitorEditor *editor)
@@ -291,7 +404,10 @@ static void paint(MonitorEditor *editor)
 	Window window = WMWidgetXID(editor->canvas);
 	WMPixmap *buffer;
 	Drawable drawable;
-	int i;
+	int i, disabled = 0;
+	int textHeight = WMFontHeight(editor->font), side = controlSize(editor);
+	int cardWidth = WMAX(160, 8 * textHeight), cardHeight = 4 * textHeight + side + 20;
+	int columns = WMAX(1, ((int)size.width - 24) / (cardWidth + 8));
 
 	if (!window || !size.width || !size.height)
 		return;
@@ -302,22 +418,67 @@ static void paint(MonitorEditor *editor)
 		return;
 	drawable = WMGetPixmapXID(buffer);
 	XFillRectangle(editor->dpy, drawable, WMColorGC(editor->gray), 0, 0, size.width, size.height);
+	if (editor->trayPages) {
+		const char *text = editor->trayPages > 1 ? _("Disabled monitors (scroll to browse)") : _("Disabled monitors");
+
+		XDrawLine(editor->dpy, drawable, WMColorGC(editor->starGray), 12, editor->trayY - 8,
+			  (int)size.width - 12, editor->trayY - 8);
+		WMDrawString(editor->screen, drawable, editor->white, editor->font, 16, editor->trayY,
+			     text, strlen(text));
+		if (editor->trayPages > 1) {
+			int next;
+
+			for (next = 0; next < 2; next++) {
+				WMRect r = trayArrowRect(editor, next);
+				XPoint arrow[] = {
+					{ r.pos.x + (next ? side / 3 : 2 * side / 3), r.pos.y + side / 4 },
+					{ r.pos.x + (next ? 2 * side / 3 : side / 3), r.pos.y + side / 2 },
+					{ r.pos.x + (next ? side / 3 : 2 * side / 3), r.pos.y + 3 * side / 4 }
+				};
+
+				XFillPolygon(editor->dpy, drawable, WMColorGC(editor->white), arrow, 3,
+					     Convex, CoordModeOrigin);
+			}
+		}
+	}
 	for (i = 0; i < editor->draft->count; i++) {
 		MonitorOutput *o = &editor->draft->outputs[i];
 		WMRect *r = &editor->rects[i];
 		RImage *image = NULL;
 		WMPixmap *preview;
 		char text[256];
-		int w, h, textHeight = WMFontHeight(editor->font);
+		int w, h;
 
-		if (!o->enabled)
+		*r = wmkrect(0, 0, 0, 0);
+		if (!o->connected)
 			continue;
 		MonitorOutputSize(o, &w, &h);
-		*r = wmkrect(editor->offsetX + (o->x - editor->originX) * editor->scale,
-			    editor->offsetY + (o->y - editor->originY) * editor->scale,
-			    WMAX(1, (int)(w * editor->scale)), WMAX(1, (int)(h * editor->scale)));
+		if (o->enabled) {
+			*r = wmkrect(editor->offsetX + (o->x - editor->originX) * editor->scale,
+				    editor->offsetY + (o->y - editor->originY) * editor->scale - mirrorOffset(editor, i),
+				    WMAX(2 * side + 12, (int)(w * editor->scale)),
+				    WMAX(2 * textHeight + side + 20, (int)(h * editor->scale)));
+		} else {
+			int slot = disabled++ - editor->trayPage * columns;
+
+			if (slot < 0 || slot >= columns)
+				continue;
+			*r = wmkrect(16 + slot * (cardWidth + 8), (int)size.height - cardHeight - 12,
+				    WMIN(cardWidth, (int)size.width - 32), cardHeight);
+		}
 		if (editor->backgrounds[i])
 			image = RScaleImage(editor->backgrounds[i], r->size.width, r->size.height);
+		if (image && !o->enabled) {
+			RColor gray = { 0x70, 0x70, 0x70, 0xff };
+			RImage *dimmed = RCreateImage(image->width, image->height, False);
+
+			if (dimmed) {
+				RClearImage(dimmed, &gray);
+				RCombineImagesWithOpaqueness(dimmed, image, 96);
+				RReleaseImage(image);
+				image = dimmed;
+			}
+		}
 		preview = image ? WMCreatePixmapFromRImage(editor->screen, image, 128) : NULL;
 		if (preview) {
 			WMDrawPixmap(preview, drawable, r->pos.x, r->pos.y);
@@ -327,12 +488,25 @@ static void paint(MonitorEditor *editor)
 			RReleaseImage(image);
 		XFillRectangle(editor->dpy, drawable, WMColorGC(editor->black), r->pos.x, r->pos.y,
 			       r->size.width, WMIN(r->size.height, (unsigned)(2 * textHeight + 8)));
-		snprintf(text, sizeof(text), "%s%s", o->name, o->id == editor->draft->primary ? _(" (primary)") : "");
+		snprintf(text, sizeof(text), "%s", o->name);
 		WMDrawString(editor->screen, drawable, editor->white, editor->font, r->pos.x + 5, r->pos.y + 2,
 			     text, strlen(text));
-		snprintf(text, sizeof(text), "%dx%d  +%d+%d", w, h, o->x, o->y);
+		if (o->enabled)
+			snprintf(text, sizeof(text), "%dx%d  +%d+%d", w, h, o->x, o->y);
+		else
+			snprintf(text, sizeof(text), "%s", o->nmode ? _("Disabled") : _("No usable modes"));
 		WMDrawString(editor->screen, drawable, editor->white, editor->font, r->pos.x + 5,
 			     r->pos.y + textHeight + 3, text, strlen(text));
+		XFillRectangle(editor->dpy, drawable, WMColorGC(editor->black), r->pos.x,
+			       r->pos.y + (int)r->size.height - side - 8, r->size.width, side + 8);
+		if (WMWidthOfString(editor->font, o->name, strlen(o->name)) + 2 * side + 16 < (int)r->size.width)
+			WMDrawString(editor->screen, drawable, editor->white, editor->font,
+				     r->pos.x + side + 8, r->pos.y + (int)r->size.height - side - 4,
+				     o->name, strlen(o->name));
+		drawStar(editor, drawable, monitorControlRect(editor, i, True),
+			 o->enabled && o->id == effectivePrimary(editor), o->enabled && !editor->rollback);
+		drawCheckbox(editor, drawable, monitorControlRect(editor, i, False),
+			     o->enabled, o->nmode > 0 && !editor->rollback);
 		XDrawRectangle(editor->dpy, drawable,
 			       WMColorGC(i == editor->selected ? editor->highlight : editor->white),
 			       r->pos.x, r->pos.y, r->size.width - 1, r->size.height - 1);
@@ -344,7 +518,6 @@ static void paint(MonitorEditor *editor)
 static void updateButtons(MonitorEditor *editor)
 {
 	Bool pending = editor->rollback != NULL;
-	int i;
 
 	WMSetButtonEnabled(editor->apply, !pending && editor->dirty);
 	WMSetButtonEnabled(editor->save, !pending && !editor->dirty);
@@ -352,16 +525,6 @@ static void updateButtons(MonitorEditor *editor)
 	WMSetButtonEnabled(editor->refresh, !pending);
 	WMSetButtonEnabled(editor->keep, pending);
 	WMSetButtonEnabled(editor->revert, pending);
-	for (i = 0; i < editor->draft->count; i++) {
-		MonitorOutput *o = &editor->draft->outputs[i];
-
-		if (!o->connected)
-			continue;
-		WMSetButtonSelected(editor->primary[i], o->id == editor->draft->primary);
-		WMSetButtonEnabled(editor->primary[i], !pending && o->enabled);
-		WMSetButtonSelected(editor->enabled[i], o->enabled);
-		WMSetButtonEnabled(editor->enabled[i], !pending && o->nmode > 0);
-	}
 }
 
 static void edited(MonitorEditor *editor)
@@ -372,42 +535,37 @@ static void edited(MonitorEditor *editor)
 	paint(editor);
 }
 
-static void primaryChanged(WMWidget *widget, void *data)
+static void primaryChanged(MonitorEditor *editor, int index)
 {
-	MonitorEditor *editor = data;
-	int i;
-
-	for (i = 0; i < editor->draft->count; i++)
-		if (widget == editor->primary[i])
-			editor->draft->primary = editor->draft->outputs[i].id;
+	if (!editor->draft->outputs[index].enabled || editor->draft->primary == editor->draft->outputs[index].id)
+		return;
+	editor->draft->primary = editor->draft->outputs[index].id;
 	edited(editor);
 }
 
-static void enabledChanged(WMWidget *widget, void *data)
+static void enabledChanged(MonitorEditor *editor, int index)
 {
-	MonitorEditor *editor = data;
-	int i, index = -1, enabled = 0, right = 0;
+	int i, enabled = 0, right = 0;
+
+	if (editor->draft->outputs[index].nmode == 0)
+		return;
 
 	for (i = 0; i < editor->draft->count; i++) {
 		MonitorOutput *o = &editor->draft->outputs[i];
 		int w, h;
 
-		if (widget == editor->enabled[i])
-			index = i;
 		if (o->enabled) {
 			enabled++;
 			MonitorOutputSize(o, &w, &h);
 			right = WMAX(right, o->x + w);
 		}
 	}
-	if (index < 0)
-		return;
 	if (editor->draft->outputs[index].enabled && enabled == 1) {
-		WMSetButtonSelected(editor->enabled[index], True);
 		report(editor, _("At least one monitor must remain enabled."));
 		return;
 	}
-	editor->draft->outputs[index].enabled = WMGetButtonSelected(widget);
+	editor->draft->outputs[index].enabled = !editor->draft->outputs[index].enabled;
+	WMUnmapWidget(editor->options);
 	if (editor->draft->outputs[index].enabled) {
 		editor->draft->outputs[index].x = right;
 		editor->draft->outputs[index].y = 0;
@@ -527,23 +685,42 @@ static void canvasEvent(XEvent *event, void *data)
 	if (editor->rollback)
 		return;
 	if (event->type == ButtonPress) {
+		editor->pressedControl = 0;
+		if (editor->trayPages > 1 &&
+		    (event->xbutton.button == Button4 || event->xbutton.button == Button5 ||
+		     (event->xbutton.button == Button1 &&
+		      (containsPoint(trayArrowRect(editor, False), event->xbutton.x, event->xbutton.y) ||
+		       containsPoint(trayArrowRect(editor, True), event->xbutton.x, event->xbutton.y))))) {
+			Bool next = event->xbutton.button == Button5 ||
+				    (event->xbutton.button == Button1 &&
+				     containsPoint(trayArrowRect(editor, True), event->xbutton.x, event->xbutton.y));
+
+			editor->trayPage = (editor->trayPage + (next ? 1 : editor->trayPages - 1)) % editor->trayPages;
+			paint(editor);
+			return;
+		}
 		for (i = editor->draft->count - 1; i >= 0; i--) {
 			WMRect *r = &editor->rects[i];
 
-			if (!editor->draft->outputs[i].enabled || event->xbutton.x < r->pos.x ||
-			    event->xbutton.y < r->pos.y || event->xbutton.x >= r->pos.x + (int)r->size.width ||
-			    event->xbutton.y >= r->pos.y + (int)r->size.height)
+			if (!containsPoint(*r, event->xbutton.x, event->xbutton.y))
 				continue;
 			editor->selected = i;
 			if (event->xbutton.button == Button3) {
 				showOptions(editor, event->xbutton.x_root, event->xbutton.y_root);
 			} else if (event->xbutton.button == Button1) {
 				WMUnmapWidget(editor->options);
-				editor->dragging = i;
-				editor->dragX = event->xbutton.x;
-				editor->dragY = event->xbutton.y;
-				editor->outputX = editor->draft->outputs[i].x;
-				editor->outputY = editor->draft->outputs[i].y;
+				if (containsPoint(monitorControlRect(editor, i, True), event->xbutton.x, event->xbutton.y))
+					editor->pressedControl = 1;
+				else if (containsPoint(monitorControlRect(editor, i, False), event->xbutton.x, event->xbutton.y))
+					editor->pressedControl = 2;
+				else if (editor->draft->outputs[i].enabled) {
+					editor->dragging = i;
+					editor->dragX = event->xbutton.x;
+					editor->dragY = event->xbutton.y;
+					editor->outputX = editor->draft->outputs[i].x;
+					editor->outputY = editor->draft->outputs[i].y;
+				}
+				editor->controlOutput = i;
 			}
 			paint(editor);
 			break;
@@ -554,101 +731,31 @@ static void canvasEvent(XEvent *event, void *data)
 		o->x = editor->outputX + (event->xmotion.x - editor->dragX) / editor->scale;
 		o->y = editor->outputY + (event->xmotion.y - editor->dragY) / editor->scale;
 		paint(editor);
-	} else if (event->type == ButtonRelease && event->xbutton.button == Button1 && editor->dragging >= 0) {
-		snapOutput(editor, editor->dragging);
-		editor->dragging = -1;
-		MonitorLayoutNormalize(editor->draft);
-		edited(editor);
+	} else if (event->type == ButtonRelease && event->xbutton.button == Button1) {
+		int control = editor->pressedControl;
+
+		editor->pressedControl = 0;
+		if (control && containsPoint(monitorControlRect(editor, editor->controlOutput, control == 1),
+					     event->xbutton.x, event->xbutton.y)) {
+			if (control == 1)
+				primaryChanged(editor, editor->controlOutput);
+			else
+				enabledChanged(editor, editor->controlOutput);
+		} else if (editor->dragging >= 0) {
+			snapOutput(editor, editor->dragging);
+			editor->dragging = -1;
+			MonitorLayoutNormalize(editor->draft);
+			edited(editor);
+		}
 	}
 }
 
 static void rebuild(MonitorEditor *editor)
 {
-	WMBox *pRow = NULL, *eRow = NULL;
-	WMButton *first = NULL;
-	int i, count = 0;
-
-	if (editor->primaryRows)
-		WMRemoveBoxSubview(editor->primaryBox, WMWidgetView(editor->primaryRows));
-	if (editor->primaryRows)
-		WMDestroyWidget(editor->primaryRows);
-	if (editor->enabledRows)
-		WMRemoveBoxSubview(editor->enabledBox, WMWidgetView(editor->enabledRows));
-	if (editor->enabledRows)
-		WMDestroyWidget(editor->enabledRows);
-	wfree(editor->primary);
-	wfree(editor->enabled);
 	wfree(editor->rects);
-	editor->primary = wmalloc(sizeof(*editor->primary) * WMAX(1, editor->draft->count));
-	editor->enabled = wmalloc(sizeof(*editor->enabled) * WMAX(1, editor->draft->count));
 	editor->rects = wmalloc(sizeof(*editor->rects) * WMAX(1, editor->draft->count));
-	editor->primaryRows = WMCreateBox(editor->primaryBox);
-	editor->enabledRows = WMCreateBox(editor->enabledBox);
-	for (i = 0; i < editor->draft->count; i++) {
-		MonitorOutput *o = &editor->draft->outputs[i];
-
-		if (!o->connected)
-			continue;
-		if (count % 3 == 0) {
-			pRow = WMCreateBox(editor->primaryRows);
-			eRow = WMCreateBox(editor->enabledRows);
-			WMSetBoxHorizontal(pRow, True);
-			WMSetBoxHorizontal(eRow, True);
-		}
-		editor->primary[i] = WMCreateRadioButton(pRow);
-		editor->enabled[i] = WMCreateSwitchButton(eRow);
-		WMSetButtonText(editor->primary[i], o->name);
-		WMSetButtonText(editor->enabled[i], o->name);
-		WMSetButtonAction(editor->primary[i], primaryChanged, editor);
-		WMSetButtonAction(editor->enabled[i], enabledChanged, editor);
-		if (first)
-			WMGroupButtons(first, editor->primary[i]);
-		else
-			first = editor->primary[i];
-		WPrefsPackButton(pRow, editor->primary[i], 16);
-		WPrefsPackButton(eRow, editor->enabled[i], 16);
-		count++;
-		if (count % 3 == 0) {
-			WMPackBoxSubview(editor->primaryRows, pRow, WMGetBoxMinimumSize(pRow), False, 0);
-			WMPackBoxSubview(editor->enabledRows, eRow, WMGetBoxMinimumSize(eRow), False, 0);
-			WMMapSubwidgets(pRow);
-			WMMapSubwidgets(eRow);
-			pRow = eRow = NULL;
-		}
-	}
-	if (pRow) {
-		WMPackBoxSubview(editor->primaryRows, pRow, WMGetBoxMinimumSize(pRow), False, 0);
-		WMPackBoxSubview(editor->enabledRows, eRow, WMGetBoxMinimumSize(eRow), False, 0);
-		WMMapSubwidgets(pRow);
-		WMMapSubwidgets(eRow);
-	}
-	WMPackBoxSubview(editor->primaryBox, editor->primaryRows, WMGetBoxMinimumSize(editor->primaryRows), False, 0);
-	WMPackBoxSubview(editor->enabledBox, editor->enabledRows, WMGetBoxMinimumSize(editor->enabledRows), False, 0);
-	{
-		WMWidget *children[] = { editor->primaryLabel, editor->primaryBox, editor->hintLabel,
-					editor->canvas, editor->enabledLabel, editor->enabledBox,
-					editor->status, editor->actions };
-		WMSize minimum, current = WMGetViewSize(WMWidgetView(editor->window));
-
-		for (i = 0; i < wlengthof(children); i++)
-			WMRemoveBoxSubview(editor->column, WMWidgetView(children[i]));
-		WPrefsPackLabel(editor->column, editor->primaryLabel, 4);
-		WMPackBoxSubview(editor->column, editor->primaryBox, WMGetBoxMinimumSize(editor->primaryBox), False, 8);
-		WMPackBoxSubview(editor->column, editor->hintLabel, wmksize(560, 2 * WMFontHeight(editor->font)), False, 8);
-		WMPackBoxSubview(editor->column, editor->canvas, wmksize(560, 280), True, 8);
-		WPrefsPackLabel(editor->column, editor->enabledLabel, 4);
-		WMPackBoxSubview(editor->column, editor->enabledBox, WMGetBoxMinimumSize(editor->enabledBox), False, 8);
-		WMPackBoxSubview(editor->column, editor->status, wmksize(560, 3 * WMFontHeight(editor->font)), False, 8);
-		WMPackBoxSubview(editor->column, editor->actions, WMGetBoxMinimumSize(editor->actions), False, 0);
-		minimum = WMGetBoxMinimumSize(editor->column);
-		WMSetWindowMinSize(editor->window, minimum.width, minimum.height);
-		if (current.width < minimum.width || current.height < minimum.height)
-			WMResizeWidget(editor->window, WMAX(current.width, minimum.width), WMAX(current.height, minimum.height));
-	}
-	WMMapSubwidgets(editor->primaryRows);
-	WMMapSubwidgets(editor->enabledRows);
-	WMMapSubwidgets(editor->primaryBox);
-	WMMapSubwidgets(editor->enabledBox);
+	editor->pressedControl = 0;
+	editor->trayPage = 0;
 	if (WMWidgetXID(editor->window))
 		WMRealizeWidget(editor->column);
 	updateButtons(editor);
@@ -769,6 +876,7 @@ static void applyChanges(WMWidget *widget, void *data)
 	editor->seconds = 15;
 	WMUnmapWidget(editor->options);
 	updateButtons(editor);
+	paint(editor);
 	snprintf(text, sizeof(text), _("Keep this layout? Reverting in %d seconds."), editor->seconds);
 	WMSetLabelText(editor->status, text);
 	WMSetLabelText(editor->confirmationLabel, text);
@@ -908,34 +1016,26 @@ static void createEditor(MonitorEditor *editor)
 	editor->black = WMBlackColor(editor->screen);
 	editor->gray = WMDarkGrayColor(editor->screen);
 	editor->highlight = WMCreateRGBColor(editor->screen, 0x4000, 0xc000, 0xffff, True);
+	editor->gold = WMCreateRGBColor(editor->screen, 0xffff, 0xd700, 0, True);
+	editor->starGray = WMGrayColor(editor->screen);
 	editor->window = WMCreateWindow(editor->screen, "wmmonitors");
 	WMSetWindowTitle(editor->window, _("Monitor Configuration"));
 	WMSetWindowCloseAction(editor->window, closeEditor, editor);
 	editor->column = WMCreateBox(editor->window);
 	WMSetBoxBorderWidth(editor->column, 12);
 	label = WMCreateLabel(editor->column);
-	editor->primaryLabel = label;
-	WMSetLabelText(label, _("Primary monitor"));
-	WPrefsPackLabel(editor->column, label, 4);
-	editor->primaryBox = WMCreateBox(editor->column);
-	WMPackBoxSubview(editor->column, editor->primaryBox, wmksize(1, 1), False, 8);
-	label = WMCreateLabel(editor->column);
 	editor->hintLabel = label;
-	WMSetLabelText(label, _("Drag monitors to arrange them. Right-click a monitor for resolution, rotation and reflection."));
+	WMSetLabelText(label, _("Drag to arrange; click the bottom-left star for primary, or the bottom-right checkbox to enable. Right-click for monitor settings."));
 	WMSetLabelWraps(label, True);
 	WMPackBoxSubview(editor->column, label, wmksize(560, 2 * WMFontHeight(editor->font)), False, 8);
 	editor->canvas = WMCreateFrame(editor->column);
 	WMSetFrameRelief(editor->canvas, WRFlat);
-	WMPackBoxSubview(editor->column, editor->canvas, wmksize(560, 280), True, 8);
+	WMPackBoxSubview(editor->column, editor->canvas,
+			 wmksize(560, WMAX(360, 10 * (int)WMFontHeight(editor->font) + 2 * controlSize(editor) + 100)),
+			 True, 8);
 	WMCreateEventHandler(WMWidgetView(editor->canvas),
 			     ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
 			     canvasEvent, editor);
-	label = WMCreateLabel(editor->column);
-	editor->enabledLabel = label;
-	WMSetLabelText(label, _("Enabled monitors"));
-	WPrefsPackLabel(editor->column, label, 4);
-	editor->enabledBox = WMCreateBox(editor->column);
-	WMPackBoxSubview(editor->column, editor->enabledBox, wmksize(1, 1), False, 8);
 	editor->status = WMCreateLabel(editor->column);
 	WMSetLabelWraps(editor->status, True);
 	WMPackBoxSubview(editor->column, editor->status, wmksize(560, 3 * WMFontHeight(editor->font)), False, 8);

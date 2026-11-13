@@ -9,8 +9,15 @@ wmmonitors \- configure monitors using a WINGs layout editor
 shows connected RandR outputs as movable rectangles with background previews.
 Drag a rectangle to place a monitor to the left, right, above or below another.
 Nearby edges snap together. Overlapping rectangles are allowed.
-Select the primary monitor using the radio buttons above the canvas.
-Use the checkboxes below it to enable or disable outputs.
+Click the star at the bottom-left of a monitor to make it primary.
+The primary monitor has a gold star; other monitors have gray stars.
+If RandR has no explicit primary, the star marks Window Maker's default first
+enabled monitor.
+Use each monitor's bottom-right checkbox to enable or disable it.
+Disabled monitors appear as dimmed cards in a tray inside the canvas,
+where their checkboxes can enable them again.
+Use the tray arrows or mouse wheel to browse additional disabled monitors.
+Mirrored monitors are drawn as stacked cards with individually exposed controls.
 At least one output must remain enabled.
 .PP
 Right-click a rectangle to open its resolution, refresh rate, rotation and
