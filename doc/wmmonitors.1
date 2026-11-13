@@ -1,0 +1,67 @@
+.TH WMMONITORS 1 "November 2026" "Window Maker"
+.SH NAME
+wmmonitors \- configure monitors using a WINGs layout editor
+.SH SYNOPSIS
+.B wmmonitors
+.RI [ options ]
+.SH DESCRIPTION
+.B wmmonitors
+shows connected RandR outputs as movable rectangles with background previews.
+Drag a rectangle to place a monitor to the left, right, above or below another.
+Nearby edges snap together. Overlapping rectangles are allowed.
+Select the primary monitor using the radio buttons above the canvas.
+Use the checkboxes below it to enable or disable outputs.
+At least one output must remain enabled.
+.PP
+Right-click a rectangle to open its resolution, refresh rate, rotation and
+reflection controls. Unsupported rotation and reflection choices are disabled.
+Active backgrounds are read from the desktop background pixmap; new or disabled
+outputs use their saved Window Maker background, or the default background color.
+Saved-texture previews support solid colors, two-color gradients and image
+textures; other texture types use the default color and produce a warning.
+.PP
+Plugging or unplugging a monitor, or an external layout change, reloads the live
+configuration and discards staged edits. Scaling transforms and panning must be
+reset with
+.B xrandr
+before applying layouts in this editor.
+.SH APPLYING AND SAVING
+.B Apply
+changes the current X-server configuration, not the startup configuration.
+Choose
+.B Keep
+within 15 seconds to confirm, or the previous layout is restored.
+.B Revert
+restores it immediately. Closing during confirmation also reverts.
+If monitors are unplugged during confirmation, the old snapshot cannot be
+restored safely; the editor reloads the available outputs and reports this.
+.PP
+.B Save Layout
+stores the confirmed live layout in the GNUstep defaults file
+.BR WMMonitorLayout .
+.B Load Layout
+stages the saved layout for review; it does not activate it.
+Outputs are matched by connector name, and modes by name and refresh rate,
+not by X-server resource identifiers.
+Missing monitors are ignored, and newly attached monitors retain their live
+settings. Unavailable saved modes and invalid layouts are reported as errors.
+Nothing is automatically restored at login.
+.SH OPTIONS
+.TP
+.BI \-display " display"
+Select the X display.
+.TP
+.BR \-\-help " | " \-h
+Print usage information and exit.
+.TP
+.BR \-\-version " | " \-v
+Print the version and exit.
+.SH FILES
+.TP
+.B ~/GNUstep/Defaults/WMMonitorLayout
+Saved monitor configuration. WMAKER_USER_ROOT can relocate the GNUstep directory.
+.SH SEE ALSO
+.BR WPrefs (1),
+.BR wmwallpaper (1),
+.BR wmsetbg (1),
+.BR xrandr (1)

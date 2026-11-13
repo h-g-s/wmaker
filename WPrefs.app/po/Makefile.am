@@ -21,6 +21,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/KeyboardShortcuts.c \
 	$(top_srcdir)/WPrefs.app/Menu.c \
 	$(top_srcdir)/WPrefs.app/MenuPreferences.c \
+	$(top_srcdir)/WPrefs.app/MonitorLayout.c \
 	$(top_srcdir)/WPrefs.app/MouseSettings.c \
 	$(top_srcdir)/WPrefs.app/Paths.c \
 	$(top_srcdir)/WPrefs.app/PanelLayout.c \
@@ -34,6 +35,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/double.c \
 	$(top_srcdir)/WPrefs.app/editmenu.c \
 	$(top_srcdir)/WPrefs.app/main.c \
+	$(top_srcdir)/WPrefs.app/wmmonitors.c \
 	$(top_srcdir)/WPrefs.app/xmodifier.c
 
 # not_yet_fully_implemented
@@ -94,4 +96,4 @@ am__v_CHKTRANS_1 =
 # 'make check' will make sure the tranlation sources are in line with the compiled source
 check-local:
 	$(AM_V_CHKTRANS)$(top_srcdir)/script/check-translation-sources.sh \
-		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am" -v WPrefs_SOURCES
+		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am" -v WPrefs_SOURCES -v wmmonitors_SOURCES

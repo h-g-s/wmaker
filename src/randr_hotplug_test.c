@@ -132,6 +132,7 @@ int main(void)
 	state.outputs[0].w = 1920;
 	state.outputs[0].h = 1080;
 	state.outputs[1].connected = state.outputs[2].connected = True;
+	state.outputs[1].activate_pending = state.outputs[2].activate_pending = True;
 	state.outputs[1].xid = output;
 	state.outputs[2].xid = 3;
 
@@ -148,6 +149,7 @@ int main(void)
 	assert(wRandR_AutoActivate(&screen, &state, &resources));
 	assert(configured == 2 && configured_x == 3840);
 	assert(root_attrs.width == 5760);
+	state.outputs[2].activate_pending = True;
 
 	/* Reject a layout that cannot fit before issuing an invalid X request. */
 	max_width = 5759;
@@ -196,6 +198,19 @@ int main(void)
 	wRandR_Update(&screen);
 	assert(screen.xine_info.screens[0].size.width == 1080);
 	assert(refreshed == 2);
+
+	/* An external disable stays off; reconnecting still auto-activates it. */
+	output_info.crtc = None;
+	configured = 0;
+	wRandR_Update(&screen);
+	assert(configured == 0 && !state.outputs[0].activate_pending);
+	output_info.connection = RR_Disconnected;
+	wRandR_Update(&screen);
+	output_info.connection = RR_Connected;
+	wRandR_Update(&screen);
+	assert(configured == 1);
+	WMDeleteTimerHandler(screen.randr_debounce_timer);
+	screen.randr_debounce_timer = NULL;
 
 	wfree(screen.xine_info.screens);
 	wfree(screen.usableArea);

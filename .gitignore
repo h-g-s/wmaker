@@ -97,6 +97,8 @@ WPrefs.app/mouse_settings_test
 WPrefs.app/expert_test
 WPrefs.app/wallpaper_test
 WPrefs.app/wmwallpaper
+WPrefs.app/wmmonitors
+WPrefs.app/monitor_layout_test
 
 # These files are generated from make rules
 wrlib/wrlib.pc

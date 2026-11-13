@@ -44,6 +44,7 @@ typedef struct {
     int x, y, w, h;
     Rotation rotation;     /* current CRTC rotation */
     Bool connected;        /* RR_Connected */
+    Bool activate_pending; /* connection transition, not an intentional disable */
     Bool stale;            /* mark-scan scratch flag */
     char name[64];
 } WRandROutput;
@@ -77,6 +78,7 @@ static void wRandR_Scan(WScreen *scr, WRandRState *state)
         memset(o, 0, sizeof(*o));
         o->xid = sr->outputs[i];
         o->connected = (oi->connection == RR_Connected);
+        o->activate_pending = o->connected && oi->crtc == None;
         o->crtc = oi->crtc;
         strncpy(o->name, oi->name, sizeof(o->name) - 1);
 
@@ -367,7 +369,7 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
         Status ret;
 
         /* Only process newly connected outputs that have no CRTC yet */
-        if (!o->connected || o->crtc != None || o->stale)
+        if (!o->connected || !o->activate_pending || o->crtc != None || o->stale)
             continue;
 
         oi = XRRGetOutputInfo(dpy, sr, o->xid);
@@ -479,6 +481,7 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
                                new_x, 0, best_mode, rotation,
                                &o->xid, 1);
         if (ret == RRSetConfigSuccess) {
+            o->activate_pending = False;
             wwarning("RandR: auto-activated output %s at +%d+0", o->name, new_x);
             /* Re-query resources before assigning another output: CRTC use,
              * framebuffer size and configuration timestamps have changed. */
@@ -538,6 +541,10 @@ static void wRandR_Update(WScreen *scr)
 
         if (found) {
             found->stale = False;
+            if (oi->connection == RR_Connected && !found->connected)
+                found->activate_pending = True;
+            if (oi->connection != RR_Connected || oi->crtc != None)
+                found->activate_pending = False;
             found->connected = (oi->connection == RR_Connected);
             found->crtc = oi->crtc;
             found->w = 0;

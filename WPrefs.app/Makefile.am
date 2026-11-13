@@ -6,7 +6,7 @@ wpexecbindir = @wprefs_bindir@
 
 wpexecbin_PROGRAMS = WPrefs
 
-bin_PROGRAMS = wmwallpaper
+bin_PROGRAMS = wmwallpaper wmmonitors
 
 wpdatadir = @wprefs_datadir@
 
@@ -69,6 +69,7 @@ WPrefs_SOURCES = \
 AM_CFLAGS = @PANGO_CFLAGS@
 
 AM_CPPFLAGS = -DRESOURCE_PATH=\"$(wpdatadir)\" -DWMAKER_RESOURCE_PATH=\"$(pkgdatadir)\" \
+	 -DMONITOR_EDITOR_PATH=\"$(bindir)/wmmonitors\" \
 	 -I$(top_builddir)/wrlib -I$(top_srcdir)/WINGs -I$(top_builddir)/WINGs \
 	 @HEADER_SEARCH_PATH@
 
@@ -87,7 +88,12 @@ wmwallpaper_SOURCES = wmwallpaper.c WallpaperChooser.c WallpaperChooser.h PanelL
 wmwallpaper_DEPENDENCIES = $(WPrefs_DEPENDENCIES)
 wmwallpaper_LDADD = $(WPrefs_LDADD)
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test
+wmmonitors_SOURCES = wmmonitors.c MonitorLayout.c MonitorLayout.h PanelLayout.c PanelLayout.h
+wmmonitors_LDADD = $(WPrefs_LDADD) @LIBXRANDR@
+
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test monitor_layout_test
+monitor_layout_test_SOURCES = monitor_layout_test.c MonitorLayout.h PanelLayout.c PanelLayout.h
+monitor_layout_test_LDADD = $(wmmonitors_LDADD)
 wallpaper_test_SOURCES = wallpaper_test.c PanelLayout.c PanelLayout.h WallpaperChooser.h
 wallpaper_test_LDADD = $(WPrefs_LDADD)
 appearance_test_SOURCES = appearance_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
@@ -139,3 +145,4 @@ check-local: $(check_PROGRAMS)
 	./menu_test || test $$? -eq 77
 	./appearance_test || test $$? -eq 77
 	./wallpaper_test || test $$? -eq 77
+	./monitor_layout_test || test $$? -eq 77

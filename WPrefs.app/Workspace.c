@@ -20,6 +20,10 @@
 
 #include "WPrefs.h"
 #include "PanelLayout.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 typedef struct _Panel {
 	WMBox *box;
@@ -79,6 +83,69 @@ static void showData(_Panel * panel)
 		}
 	}
 	WMSetPopUpButtonSelectedItem(panel->posP, idx);
+}
+
+static void launchMonitors(WMWidget *widget, void *data)
+{
+	int channel[2], error = 0;
+	pid_t pid;
+	ssize_t result;
+	const char *display = DisplayString(WMScreenDisplay(WMWidgetScreen(widget)));
+
+	(void)data;
+	if (pipe(channel) < 0) {
+		error = errno;
+		goto failed;
+	}
+	if (fcntl(channel[1], F_SETFD, FD_CLOEXEC) < 0) {
+		error = errno;
+		close(channel[0]);
+		close(channel[1]);
+		goto failed;
+	}
+	pid = fork();
+	if (pid == 0) {
+		pid_t child;
+
+		close(channel[0]);
+		child = fork();
+		if (child == 0) {
+			execl(MONITOR_EDITOR_PATH, "wmmonitors", "-display", display, (char *)NULL);
+			if (errno == ENOENT)
+				execlp("wmmonitors", "wmmonitors", "-display", display, (char *)NULL);
+		}
+		if (child < 0 || child == 0) {
+			error = errno;
+			do
+				result = write(channel[1], &error, sizeof(error));
+			while (result < 0 && errno == EINTR);
+		}
+		_exit(child > 0 ? 0 : 1);
+	}
+	close(channel[1]);
+	if (pid < 0) {
+		error = errno;
+		close(channel[0]);
+		goto failed;
+	}
+	while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+		;
+	do
+		result = read(channel[0], &error, sizeof(error));
+	while (result < 0 && errno == EINTR);
+	if (result < 0)
+		error = errno;
+	close(channel[0]);
+	if (!error)
+		return;
+failed:
+	{
+		char message[512];
+
+		snprintf(message, sizeof(message), _("Could not launch the monitor editor: %s"), strerror(error));
+		wwarning("%s", message);
+		WMRunAlertPanel(WMWidgetScreen(widget), NULL, _("Monitor Configuration"), message, _("OK"), NULL, NULL);
+	}
 }
 
 static void createPanel(Panel * p)
@@ -141,6 +208,20 @@ static void createPanel(Panel * p)
 		WMMapSubwidgets(row);
 	}
 	WPrefsPackGroup(panel->box, &navigation, True, 0);
+
+	{
+		WPrefsGroup monitors = WPrefsCreateGroup(panel->box, _("Monitors"));
+		WMButton *button = WMCreateCommandButton(monitors.content);
+		WMLabel *label = WMCreateLabel(monitors.content);
+
+		WMSetLabelText(label, _("Arrange, enable, rotate and select the primary monitor."));
+		WPrefsPackLabel(monitors.content, label, 8);
+		WMSetButtonText(button, _("Configure Monitors..."));
+		WMSetButtonAction(button, launchMonitors, NULL);
+		WPrefsPackButton(monitors.content, button, 0);
+		WPrefsPackGroup(panel->box, &monitors, False, 0);
+		WMMapSubwidgets(monitors.content);
+	}
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
