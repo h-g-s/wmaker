@@ -34,7 +34,7 @@ reset with
 before applying layouts in this editor.
 .SH APPLYING AND SAVING
 .B Apply
-changes the current X-server configuration, not the startup configuration.
+changes the current X-server configuration for this session.
 Choose
 .B Keep
 within 15 seconds to confirm, or the previous layout is restored.
@@ -46,13 +46,16 @@ restored safely; the editor reloads the available outputs and reports this.
 .B Save Layout
 stores the confirmed live layout in the GNUstep defaults file
 .BR WMMonitorLayout .
+At startup, Window Maker automatically applies this layout only when the set
+of connected monitor connector names exactly matches the saved set.
+If the sets differ, or a saved mode is no longer available, the layout is not
+applied and Window Maker continues with the current X-server configuration.
 .B Load Layout
 stages the saved layout for review; it does not activate it.
 Outputs are matched by connector name, and modes by name and refresh rate,
 not by X-server resource identifiers.
 Missing monitors are ignored, and newly attached monitors retain their live
 settings. Unavailable saved modes and invalid layouts are reported as errors.
-Nothing is automatically restored at login.
 .SH OPTIONS
 .TP
 .BI \-display " display"

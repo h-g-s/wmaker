@@ -42,6 +42,7 @@ POTFILES  = \
 	$(top_srcdir)/src/placement.c \
 	$(top_srcdir)/src/properties.c \
 	$(top_srcdir)/src/randr.c \
+	$(top_srcdir)/src/monitor_layout.c \
 	$(top_srcdir)/src/resources.c \
 	$(top_srcdir)/src/rootmenu.c \
 	$(top_srcdir)/src/screen.c \

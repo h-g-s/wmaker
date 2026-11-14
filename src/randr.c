@@ -23,9 +23,12 @@
 #ifdef USE_RANDR
 
 #include <string.h>
+#include <errno.h>
+#include <unistd.h>
 #include <X11/Xlib.h>
 
 #include "randr.h"
+#include "monitor_layout.h"
 #include "window.h"
 #include "framewin.h"
 #include "xinerama.h"
@@ -496,6 +499,54 @@ static Bool wRandR_AutoActivate(WScreen *scr, WRandRState *state, XRRScreenResou
 
 static void wRandRDebounceTimerFired(void *data);
 
+static void wRandR_MarkOutputsAsRestored(WRandRState *state)
+{
+    int i;
+
+    /* Outputs disabled by the saved layout are not pending hotplug activations. */
+    for (i = 0; i < state->n_outputs; i++)
+        state->outputs[i].activate_pending = False;
+}
+
+static Bool wRandR_RestoreSavedLayout(WScreen *scr)
+{
+    char *path;
+    char error[512];
+    MonitorLayout *layout;
+
+    /* The monitor editor saves a layout for the default X screen. */
+    if (scr->screen != DefaultScreen(dpy))
+        return False;
+
+    path = wdefaultspathfordomain("WMMonitorLayout");
+    if (access(path, F_OK) < 0) {
+        if (errno != ENOENT && errno != ENOTDIR)
+            wwarning("RandR: could not access saved monitor layout %s: %s", path, strerror(errno));
+        wfree(path);
+        return False;
+    }
+
+    layout = MonitorLayoutQuery(dpy, scr->root_win, error, sizeof(error));
+    if (!layout) {
+        wwarning("RandR: could not restore saved monitor layout: %s", error);
+        wfree(path);
+        return False;
+    }
+    if (!MonitorLayoutLoadExact(layout, path, error, sizeof(error)) ||
+        !MonitorLayoutApply(dpy, scr->root_win, layout, error, sizeof(error))) {
+        wwarning("RandR: saved monitor layout was not applied: %s", error);
+        MonitorLayoutFree(layout);
+        wfree(path);
+        return False;
+    } else {
+        wmessage("RandR: restored saved monitor layout from %s", path);
+    }
+
+    MonitorLayoutFree(layout);
+    wfree(path);
+    return True;
+}
+
 /* Synchronize RandR state with the X server */
 static void wRandR_Update(WScreen *scr)
 {
@@ -647,6 +698,7 @@ static void wRandRDebounceTimerFired(void *data)
 void wRandRInit(WScreen *scr)
 {
     WRandRState *state;
+    Bool restored;
 
     if (!w_global.xext.randr.supported)
         return;
@@ -655,7 +707,10 @@ void wRandRInit(WScreen *scr)
     memset(state, 0, sizeof(*state));
     scr->randr_state = state;
 
+    restored = wRandR_RestoreSavedLayout(scr);
     wRandR_Scan(scr, state);
+    if (restored)
+        wRandR_MarkOutputsAsRestored(state);
     wRandR_ApplyToXinerama(scr, state);
 }
 

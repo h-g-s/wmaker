@@ -88,11 +88,11 @@ wmwallpaper_SOURCES = wmwallpaper.c WallpaperChooser.c WallpaperChooser.h PanelL
 wmwallpaper_DEPENDENCIES = $(WPrefs_DEPENDENCIES)
 wmwallpaper_LDADD = $(WPrefs_LDADD)
 
-wmmonitors_SOURCES = wmmonitors.c MonitorLayout.c MonitorLayout.h PanelLayout.c PanelLayout.h
+wmmonitors_SOURCES = wmmonitors.c ../src/monitor_layout.c ../src/monitor_layout.h PanelLayout.c PanelLayout.h
 wmmonitors_LDADD = $(WPrefs_LDADD) @LIBXRANDR@
 
 check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test monitor_layout_test
-monitor_layout_test_SOURCES = monitor_layout_test.c MonitorLayout.h PanelLayout.c PanelLayout.h
+monitor_layout_test_SOURCES = monitor_layout_test.c ../src/monitor_layout.h PanelLayout.c PanelLayout.h
 monitor_layout_test_LDADD = $(wmmonitors_LDADD)
 wallpaper_test_SOURCES = wallpaper_test.c PanelLayout.c PanelLayout.h WallpaperChooser.h
 wallpaper_test_LDADD = $(WPrefs_LDADD)

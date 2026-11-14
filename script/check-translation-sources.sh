@@ -132,7 +132,9 @@ function add_source_to_list()
     # We filter headers because it is very bad practice to include translatable strings
     # in a header. This script does not check this validity but assumes the code is ok
     if (list_src[key] !~ /\.h$/) {
-      print "  srcfile[\"" list_src[key] "\"] = 1;";
+      source_file = list_src[key];
+      sub(/^.*\//, "", source_file);
+      print "  srcfile[\"" source_file "\"] = 1;";
     }
     delete list_src[key];
   }

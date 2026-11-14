@@ -21,7 +21,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/KeyboardShortcuts.c \
 	$(top_srcdir)/WPrefs.app/Menu.c \
 	$(top_srcdir)/WPrefs.app/MenuPreferences.c \
-	$(top_srcdir)/WPrefs.app/MonitorLayout.c \
+	$(top_srcdir)/src/monitor_layout.c \
 	$(top_srcdir)/WPrefs.app/MouseSettings.c \
 	$(top_srcdir)/WPrefs.app/Paths.c \
 	$(top_srcdir)/WPrefs.app/PanelLayout.c \

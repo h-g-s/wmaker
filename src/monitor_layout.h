@@ -4,7 +4,7 @@
 #ifndef MONITOR_LAYOUT_H
 #define MONITOR_LAYOUT_H
 
-#include "../src/wconfig.h"
+#include "wconfig.h"
 #include <WINGs/WINGs.h>
 
 #ifdef USE_RANDR
@@ -50,5 +50,6 @@ Bool MonitorLayoutApply(Display *dpy, Window root, const MonitorLayout *layout, 
 Bool MonitorLayoutRestore(Display *dpy, Window root, const MonitorLayout *layout, char *error, size_t size);
 Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *error, size_t size);
 Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size);
+Bool MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size);
 #endif
 #endif

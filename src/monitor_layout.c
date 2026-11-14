@@ -1,7 +1,7 @@
-/* MonitorLayout.c - live RandR configuration and explicit layout storage
+/* monitor_layout.c - live RandR configuration and explicit layout storage
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
-#include "MonitorLayout.h"
+#include "monitor_layout.h"
 
 #ifdef USE_RANDR
 #include <limits.h>
@@ -575,12 +575,13 @@ static Bool readNumber(WMPropList *dict, const char *key, long *number)
 	return !errno && end != text && !*end;
 }
 
-Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size)
+static Bool monitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size,
+			      Bool exact)
 {
 	WMPropList *dict = WMReadPropListFromFile(path), *outputs, *primary;
 	MonitorLayout *copy = MonitorLayoutCopy(layout);
 	long version;
-	int i, j, matched = 0;
+	int i, j, matched = 0, connected = 0;
 	Bool success = False;
 
 	if (!dict || !WMIsPLDictionary(dict) || !readNumber(dict, "Version", &version) || version != 1) {
@@ -591,14 +592,36 @@ Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, siz
 	primary = getValue(dict, "Primary");
 	if (!outputs || !WMIsPLDictionary(outputs) || (primary && !WMIsPLString(primary)))
 		goto invalid;
+	if (exact) {
+		WMPropList *keys = WMGetPLDictionaryKeys(outputs);
+		int key_count = WMGetPropListItemCount(keys);
+
+		WMReleasePropList(keys);
+		for (i = 0; i < copy->count; i++)
+			if (copy->outputs[i].connected)
+				connected++;
+		if (key_count != connected) {
+			fail(error, size, _("The saved layout contains %d monitors, but %d are connected."),
+			     key_count, connected);
+			goto done;
+		}
+	}
 	copy->primary = None;
 	for (i = 0; i < copy->count; i++) {
 		MonitorOutput *o = &copy->outputs[i];
 		WMPropList *entry = getValue(outputs, o->name), *mode;
 		long enabled, x, y, rotation, rate;
 
-		if (!entry || !o->connected)
+		if (!o->connected)
 			continue;
+		if (!entry) {
+			if (exact) {
+				fail(error, size, _("The saved layout does not include connected monitor %s."),
+				     o->name);
+				goto done;
+			}
+			continue;
+		}
 		matched++;
 		if (!WMIsPLDictionary(entry) || !readNumber(entry, "Enabled", &enabled) ||
 		    !readNumber(entry, "X", &x) || !readNumber(entry, "Y", &y) ||
@@ -634,7 +657,7 @@ Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, siz
 	MonitorLayoutNormalize(copy);
 	if (!MonitorLayoutValidate(copy, error, size))
 		goto done;
-	/* Missing outputs are ignored; newly attached outputs retain their live settings. */
+	/* Non-exact loads ignore missing outputs; newly attached outputs retain live settings. */
 	for (i = 0; i < layout->count; i++) {
 		layout->outputs[i].enabled = copy->outputs[i].enabled;
 		layout->outputs[i].x = copy->outputs[i].x;
@@ -652,5 +675,15 @@ done:
 		WMReleasePropList(dict);
 	MonitorLayoutFree(copy);
 	return success;
+}
+
+Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size)
+{
+	return monitorLayoutLoad(layout, path, error, size, False);
+}
+
+Bool MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size)
+{
+	return monitorLayoutLoad(layout, path, error, size, True);
 }
 #endif

@@ -3,7 +3,7 @@
  */
 #include "WPrefs.h"
 #include "PanelLayout.h"
-#include "MonitorLayout.h"
+#include "../src/monitor_layout.h"
 #include <X11/Xatom.h>
 #include <X11/Xlocale.h>
 #include <ctype.h>
@@ -855,7 +855,7 @@ static void keepChanges(WMWidget *widget, void *data)
 	MonitorLayoutFree(editor->rollback);
 	editor->rollback = NULL;
 	WMUnmapWidget(editor->confirmation);
-	reload(editor, _("Layout confirmed for this session. Use Save Layout to store it for later."));
+	reload(editor, _("Layout confirmed for this session. Use Save Layout to restore it at startup with the same monitors."));
 }
 
 static void revertChanges(WMWidget *widget, void *data)
@@ -965,7 +965,7 @@ static void saveLayout(WMWidget *widget, void *data)
 		report(editor, error);
 		return;
 	}
-	snprintf(text, sizeof(text), _("Layout saved to %s. Load Layout stages it; Apply activates it."), editor->path);
+	snprintf(text, sizeof(text), _("Layout saved to %s. Load Layout stages it now; Window Maker restores it at startup when the same monitors are connected."), editor->path);
 	WMSetLabelText(editor->status, text);
 	updateButtons(editor);
 }
@@ -1176,7 +1176,7 @@ static void createEditor(MonitorEditor *editor)
 	WMMapSubwidgets(editor->column);
 	WMMapSubwidgets(editor->window);
 	WMMapWidget(editor->window);
-	WMSetLabelText(editor->status, _("Apply changes only for this session. Save Layout and Load Layout are explicit; nothing is restored at login."));
+	WMSetLabelText(editor->status, _("Apply changes for this session. Save Layout restores the layout at startup when the same monitors are connected; Load Layout stages it now."));
 	paint(editor);
 }
 #endif

@@ -1,6 +1,6 @@
 /* Focused model, persistence, transaction and WINGs interaction tests. */
 #include "WPrefs.h"
-#include "MonitorLayout.h"
+#include "../src/monitor_layout.h"
 #undef NDEBUG
 #include <assert.h>
 #include <unistd.h>
@@ -16,7 +16,7 @@ static XRRCrtcInfo allocation_info;
 #define XRRSetCrtcConfig testSetCrtcConfig
 #define XRRGetCrtcInfo testGetCrtcInfo
 #define XRRFreeCrtcInfo testFreeCrtcInfo
-#include "MonitorLayout.c"
+#include "../src/monitor_layout.c"
 #undef XRRSetCrtcConfig
 #undef XRRGetCrtcInfo
 #undef XRRFreeCrtcInfo
@@ -122,6 +122,15 @@ static void modelTests(const char *path)
 	assert(MonitorLayoutValidate(layout, error, sizeof(error)));
 	assert(MonitorLayoutSave(layout, path, error, sizeof(error)));
 	copy = MonitorLayoutCopy(layout);
+	assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	wfree(copy->outputs[2].name);
+	copy->outputs[2].name = wstrdup("DP-4");
+	assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	wfree(copy->outputs[2].name);
+	copy->outputs[2].name = wstrdup("DP-3");
+	copy->outputs[2].connected = False;
+	assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	copy->outputs[2].connected = True;
 	copy->outputs[0].id = 100;
 	copy->outputs[0].rotation = RR_Rotate_0;
 	copy->outputs[1].x = 500;
@@ -155,6 +164,7 @@ static void modelTests(const char *path)
 		layout = fixture();
 		copy = MonitorLayoutCopy(layout);
 		assert(!MonitorLayoutLoad(copy, path, error, sizeof(error)));
+		assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
 		assert(MonitorLayoutSame(layout, copy, False));
 		MonitorLayoutFree(copy);
 		MonitorLayoutFree(layout);

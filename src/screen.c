@@ -641,10 +641,6 @@ WScreen *wScreenInit(int screen_number)
 		scr->usableArea[i].y2 = scr->totalUsableArea[i].y2 = rect.pos.y + rect.size.height;
 	}
 
-#ifdef USE_RANDR
-	wRandRInit(scr);
-#endif
-
 	scr->fakeGroupLeaders = WMCreateArray(16);
 
 	CantManageScreen = 0;
@@ -685,6 +681,10 @@ WScreen *wScreenInit(int screen_number)
 		wfree(scr);
 		return NULL;
 	}
+
+#ifdef USE_RANDR
+	wRandRInit(scr);
+#endif
 
 	XDefineCursor(dpy, scr->root_win, wPreferences.cursor[WCUR_ROOT]);
 

@@ -63,6 +63,8 @@ wmaker_SOURCES = 	\
 	properties.h \
 	randr.c \
 	randr.h \
+	monitor_layout.c \
+	monitor_layout.h \
 	resources.c \
 	resources.h \
 	rootmenu.c \
@@ -188,7 +190,7 @@ am__v_CHKOPTS_0 = @echo "  CHK      $@" ;
 am__v_CHKOPTS_1 =
 
 check_PROGRAMS = randr_hotplug_test
-randr_hotplug_test_SOURCES = randr_hotplug_test.c
+randr_hotplug_test_SOURCES = randr_hotplug_test.c monitor_layout.c monitor_layout.h
 randr_hotplug_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
 randr_hotplug_test_LDADD = $(wmaker_LDADD)
 

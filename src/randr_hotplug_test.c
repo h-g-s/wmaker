@@ -135,6 +135,9 @@ int main(void)
 	state.outputs[1].activate_pending = state.outputs[2].activate_pending = True;
 	state.outputs[1].xid = output;
 	state.outputs[2].xid = 3;
+	wRandR_MarkOutputsAsRestored(&state);
+	assert(!state.outputs[1].activate_pending && !state.outputs[2].activate_pending);
+	state.outputs[1].activate_pending = state.outputs[2].activate_pending = True;
 
 	/* Only one output is configured per resource snapshot, without overlap. */
 	assert(wRandR_AutoActivate(&screen, &state, &resources));
