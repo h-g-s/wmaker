@@ -159,5 +159,6 @@ WPrefs.app/WPrefs.desktop
 
 .pc
 src/randr_hotplug_test
+src/winoverview_navigation_test
 util/wmsetbg_refresh_test
 WPrefs.app/appearance_test

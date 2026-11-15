@@ -189,13 +189,18 @@ am__v_CHKOPTS_  = $(am__v_CHKOPTS_$(AM_DEFAULT_VERBOSITY))
 am__v_CHKOPTS_0 = @echo "  CHK      $@" ;
 am__v_CHKOPTS_1 =
 
-check_PROGRAMS = randr_hotplug_test
+check_PROGRAMS = randr_hotplug_test winoverview_navigation_test
 randr_hotplug_test_SOURCES = randr_hotplug_test.c monitor_layout.c monitor_layout.h
 randr_hotplug_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
 randr_hotplug_test_LDADD = $(wmaker_LDADD)
 
-check-local: defaults-callbacks-static defaults-callbacks-dynamic randr_hotplug_test
+winoverview_navigation_test_SOURCES = winoverview_navigation_test.c
+winoverview_navigation_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
+winoverview_navigation_test_LDADD = $(wmaker_LDADD)
+
+check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRAMS)
 	./randr_hotplug_test || test $$? -eq 77
+	./winoverview_navigation_test
 
 # Check that the callback functions used to load the configuration match
 # the type of the variable where the value will be stored

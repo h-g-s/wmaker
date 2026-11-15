@@ -81,6 +81,7 @@ static struct {
 
 	OverviewEntry entries[MAX_ENTRIES];
 	int count;
+	int columns;
 	int selected;
 	int pressed;
 	Bool done;
@@ -288,6 +289,7 @@ static void layoutEntries(void)
 	}
 
 	cols = best_cols;
+	ov.columns = cols;
 	rows = (ov.count + cols - 1) / cols;
 	cell_w = WMAX(16, (area_w - (cols - 1) * CELL_GAP) / cols);
 	cell_h = WMAX(16, (area_h - (rows - 1) * CELL_GAP) / rows - ov.title_height);
@@ -628,43 +630,26 @@ static void selectEntry(int index)
 static int neighbour(int from, int dx, int dy)
 {
 	OverviewEntry *f = &ov.entries[from];
-	int fx = f->x + f->w / 2, fy = f->y + f->h / 2;
-	int best = -1, best_primary = 0, best_perp = 0;
-	int i;
+	int fx = f->x + f->w / 2;
+	int row = from / ov.columns + dy;
+	int first = row * ov.columns;
+	int end = WMIN(first + ov.columns, ov.count);
+	int best, i;
 
-	for (i = 0; i < ov.count; i++) {
+	if (dx)
+		return (from + dx + ov.count) % ov.count;
+	if (row < 0 || first >= ov.count)
+		return from;
+
+	/* Use grid rows: thumbnail centers can differ by a pixel within a row. */
+	best = first;
+	for (i = first + 1; i < end; i++) {
 		OverviewEntry *e = &ov.entries[i];
-		int ox = e->x + e->w / 2 - fx, oy = e->y + e->h / 2 - fy;
-		int primary = dx ? ox * dx : oy * dy;
-		int perp = abs(dx ? oy : ox);
 
-		if (i == from || primary <= 0)
-			continue;
-		/* left/right stay in the same row */
-		if (dx && perp > f->h / 2 + CELL_GAP)
-			continue;
-		if (best < 0 || primary < best_primary || (primary == best_primary && perp < best_perp)) {
+		if (abs(e->x + e->w / 2 - fx) < abs(ov.entries[best].x + ov.entries[best].w / 2 - fx))
 			best = i;
-			best_primary = primary;
-			best_perp = perp;
-		}
 	}
 
-	/* rows are not aligned vertically: prefer the closest one in the next row */
-	if (best >= 0 && dy) {
-		int row_y = ov.entries[best].y + ov.entries[best].h / 2;
-
-		for (i = 0; i < ov.count; i++) {
-			OverviewEntry *e = &ov.entries[i];
-
-			if (abs(e->y + e->h / 2 - row_y) <= CELL_GAP
-			    && abs(e->x + e->w / 2 - fx) < abs(ov.entries[best].x + ov.entries[best].w / 2 - fx))
-				best = i;
-		}
-	}
-
-	if (best < 0 && dx)
-		best = (from + dx + ov.count) % ov.count;
 	return best;
 }
 
@@ -672,6 +657,7 @@ static void handleKey(XEvent *ev)
 {
 	WShortKey *key = &wKeyBindings[WKBD_WINDOWOVERVIEW];
 	int modifiers = ev->xkey.state & w_global.shortcut.modifiers_mask;
+	XKeyEvent lookup = ev->xkey;
 	KeySym ks;
 
 	if (key->keycode != 0 && key->keycode == ev->xkey.keycode && key->modifier == modifiers) {
@@ -679,7 +665,10 @@ static void handleKey(XEvent *ev)
 		return;
 	}
 
-	XLookupString(&ev->xkey, NULL, 0, &ks, NULL);
+	/* Held cycling modifiers must not alter navigation key translation. */
+	if (ov.cycling)
+		lookup.state &= ~ov.hold_mask;
+	XLookupString(&lookup, NULL, 0, &ks, NULL);
 	switch (ks) {
 	case XK_Escape:
 		ov.done = True;
