@@ -70,18 +70,27 @@ typedef struct {
 	char *label;
 	int nat_w, nat_h;	/* size the thumbnail would have when not scaled */
 	int x, y, w, h;		/* thumbnail rectangle */
+	int head, slot;		/* monitor and position in that monitor's grid */
 } OverviewEntry;
+
+typedef struct {
+	WMRect rect;
+	int entries[MAX_ENTRIES];
+	int count;
+	int columns;
+} OverviewHead;
 
 static struct {
 	WScreen *scr;
 	Window win;
 	WMRect rect;
+	OverviewHead *heads;
+	int head_count;
 	WMFont *font;
 	int title_height;
 
 	OverviewEntry entries[MAX_ENTRIES];
 	int count;
-	int columns;
 	int selected;
 	int pressed;
 	Bool done;
@@ -166,6 +175,7 @@ static void initEntry(OverviewEntry *e, WWindow *wwin)
 	e->label = labelForWindow(wwin);
 	e->nat_w = WMAX(1, wwin->client.width);
 	e->nat_h = WMAX(1, wwin->client.height);
+	e->head = wGetHeadForWindow(wwin);
 }
 
 static void loadEntryImage(OverviewEntry *e)
@@ -260,26 +270,32 @@ static void fitSize(int nat_w, int nat_h, int max_w, int max_h, int *w, int *h)
 }
 
 /* Pick the number of columns giving the largest thumbnails, then place them */
-static void layoutEntries(void)
+static void layoutHead(OverviewHead *head)
 {
-	int area_w = ov.rect.size.width - 2 * OUTER_MARGIN;
-	int area_h = ov.rect.size.height - 2 * OUTER_MARGIN;
+	int area_w = head->rect.size.width - 2 * OUTER_MARGIN;
+	int area_h = head->rect.size.height - 2 * OUTER_MARGIN;
 	int best_cols = 1, cols, rows, cell_w, cell_h, row, i;
 	double best_score = -1.0;
 
-	for (cols = 1; cols <= ov.count; cols++) {
+	if (head->count == 0)
+		return;
+
+	for (cols = 1; cols <= head->count; cols++) {
 		double score = 0.0;
 
-		rows = (ov.count + cols - 1) / cols;
+		rows = (head->count + cols - 1) / cols;
 		cell_w = (area_w - (cols - 1) * CELL_GAP) / cols;
 		cell_h = (area_h - (rows - 1) * CELL_GAP) / rows - ov.title_height;
-		if (cell_w < 16 || cell_h < 16)
+		if (cell_w < 16)
 			break;
+		if (cell_h < 16)
+			continue;
 
-		for (i = 0; i < ov.count; i++) {
+		for (i = 0; i < head->count; i++) {
+			OverviewEntry *e = &ov.entries[head->entries[i]];
 			int w, h;
 
-			fitSize(ov.entries[i].nat_w, ov.entries[i].nat_h, cell_w, cell_h, &w, &h);
+			fitSize(e->nat_w, e->nat_h, cell_w, cell_h, &w, &h);
 			score += (double) w * h;
 		}
 		if (score > best_score) {
@@ -289,27 +305,47 @@ static void layoutEntries(void)
 	}
 
 	cols = best_cols;
-	ov.columns = cols;
-	rows = (ov.count + cols - 1) / cols;
+	head->columns = cols;
+	rows = (head->count + cols - 1) / cols;
 	cell_w = WMAX(16, (area_w - (cols - 1) * CELL_GAP) / cols);
 	cell_h = WMAX(16, (area_h - (rows - 1) * CELL_GAP) / rows - ov.title_height);
 
 	for (row = 0, i = 0; row < rows; row++) {
-		int in_row = WMIN(cols, ov.count - i);
+		int in_row = WMIN(cols, head->count - i);
 		int row_x = (area_w - (in_row * cell_w + (in_row - 1) * CELL_GAP)) / 2;
 		int grid_y = (area_h - (rows * (cell_h + ov.title_height) + (rows - 1) * CELL_GAP)) / 2;
-		int cell_y = OUTER_MARGIN + grid_y + row * (cell_h + ov.title_height + CELL_GAP) + ov.title_height;
+		int cell_y = head->rect.pos.y + OUTER_MARGIN + grid_y
+			+ row * (cell_h + ov.title_height + CELL_GAP) + ov.title_height;
 		int col;
 
 		for (col = 0; col < in_row; col++, i++) {
-			OverviewEntry *e = &ov.entries[i];
-			int cell_x = OUTER_MARGIN + row_x + col * (cell_w + CELL_GAP);
+			OverviewEntry *e = &ov.entries[head->entries[i]];
+			int cell_x = head->rect.pos.x + OUTER_MARGIN + row_x + col * (cell_w + CELL_GAP);
 
 			fitSize(e->nat_w, e->nat_h, cell_w, cell_h, &e->w, &e->h);
 			e->x = cell_x + (cell_w - e->w) / 2;
 			e->y = cell_y + (cell_h - e->h) / 2;
 		}
 	}
+}
+
+static void layoutEntries(void)
+{
+	int i;
+
+	for (i = 0; i < ov.head_count; i++) {
+		ov.heads[i].count = 0;
+		ov.heads[i].columns = 0;
+	}
+	for (i = 0; i < ov.count; i++) {
+		OverviewEntry *e = &ov.entries[i];
+		OverviewHead *head = &ov.heads[e->head];
+
+		e->slot = head->count;
+		head->entries[head->count++] = i;
+	}
+	for (i = 0; i < ov.head_count; i++)
+		layoutHead(&ov.heads[i]);
 }
 
 static Pixmap currentWallpaper(WScreen *scr)
@@ -545,12 +581,20 @@ static Pixmap renderOverview(WScreen *scr)
 	Pixmap bg, pixmap;
 	int i;
 
-	bg = cachedBackground(scr, ov.rect);
-	if (bg == None)
-		return None;
-
 	pixmap = XCreatePixmap(dpy, scr->root_win, ov.rect.size.width, ov.rect.size.height, scr->w_depth);
-	XCopyArea(dpy, bg, pixmap, scr->draw_gc, 0, 0, ov.rect.size.width, ov.rect.size.height, 0, 0);
+	XSetForeground(dpy, scr->draw_gc, scr->black_pixel);
+	XFillRectangle(dpy, pixmap, scr->draw_gc, 0, 0, ov.rect.size.width, ov.rect.size.height);
+	for (i = 0; i < ov.head_count; i++) {
+		WMRect rect = ov.heads[i].rect;
+
+		bg = cachedBackground(scr, rect);
+		if (bg == None) {
+			XFreePixmap(dpy, pixmap);
+			return None;
+		}
+		XCopyArea(dpy, bg, pixmap, scr->draw_gc, 0, 0, rect.size.width, rect.size.height,
+			  rect.pos.x, rect.pos.y);
+	}
 
 	fill = WMCreateRGBColor(scr->wmscreen, 0x3000, 0x3000, 0x3400, True);
 	for (i = 0; i < ov.count; i++)
@@ -626,31 +670,116 @@ static void selectEntry(int index)
 	drawSelection(ov.selected, True);
 }
 
-/* Closest entry in the given direction, used for arrow key navigation */
+/* Find a populated monitor in the requested physical direction. */
+static int neighbourHead(int from, int dx, int dy)
+{
+	WMRect f = ov.heads[from].rect;
+	int best = -1, best_perp = 0;
+	Bool best_aligned = False;
+	long long best_distance = 0;
+	int i;
+
+	for (i = 0; i < ov.head_count; i++) {
+		WMRect r = ov.heads[i].rect;
+		int ox = r.pos.x + r.size.width / 2 - (f.pos.x + f.size.width / 2);
+		int oy = r.pos.y + r.size.height / 2 - (f.pos.y + f.size.height / 2);
+		int gap_x, gap_y, perp = abs(dx ? oy : ox);
+		int overlap;
+		Bool aligned;
+		long long distance;
+
+		if (i == from || ov.heads[i].count == 0)
+			continue;
+		if ((dx > 0 && r.pos.x < f.pos.x + (int)f.size.width)
+		    || (dx < 0 && r.pos.x + (int)r.size.width > f.pos.x)
+		    || (dy > 0 && r.pos.y < f.pos.y + (int)f.size.height)
+		    || (dy < 0 && r.pos.y + (int)r.size.height > f.pos.y))
+			continue;
+		gap_x = WMAX(0, WMAX(r.pos.x - (f.pos.x + (int)f.size.width),
+				    f.pos.x - (r.pos.x + (int)r.size.width)));
+		gap_y = WMAX(0, WMAX(r.pos.y - (f.pos.y + (int)f.size.height),
+				    f.pos.y - (r.pos.y + (int)r.size.height)));
+		overlap = dx ? WMIN(r.pos.y + (int)r.size.height, f.pos.y + (int)f.size.height)
+				- WMAX(r.pos.y, f.pos.y)
+			     : WMIN(r.pos.x + (int)r.size.width, f.pos.x + (int)f.size.width)
+				- WMAX(r.pos.x, f.pos.x);
+		aligned = overlap > 0;
+		distance = (long long)gap_x * gap_x + (long long)gap_y * gap_y;
+		if (best < 0 || aligned > best_aligned
+		    || (aligned == best_aligned
+			&& (distance < best_distance || (distance == best_distance && perp < best_perp)))) {
+			best = i;
+			best_aligned = aligned;
+			best_distance = distance;
+			best_perp = perp;
+		}
+	}
+	return best;
+}
+
+/* Enter the facing grid edge at the closest perpendicular position. */
+static int entryOnHead(int from, int target, int dx, int dy)
+{
+	OverviewEntry *f = &ov.entries[from];
+	OverviewHead *head = &ov.heads[target];
+	int best = -1, best_perp = 0, best_primary = 0;
+	int last_row = (head->count - 1) / head->columns;
+	int i;
+
+	for (i = 0; i < head->count; i++) {
+		OverviewEntry *e = &ov.entries[head->entries[i]];
+		int row = i / head->columns, col = i % head->columns;
+		int ox = e->x + e->w / 2 - (f->x + f->w / 2);
+		int oy = e->y + e->h / 2 - (f->y + f->h / 2);
+		int perp = abs(dx ? oy : ox), primary = abs(dx ? ox : oy);
+
+		if ((dx > 0 && col != 0)
+		    || (dx < 0 && col != head->columns - 1 && i != head->count - 1)
+		    || (dy > 0 && row != 0) || (dy < 0 && row != last_row))
+			continue;
+		if (best < 0 || perp < best_perp || (perp == best_perp && primary < best_primary)) {
+			best = head->entries[i];
+			best_perp = perp;
+			best_primary = primary;
+		}
+	}
+	return best;
+}
+
+/* Closest entry in the given direction, used for arrow key navigation. */
 static int neighbour(int from, int dx, int dy)
 {
 	OverviewEntry *f = &ov.entries[from];
+	OverviewHead *head = &ov.heads[f->head];
+	int row = f->slot / head->columns;
+	int first = row * head->columns;
+	int end = WMIN(first + head->columns, head->count);
+	int target, i, best;
 	int fx = f->x + f->w / 2;
-	int row = from / ov.columns + dy;
-	int first = row * ov.columns;
-	int end = WMIN(first + ov.columns, ov.count);
-	int best, i;
 
-	if (dx)
-		return (from + dx + ov.count) % ov.count;
-	if (row < 0 || first >= ov.count)
-		return from;
+	if (dx && f->slot + dx >= first && f->slot + dx < end)
+		return head->entries[f->slot + dx];
+	if (dy && row + dy >= 0 && (row + dy) * head->columns < head->count) {
+		first = (row + dy) * head->columns;
+		end = WMIN(first + head->columns, head->count);
+		best = first;
+		/* Thumbnail centers can differ by a pixel within a grid row. */
+		for (i = first + 1; i < end; i++) {
+			OverviewEntry *e = &ov.entries[head->entries[i]];
+			OverviewEntry *b = &ov.entries[head->entries[best]];
 
-	/* Use grid rows: thumbnail centers can differ by a pixel within a row. */
-	best = first;
-	for (i = first + 1; i < end; i++) {
-		OverviewEntry *e = &ov.entries[i];
-
-		if (abs(e->x + e->w / 2 - fx) < abs(ov.entries[best].x + ov.entries[best].w / 2 - fx))
-			best = i;
+			if (abs(e->x + e->w / 2 - fx) < abs(b->x + b->w / 2 - fx))
+				best = i;
+		}
+		return head->entries[best];
 	}
 
-	return best;
+	target = neighbourHead(f->head, dx, dy);
+	if (target >= 0)
+		return entryOnHead(from, target, dx, dy);
+	if (dx)
+		return head->entries[(f->slot + dx + head->count) % head->count];
+	return from;
 }
 
 static void handleKey(XEvent *ev)
@@ -841,13 +970,19 @@ static void releaseEntries(void)
 
 static Bool beginOverview(WScreen *scr)
 {
+	int i;
+
 	memset(&ov, 0, sizeof(ov));
 	ov.scr = scr;
-	ov.rect = wGetRectForHead(scr, wGetHeadForPointerLocation(scr));
+	ov.rect = (WMRect){ { 0, 0 }, { scr->scr_width, scr->scr_height } };
 	ov.font = WMBoldSystemFontOfSize(scr->wmscreen, FONT_SIZE);
 	if (!ov.font)
 		return False;
 	ov.title_height = WMFontHeight(ov.font) + TITLE_GAP;
+	ov.head_count = wXineramaHeads(scr);
+	ov.heads = wmalloc(sizeof(*ov.heads) * ov.head_count);
+	for (i = 0; i < ov.head_count; i++)
+		ov.heads[i].rect = wGetRectForHead(scr, i);
 	return True;
 }
 
@@ -859,6 +994,9 @@ static void endOverview(void)
 	if (ov.modmap)
 		XFreeModifiermap(ov.modmap);
 	ov.modmap = NULL;
+	wfree(ov.heads);
+	ov.heads = NULL;
+	ov.head_count = 0;
 }
 
 /* Show the collected and laid out entries and let the user pick one */

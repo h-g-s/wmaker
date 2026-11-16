@@ -38,6 +38,7 @@ WApplication *wApplicationOf(Window window) { assert(0); return NULL; }
 WScreen *wScreenForRootWindow(Window window) { assert(0); return NULL; }
 WWindow *wWindowFor(Window window) { assert(0); return NULL; }
 int wGetHeadForPointerLocation(WScreen *scr) { assert(0); return 0; }
+int wGetHeadForWindow(WWindow *wwin) { assert(0); return 0; }
 WMRect wGetRectForHead(WScreen *scr, int head) { assert(0); return (WMRect){ { 0, 0 }, { 0, 0 } }; }
 WMArray *wSwitchPanelWindowList(WScreen *scr, Bool class_only) { assert(0); return NULL; }
 char *ShrinkString(WMFont *font, const char *string, int width) { assert(0); return NULL; }
@@ -61,13 +62,18 @@ void wSnapshotDraw(WScreen *scr, Drawable dest, RImage *img, int x, int y) { ass
 static void setupGrid(void)
 {
 	static WScreen screen;
+	static OverviewHead heads[4];
 	int i;
 
 	memset(&ov, 0, sizeof(ov));
+	memset(heads, 0, sizeof(heads));
 	memset(wKeyBindings, 0, sizeof(wKeyBindings));
 	ov.scr = &screen;
 	ov.count = 6;
 	ov.rect = (WMRect){ { 0, 0 }, { 1200, 800 } };
+	ov.heads = heads;
+	ov.head_count = 1;
+	ov.heads[0].rect = ov.rect;
 	ov.title_height = 22;
 	for (i = 0; i < ov.count; i++) {
 		ov.entries[i].nat_w = 640;
@@ -76,7 +82,7 @@ static void setupGrid(void)
 		ov.entries[i].client_win = i + 1;
 	}
 	layoutEntries();
-	assert(ov.columns == 3);
+	assert(ov.heads[0].columns == 3);
 }
 
 static void testGridNavigation(void)
@@ -97,13 +103,14 @@ static void testGridNavigation(void)
 	/* A short centered last row uses the nearest column in the next row. */
 	ov.count = 5;
 	layoutEntries();
-	assert(ov.columns == 3);
+	assert(ov.heads[0].columns == 3);
 	assert(neighbour(0, 0, 1) == 3);
 	assert(neighbour(2, 0, 1) == 4);
 	assert(neighbour(4, 0, -1) == 1);
 	assert(neighbour(4, 0, 1) == 4);
 
-	ov.count = ov.columns = 1;
+	ov.count = 1;
+	layoutEntries();
 	assert(neighbour(0, -1, 0) == 0);
 	assert(neighbour(0, 1, 0) == 0);
 	assert(neighbour(0, 0, -1) == 0);
@@ -211,6 +218,136 @@ static void testCycleBindings(void)
 	assert(ov.selected == 0 && lookup_state == ShiftMask);
 }
 
+static void setupMultiGrid(void)
+{
+	int i;
+
+	setupGrid();
+	ov.count = 12;
+	ov.head_count = 2;
+	ov.rect.size.width = 2400;
+	ov.heads[1].rect = (WMRect){ { 1200, 0 }, { 1200, 800 } };
+	for (i = 0; i < ov.count; i++) {
+		ov.entries[i].nat_w = 640;
+		ov.entries[i].nat_h = i % 3 ? 479 : 480;
+		ov.entries[i].client_win = i + 1;
+		ov.entries[i].head = i % 2;
+	}
+	layoutEntries();
+	assert(ov.heads[0].columns == 3 && ov.heads[1].columns == 3);
+}
+
+static void testMonitorGrids(void)
+{
+	int i;
+
+	setupMultiGrid();
+	for (i = 0; i < ov.count; i++) {
+		OverviewEntry *e = &ov.entries[i];
+		OverviewHead *head = &ov.heads[e->head];
+
+		assert(e->client_win == i + 1);
+		assert(head->entries[e->slot] == i);
+		assert(e->x >= head->rect.pos.x && e->y >= head->rect.pos.y + ov.title_height);
+		assert(e->x + e->w <= head->rect.pos.x + head->rect.size.width);
+		assert(e->y + e->h <= head->rect.pos.y + head->rect.size.height);
+		assert(entryAt(e->x + e->w / 2, e->y + e->h / 2) == i);
+	}
+	assert(neighbour(0, 1, 0) == 2);
+	assert(neighbour(0, 0, 1) == 6);
+	assert(neighbour(6, 0, -1) == 0);
+	assert(neighbour(4, 1, 0) == 1);
+	assert(neighbour(1, -1, 0) == 4);
+	assert(neighbour(10, 1, 0) == 7);
+	assert(neighbour(7, -1, 0) == 10);
+	assert(neighbour(0, -1, 0) == 10);
+	assert(neighbour(11, 1, 0) == 1);
+	assert(neighbour(0, 0, -1) == 0);
+
+	ov.count = 10;
+	layoutEntries();
+	assert(neighbour(8, 1, 0) == 7);
+	assert(neighbour(7, -1, 0) == 8);
+
+	setupMultiGrid();
+	ov.heads[1].rect.pos = wmkpoint(0, 800);
+	layoutEntries();
+	assert(neighbour(6, 0, 1) == 1);
+	assert(neighbour(1, 0, -1) == 6);
+	assert(neighbour(8, 0, 1) == 3);
+	assert(neighbour(3, 0, -1) == 8);
+}
+
+static void testEmptyAndOffsetMonitors(void)
+{
+	int i;
+
+	setupMultiGrid();
+	ov.head_count = 4;
+	ov.heads[2].rect = (WMRect){ { 2400, 100 }, { 1000, 900 } };
+	ov.heads[3].rect = (WMRect){ { 200, 1000 }, { 1200, 800 } };
+	ov.count = 18;
+	for (i = 0; i < ov.count; i++) {
+		ov.entries[i].head = i < 6 ? 0 : (i < 12 ? 2 : 3);
+		ov.entries[i].nat_w = 640;
+		ov.entries[i].nat_h = 480;
+	}
+	layoutEntries();
+	assert(ov.heads[1].count == 0);
+	assert(neighbourHead(0, 1, 0) == 2);
+	assert(neighbourHead(2, -1, 0) == 0);
+	assert(neighbourHead(0, 0, 1) == 3);
+	assert(neighbourHead(0, 0, -1) == -1);
+	assert(ov.entries[neighbour(5, 1, 0)].head == 2);
+	assert(ov.entries[neighbour(6, -1, 0)].head == 0);
+}
+
+static void testCrowdedMonitor(void)
+{
+	int i;
+
+	setupMultiGrid();
+	ov.heads[1].rect.size.height = 600;
+	ov.count = 18;
+	for (i = 0; i < ov.count; i++) {
+		ov.entries[i].head = i % 2;
+		ov.entries[i].nat_w = 640;
+		ov.entries[i].nat_h = 480;
+	}
+	layoutEntries();
+	assert(ov.heads[1].columns > 1);
+	for (i = 0; i < ov.count; i++) {
+		OverviewEntry *e = &ov.entries[i];
+		WMRect rect = ov.heads[e->head].rect;
+
+		assert(e->x >= rect.pos.x && e->y - ov.title_height >= rect.pos.y);
+		assert(e->x + e->w <= rect.pos.x + rect.size.width);
+		assert(e->y + e->h <= rect.pos.y + rect.size.height);
+	}
+}
+
+static void testMultiMonitorKeys(Bool cycling)
+{
+	unsigned int held = cycling ? Mod1Mask : 0;
+
+	setupMultiGrid();
+	ov.cycling = cycling;
+	ov.hold_mask = held;
+	ov.selected = 4;
+	press(XK_Right, held);
+	assert(ov.selected == 1);
+	press(XK_Left, held);
+	assert(ov.selected == 4);
+	press(XK_Down, held);
+	assert(ov.selected == 10);
+	press(XK_Right, held);
+	assert(ov.selected == 7);
+	press(XK_Tab, held);
+	assert(ov.selected == 8);
+	press(XK_Return, held);
+	assert(ov.chosen == ov.entries[8].client_win);
+}
+
 int main(void)
 {
 	testGridNavigation();
@@ -218,6 +355,11 @@ int main(void)
 	testKeyboardNavigation(True);
 	testCycleRelease();
 	testCycleBindings();
+	testMonitorGrids();
+	testEmptyAndOffsetMonitors();
+	testCrowdedMonitor();
+	testMultiMonitorKeys(False);
+	testMultiMonitorKeys(True);
 	puts("Window overview navigation tests passed");
 	return 0;
 }

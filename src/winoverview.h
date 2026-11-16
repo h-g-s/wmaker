@@ -25,9 +25,10 @@
 #include "screen.h"
 
 /*
- * Cover the head with the pointer with a darkened copy of the wallpaper
- * and snapshots of all windows of the current workspace. The user picks a
- * window with the mouse or the keyboard; it is then raised and focused.
+ * Cover all heads with a darkened copy of the wallpaper, showing each
+ * head's windows of the current workspace on that head. The user picks a
+ * window with the mouse or keyboard; arrows can cross between heads.
+ * The chosen window is then raised and focused.
  */
 void StartWindowOverview(WScreen *scr);
 
