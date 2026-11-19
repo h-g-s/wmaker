@@ -14,18 +14,22 @@ wpdata_DATA = WPrefs.tiff WPrefs.xpm
 
 applicationsdir = @datadir@/applications
 
-applications_DATA = WPrefs.desktop
+applications_DATA = WPrefs.desktop wmmonitors.desktop
 
 WPrefs.desktop: WPrefs.desktop.in
 	$(AM_V_GEN)sed -e "s:#wprefs_bindir#:${wprefs_bindir}:" \
 		       -e "s:#wprefs_datadir#:${wprefs_datadir}:" $< > $@
 
+wmmonitors.desktop: wmmonitors.desktop.in
+	$(AM_V_GEN)sed -e "s:#bindir#:$(bindir):" $< > $@
+
 EXTRA_DIST = $(wpdata_DATA) \
 	KeyboardSettings.c \
 	Themes.c \
-	WPrefs.desktop.in
+	WPrefs.desktop.in \
+	wmmonitors.desktop.in
 
-DISTCLEANFILES = WPrefs.desktop
+DISTCLEANFILES = $(applications_DATA)
 
 WPrefs_SOURCES = \
 	main.c \

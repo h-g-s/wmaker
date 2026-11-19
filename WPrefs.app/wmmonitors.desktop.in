@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.5
+Type=Application
+Name=Monitor Configuration
+Comment=Configure monitor layout, resolution and rotation
+TryExec=#bindir#/wmmonitors
+Exec="#bindir#/wmmonitors"
+Icon=video-display
+Terminal=false
+Categories=Settings;HardwareSettings;
