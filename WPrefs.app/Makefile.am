@@ -14,7 +14,7 @@ wpdata_DATA = WPrefs.tiff WPrefs.xpm
 
 applicationsdir = @datadir@/applications
 
-applications_DATA = WPrefs.desktop wmmonitors.desktop
+applications_DATA = WPrefs.desktop wmmonitors.desktop wmwallpaper.desktop
 
 WPrefs.desktop: WPrefs.desktop.in
 	$(AM_V_GEN)sed -e "s:#wprefs_bindir#:${wprefs_bindir}:" \
@@ -23,11 +23,15 @@ WPrefs.desktop: WPrefs.desktop.in
 wmmonitors.desktop: wmmonitors.desktop.in
 	$(AM_V_GEN)sed -e "s:#bindir#:$(bindir):" $< > $@
 
+wmwallpaper.desktop: wmwallpaper.desktop.in
+	$(AM_V_GEN)sed -e "s:#bindir#:$(bindir):" $< > $@
+
 EXTRA_DIST = $(wpdata_DATA) \
 	KeyboardSettings.c \
 	Themes.c \
 	WPrefs.desktop.in \
-	wmmonitors.desktop.in
+	wmmonitors.desktop.in \
+	wmwallpaper.desktop.in
 
 DISTCLEANFILES = $(applications_DATA)
 

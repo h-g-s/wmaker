@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.5
+Type=Application
+Name=Wallpaper
+Comment=Choose the desktop wallpaper
+TryExec=#bindir#/wmwallpaper
+Exec="#bindir#/wmwallpaper"
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=Settings;DesktopSettings;
