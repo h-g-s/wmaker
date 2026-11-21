@@ -282,6 +282,7 @@ void UpdateSwitchMenu(WScreen * scr, WWindow * wwin, int action)
 		wfree(t);
 
 		entry->icon = switchMenuIconForWindow(scr, wwin);
+		entry->flags.icon_from_window = 1;
 
 		entry->flags.indicator = 1;
 		entry->rtext = wmalloc(MAX_RTEXT_LENGTH);
@@ -363,6 +364,7 @@ void UpdateSwitchMenu(WScreen * scr, WWindow * wwin, int action)
 						wfree(t);
 						entry->rtext = rt;
 						entry->icon = ipix;
+						entry->flags.icon_from_window = 1;
 						entry->flags.indicator = 1;
 						entry->flags.indicator_type = it;
 						entry->flags.indicator_on = ion;

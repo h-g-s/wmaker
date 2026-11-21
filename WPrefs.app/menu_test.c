@@ -107,6 +107,27 @@ static void submenuIndicator(_Panel *panel)
 	XDestroyImage(image);
 }
 
+static void entrySyntax(void)
+{
+	const char *invalid[] = {
+		"(Run, ICON)", "(Run, ICON, icon.png)", "(Run, ICON, (), EXEC, xterm)",
+		"(Run, ICON, one.png, ICON, two.png, EXEC, xterm)",
+		"(Run, SHORTCUT, key, SHORTCUT, key, EXEC, xterm)",
+		"(Run, ICON, icon.png, SHORTCUT)", "(Run, ICON, icon.png, EXEC, ())"
+	};
+	WMenuEntrySpec spec;
+	WMPropList *entry = WMCreatePropListFromDescription("(Run, EXEC, xterm)");
+
+	assert(wMenuParseEntry(entry, &spec));
+	assert(!spec.icon && !spec.shortcut);
+	WMReleasePropList(entry);
+	for (unsigned int i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+		entry = WMCreatePropListFromDescription(invalid[i]);
+		assert(entry && !wMenuParseEntry(entry, &spec));
+		WMReleasePropList(entry);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int sizes[] = { 11, 24, 32 };
@@ -117,16 +138,18 @@ int main(int argc, char **argv)
 	char root[] = "/tmp/wmaker-menu-test-XXXXXX";
 	char *path;
 	WMPropList *source;
+	WMenuEntrySpec spec;
 	const char *menu =
-		"(Applications, (Run, SHORTCUT, \"Control+F1\", SHEXEC, \"xterm\"),"
-		"(Exit, EXIT, QUICK), (Restart, RESTART, \"other-wm\"),"
+		"(Applications, (Run, ICON, \"terminal.png\", SHORTCUT, \"Control+F1\", SHEXEC, \"xterm\"),"
+		"(Exit, SHORTCUT, \"Control+F2\", ICON, \"~/exit.png\", EXIT, QUICK), (Restart, RESTART, \"other-wm\"),"
 		"(External, OPEN_MENU, \"/tmp/menu\"),"
 		"(Pipe, OPEN_MENU, \"|| menu-command\"),"
 		"(PLPipe, OPEN_PLMENU, \"| pl-command\"),"
-		"(Files, OPEN_MENU, \"-noext /tmp WITH opener\"),"
+		"(Files, ICON, \"files.png\", OPEN_MENU, \"-noext /tmp WITH opener\"),"
 		"(Workspaces, WORKSPACE_MENU), (Windows, WINDOWS_MENU),"
 		"(Nested, (Child, EXEC, \"nested-command\")))";
 
+	entrySyntax();
 	if (!getenv("DISPLAY"))
 		return 77;
 	assert(mkdtemp(root));
@@ -259,6 +282,30 @@ int main(int argc, char **argv)
 		bounds(W_VIEW(submenu));
 		item = WGetEditMenuItem(panel->menu, 0);
 		menuItemSelected(&menuDelegate, panel->menu, item);
+		ItemData *runData = WGetEditMenuItemData(item);
+		assert(strcmp(runData->icon, "terminal.png") == 0);
+		char *iconText = WMGetTextFieldText(panel->iconT);
+		assert(strcmp(iconText, "terminal.png") == 0);
+		wfree(iconText);
+		WMSetTextFieldText(panel->iconT, "/tmp/custom icon.png");
+		updateMenuItem(panel, item, panel->iconT);
+		clone = WInsertMenuItemWithTitle(panel->menu, 1, "Copied Run");
+		menuItemCloned(&menuDelegate, panel->menu, item, clone);
+		ItemData *cloneData = WGetEditMenuItemData(clone);
+		assert(cloneData->icon != runData->icon);
+		assert(strcmp(cloneData->icon, "/tmp/custom icon.png") == 0);
+		iconClicked(panel->iconClearB, panel);
+		assert(!notblank(runData->icon));
+		assert(strcmp(cloneData->icon, "/tmp/custom icon.png") == 0);
+		assert(strcmp(runData->param.exec.command, "xterm") == 0);
+		assert(strcmp(runData->param.exec.shortcut, "Control+F1") == 0);
+		WMPropList *withoutIcon = processData("Run", runData);
+		assert(wMenuParseEntry(withoutIcon, &spec));
+		assert(!spec.icon && spec.shortcut);
+		WMReleasePropList(withoutIcon);
+		WRemoveEditMenuItem(panel->menu, clone);
+		WMSetTextFieldText(panel->iconT, "/tmp/custom icon.png");
+		updateMenuItem(panel, item, panel->iconT);
 		WMSetTextFieldText(panel->commandT, "updated-command");
 		updateMenuItem(panel, item, panel->commandT);
 		assert(strcmp(((ItemData *)WGetEditMenuItemData(item))->param.exec.command, "updated-command") == 0);
@@ -271,6 +318,7 @@ int main(int argc, char **argv)
 		assert(!notblank(((ItemData *)WGetEditMenuItemData(item))->param.exec.shortcut));
 		item = WGetEditMenuItem(panel->menu, 1);
 		menuItemSelected(&menuDelegate, panel->menu, item);
+		assert(strcmp(((ItemData *)WGetEditMenuItemData(item))->icon, "~/exit.png") == 0);
 		assert(W_VIEW(panel->quickB)->flags.mapped);
 		WMSetButtonSelected(panel->quickB, False);
 		buttonClicked(panel->quickB, panel);
@@ -318,6 +366,6 @@ int main(int argc, char **argv)
 	snprintf(defaults, sizeof(defaults), "%s/Defaults", root);
 	assert(rmdir(defaults) == 0);
 	assert(rmdir(root) == 0);
-	puts("PASS: menu layouts, wrapped instructions, smooth indicators, palettes, edits and saved roundtrip at 11/24/32.");
+	puts("PASS: menu layouts, icon edits/clones, entry syntax and saved roundtrip at 11/24/32.");
 	return 0;
 }

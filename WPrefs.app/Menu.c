@@ -28,6 +28,7 @@
 
 #include "editmenu.h"
 #include "PanelLayout.h"
+#include "../src/menuentry.h"
 #include <X11/Xft/Xft.h>
 
 typedef enum {
@@ -110,6 +111,11 @@ typedef struct _Panel {
 	WMButton *sgrabB;
 	WMButton *sclearB;
 
+	WMFrame *iconF;
+	WMTextField *iconT;
+	WMButton *iconBrowseB;
+	WMButton *iconClearB;
+
 	WMList *icommandL;
 
 	WMFrame *paramF;
@@ -130,6 +136,7 @@ typedef struct _Panel {
 
 typedef struct {
 	InfoType type;
+	char *icon;
 	union {
 		struct {
 			int command;
@@ -266,6 +273,28 @@ static void browseForFile(WMWidget * self, void *clientData)
 	}
 
 	wfree(oldprog);
+}
+
+static void iconClicked(WMWidget *widget, void *clientData)
+{
+	_Panel *panel = clientData;
+	WMFilePanel *filePanel;
+	char *path;
+
+	if (widget == panel->iconClearB) {
+		WMSetTextFieldText(panel->iconT, "");
+		updateMenuItem(panel, panel->currentItem, panel->iconT);
+		return;
+	}
+	filePanel = WMGetOpenPanel(WMWidgetScreen(widget));
+	WMSetFilePanelCanChooseDirectories(filePanel, False);
+	if (WMRunModalFilePanelForDirectory(filePanel, panel->parent, "/",
+					    _("Select Icon"), NULL)) {
+		path = WMGetFilePanelFileName(filePanel);
+		WMSetTextFieldText(panel->iconT, path);
+		updateMenuItem(panel, panel->currentItem, panel->iconT);
+		wfree(path);
+	}
 }
 
 static void sgrabClicked(WMWidget * w, void *data)
@@ -847,6 +876,27 @@ static void createPanel(_Panel * p)
 	WMMapSubwidgets(shortcutRow);
 	finishGroup(&shortcut);
 
+	WPrefsGroup icon = menuGroup(panel, _("Icon"));
+	panel->iconF = icon.frame;
+	WMBox *iconRow = WMCreateBox(icon.content);
+	WMSetBoxHorizontal(iconRow, True);
+	panel->iconT = WMCreateTextField(iconRow);
+	packField(iconRow, panel->iconT);
+	WMAddNotificationObserver(dataChanged, panel, WMTextDidChangeNotification, panel->iconT);
+	panel->iconClearB = WMCreateCommandButton(iconRow);
+	WMSetButtonText(panel->iconClearB, _("Clear"));
+	WMSetButtonAction(panel->iconClearB, iconClicked, panel);
+	WPrefsPackButton(iconRow, panel->iconClearB, 8);
+	panel->iconBrowseB = WMCreateCommandButton(iconRow);
+	WMSetButtonText(panel->iconBrowseB, _("Browse"));
+	WMSetButtonAction(panel->iconBrowseB, iconClicked, panel);
+	WPrefsPackButton(iconRow, panel->iconBrowseB, 0);
+	WMPackBoxSubview(icon.content, iconRow, WMGetBoxMinimumSize(iconRow), False, 0);
+	WMMapSubwidgets(iconRow);
+	WMSetBalloonTextForView(_("Optional image file. Icon names are searched in the Icon Path."),
+				WMWidgetView(panel->iconT));
+	finishGroup(&icon);
+
 	/* internal command */
 
 	panel->icommandL = WMCreateList(panel->optionsF);
@@ -934,18 +984,26 @@ static void createPanel(_Panel * p)
 
 	panel->sections[ExecInfo][0] = panel->commandF;
 	panel->sections[ExecInfo][1] = panel->shortF;
+	panel->sections[ExecInfo][2] = panel->iconF;
 
 	panel->sections[CommandInfo][0] = panel->icommandL;
 	panel->sections[CommandInfo][1] = panel->shortF;
+	panel->sections[CommandInfo][2] = panel->iconF;
 
 	panel->sections[ExternalInfo][0] = panel->pathF;
+	panel->sections[ExternalInfo][1] = panel->iconF;
 
 	panel->sections[PipeInfo][0] = panel->pipeF;
+	panel->sections[PipeInfo][1] = panel->iconF;
 
 	panel->sections[PLPipeInfo][0] = panel->plpipeF;
+	panel->sections[PLPipeInfo][1] = panel->iconF;
 
 	panel->sections[DirectoryInfo][0] = panel->dcommandF;
 	panel->sections[DirectoryInfo][1] = panel->dpathF;
+	panel->sections[DirectoryInfo][2] = panel->iconF;
+	panel->sections[WSMenuInfo][0] = panel->iconF;
+	panel->sections[WWindowListInfo][0] = panel->iconF;
 
 	panel->currentType = NoInfo;
 	{
@@ -1016,6 +1074,7 @@ static void freeItemData(ItemData * data)
 {
 #define CFREE(d) if (d) wfree(d)
 
+	CFREE(data->icon);
 	/* TODO */
 	switch (data->type) {
 	case CommandInfo:
@@ -1055,24 +1114,18 @@ static void freeItemData(ItemData * data)
 
 static ItemData *parseCommand(WMPropList * item)
 {
-	ItemData *data = wmalloc(sizeof(ItemData));
-	WMPropList *p;
-	char *command = NULL;
-	char *parameter = NULL;
-	char *shortcut = NULL;
-	int i = 1;
+	ItemData *data;
+	WMenuEntrySpec spec;
+	const char *command, *parameter, *shortcut;
 
-	p = WMGetFromPLArray(item, i++);
-	command = WMGetFromPLString(p);
-	if (strcmp(command, "SHORTCUT") == 0) {
-		p = WMGetFromPLArray(item, i++);
-		shortcut = WMGetFromPLString(p);
-		p = WMGetFromPLArray(item, i++);
-		command = WMGetFromPLString(p);
+	if (!wMenuParseEntry(item, &spec)) {
+		wwarning(_("invalid menu entry"));
+		return NULL;
 	}
-	p = WMGetFromPLArray(item, i++);
-	if (p)
-		parameter = WMGetFromPLString(p);
+	data = wmalloc(sizeof(ItemData));
+	command = spec.command;
+	parameter = spec.parameter;
+	shortcut = spec.shortcut;
 
 	if (strcmp(command, "EXEC") == 0 || strcmp(command, "SHEXEC") == 0) {
 
@@ -1088,34 +1141,33 @@ static ItemData *parseCommand(WMPropList * item)
 			data->param.exec.shortcut = wstrdup(shortcut);
 
 	} else if (strcmp(command, "OPEN_MENU") == 0) {
-		char *p;
+		const char *cursor = parameter;
 		/*
 		 * dir menu, menu file
 		 * dir WITH
 		 * |pipe
 		 */
-		p = parameter;
-
-		if (p == NULL) {
+		if (cursor == NULL) {
 			wfree(data);
 			return NULL;
 		}
 
-		while (isspace(*p) && *p)
-			p++;
-		if (*p == '|') {
-			if (*(p + 1) == '|') {
-				p++;
+		while (*cursor && isspace(*cursor))
+			cursor++;
+		if (*cursor == '|') {
+			if (*(cursor + 1) == '|') {
+				cursor++;
 				data->param.pipe.cached = 0;
 			} else {
 				data->param.pipe.cached = 1;
 			}
 			data->type = PipeInfo;
-			data->param.pipe.command = wtrimspace(p + 1);
+			data->param.pipe.command = wtrimspace(cursor + 1);
 		} else {
+			char *p;
 			char *s;
 
-			p = wstrdup(p);
+			p = wstrdup(cursor);
 
 			s = strstr(p, "WITH");
 			if (s) {
@@ -1154,10 +1206,14 @@ static ItemData *parseCommand(WMPropList * item)
 			}
 		}
 	} else if (strcmp(command, "OPEN_PLMENU") == 0) {
-		char *p;
+		const char *p = parameter;
 
-		p = parameter;
-		while (isspace(*p) && *p)
+		if (!p) {
+			wwarning(_("missing parameter for menu command \"%s\""), command);
+			wfree(data);
+			return NULL;
+		}
+		while (*p && isspace(*p))
 			p++;
 		if (*p == '|') {
 			if (*(p + 1) == '|') {
@@ -1168,6 +1224,10 @@ static ItemData *parseCommand(WMPropList * item)
 			}
 			data->type = PLPipeInfo;
 			data->param.pipe.command = wtrimspace(p + 1);
+		} else {
+			wwarning(_("invalid parameter for menu command \"%s\""), command);
+			wfree(data);
+			return NULL;
 		}
 	} else if (strcmp(command, "WORKSPACE_MENU") == 0) {
 		data->type = WSMenuInfo;
@@ -1217,6 +1277,8 @@ static ItemData *parseCommand(WMPropList * item)
 			data->param.command.parameter = wstrdup(parameter);
 	}
 
+	if (spec.icon)
+		data->icon = wstrdup(spec.icon);
 	return data;
 }
 
@@ -1305,6 +1367,11 @@ static void updateMenuItem(_Panel * panel, WEditMenuItem * item, WMWidget * chan
 	assert(data != NULL);
 
 #define REPLACE(v, d) if (v) wfree(v); v = d
+
+	if (changedWidget == panel->iconT) {
+		REPLACE(data->icon, WMGetTextFieldText(panel->iconT));
+		return;
+	}
 
 	switch (data->type) {
 	case ExecInfo:
@@ -1403,6 +1470,7 @@ menuItemCloned(WEditMenuDelegate * delegate, WEditMenu * menu, WEditMenuItem * o
 	newData = wmalloc(sizeof(ItemData));
 
 	newData->type = data->type;
+	newData->icon = DUP(data->icon);
 
 	switch (data->type) {
 	case ExecInfo:
@@ -1512,6 +1580,7 @@ static void menuItemSelected(WEditMenuDelegate * delegate, WEditMenu * menu, WEd
 
 	if (data) {
 		changeInfoType(panel, WGetEditMenuItemTitle(item), data->type);
+		WMSetTextFieldText(panel->iconT, data->icon);
 
 		switch (data->type) {
 		case NoInfo:
@@ -1771,6 +1840,15 @@ static WMPropList *processData(const char *title, ItemData * data)
 	}
 
 	item = WMCreatePLArray(WMCreatePLString(title), NULL);
+	if (notblank(data->icon)) {
+		WMPropList *key = WMCreatePLString("ICON");
+		WMPropList *value = WMCreatePLString(data->icon);
+
+		WMAddToPLArray(item, key);
+		WMAddToPLArray(item, value);
+		WMReleasePropList(key);
+		WMReleasePropList(value);
+	}
 
 	switch (data->type) {
 	case ExecInfo:

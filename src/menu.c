@@ -502,7 +502,8 @@ void wMenuRealize(WMenu * menu)
 		text = menu->entries[i]->text;
 		width = WMWidthOfString(scr->menu_entry_font, text, strlen(text)) + 10;
 
-		if (wPreferences.window_list_app_icons && menu->entries[i]->icon) {
+		if (menu->entries[i]->icon &&
+		    (!menu->entries[i]->flags.icon_from_window || wPreferences.window_list_app_icons)) {
 			width += menu->entries[i]->icon->width + 4;
 		}
 
@@ -721,7 +722,8 @@ static void paintEntry(WMenu * menu, int index, int selected)
 	if (entry->flags.indicator)
 		x += MENU_INDICATOR_SPACE + 2;
 
-	if (wPreferences.window_list_app_icons && entry->icon && entry->icon->image != None) {
+	if (entry->icon && entry->icon->image != None &&
+	    (!entry->flags.icon_from_window || wPreferences.window_list_app_icons)) {
 		int ix = x;
 		int iy = y + (h - entry->icon->height) / 2;
 

@@ -59,6 +59,7 @@ typedef struct WMenuEntry {
 		unsigned int indicator_on:1;
 		unsigned int indicator_type:5;
 		unsigned int editable:1;
+		unsigned int icon_from_window:1;
 	} flags;
 } WMenuEntry;
 

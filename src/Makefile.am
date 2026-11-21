@@ -69,6 +69,7 @@ wmaker_SOURCES = 	\
 	resources.h \
 	rootmenu.c \
 	rootmenu.h \
+	menuentry.h \
 	screen.c \
 	screen.h \
 	session.h \
@@ -198,9 +199,12 @@ winoverview_navigation_test_SOURCES = winoverview_navigation_test.c
 winoverview_navigation_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
 winoverview_navigation_test_LDADD = $(wmaker_LDADD)
 
-check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRAMS)
+check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRAMS) wmaker
 	./randr_hotplug_test || test $$? -eq 77
 	./winoverview_navigation_test
+	python3 "$(srcdir)/menu_icon_test.py" ./wmaker || test $$? -eq 77
+
+EXTRA_DIST += menu_icon_test.py
 
 # Check that the callback functions used to load the configuration match
 # the type of the variable where the value will be stored

@@ -22,6 +22,23 @@ the translation contributors.
 There is a script to convert plain text menus to property list menus
 in the utils directory, named wm-oldmenu2new.
 
+Property list command entries can have an optional icon, configured in
+WPrefs.app's Applications Menu Definition panel using Icon, Browse and Clear.
+For example:
+
+  ("Terminal", ICON, "terminal.png", SHORTCUT, "Mod4+t", EXEC, "xterm")
+  ("Exit", ICON, "~/pixmaps/exit.png", EXIT)
+
+ICON and SHORTCUT may appear in either order before the command. Icon files
+can be absolute paths, paths using ~, or names searched in IconPath. Images
+are scaled to fit the menu row while preserving their aspect ratio. Missing
+or unreadable images produce a warning; the entry remains usable without an
+icon. Clear removes the icon without changing the command or shortcut.
+This option applies to command entries (including external/generated menus
+and workspace/window-list entries), not ordinary submenu headings or the
+plain text menu format. WindowListAppIcons still controls only the automatic
+application icons inside the window list.
+
 If you are unsure to wich format to use, stick with the plain text menus
 as they are more flexible. If for some psychological reason you are
 scared by text based configuration, use the property list menu.

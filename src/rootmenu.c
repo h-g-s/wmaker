@@ -56,6 +56,8 @@
 #include "rootmenu.h"
 #include "startup.h"
 #include "switchmenu.h"
+#include "pixmap.h"
+#include "menuentry.h"
 
 #include <WINGs/WUtil.h>
 
@@ -1531,6 +1533,53 @@ static WMenu *makeDefaultMenu(WScreen * scr)
 	return menu;
 }
 
+static WPixmap *loadMenuIcon(WScreen *scr, const char *name)
+{
+	char *path;
+	RImage *image;
+	WPixmap *pixmap;
+	int size = WMAX(12, WMFontHeight(scr->menu_entry_font) + 2);
+
+	if (!name || !*name)
+		return NULL;
+	path = wfindfile(wPreferences.icon_path, name);
+	if (!path) {
+		wwarning(_("could not find menu icon \"%s\""), name);
+		return NULL;
+	}
+	image = RLoadImage(scr->rcontext, path, 0);
+	wfree(path);
+	if (!image) {
+		wwarning(_("could not load menu icon \"%s\": %s"), name, RMessageForError(RErrorCode));
+		return NULL;
+	}
+	if (image->width > size || image->height > size) {
+		int largest = WMAX(image->width, image->height);
+		RImage *scaled = RScaleImage(image,
+					    WMAX(1, (long)image->width * size / largest),
+					    WMAX(1, (long)image->height * size / largest));
+
+		RReleaseImage(image);
+		image = scaled;
+	}
+	if (!image) {
+		wwarning(_("could not scale menu icon \"%s\": %s"), name, RMessageForError(RErrorCode));
+		return NULL;
+	}
+	pixmap = wmalloc(sizeof(*pixmap));
+	if (!RConvertImageMask(scr->rcontext, image, &pixmap->image, &pixmap->mask, 128)) {
+		wwarning(_("could not render menu icon \"%s\": %s"), name, RMessageForError(RErrorCode));
+		RReleaseImage(image);
+		wPixmapDestroy(pixmap);
+		return NULL;
+	}
+	pixmap->width = image->width;
+	pixmap->height = image->height;
+	pixmap->depth = scr->w_depth;
+	RReleaseImage(image);
+	return pixmap;
+}
+
 /*
  *----------------------------------------------------------------------
  * configureMenu--
@@ -1543,7 +1592,6 @@ WMenu *configureMenu(WScreen *scr, WMPropList *definition)
 	WMenu *menu = NULL;
 	WMPropList *elem;
 	int i, count;
-	WMPropList *title, *command, *params;
 	char *tmp, *mtitle;
 
 	if (WMIsPLString(definition)) {
@@ -1648,28 +1696,15 @@ WMenu *configureMenu(WScreen *scr, WMPropList *definition)
 				wMenuEntrySetCascade(menu, mentry, submenu);
 			}
 		} else {
-			int idx = 0;
-			WMPropList *shortcut;
-			/* normal entry */
+			WMenuEntrySpec spec;
+			WMenuEntry *entry;
 
-			title = WMGetFromPLArray(elem, idx++);
-			shortcut = WMGetFromPLArray(elem, idx++);
-			if (strcmp(WMGetFromPLString(shortcut), "SHORTCUT") == 0) {
-				shortcut = WMGetFromPLArray(elem, idx++);
-				command = WMGetFromPLArray(elem, idx++);
-			} else {
-				command = shortcut;
-				shortcut = NULL;
-			}
-			params = WMGetFromPLArray(elem, idx++);
-
-			if (!title || !command)
+			if (!wMenuParseEntry(elem, &spec))
 				goto error;
-
-			addMenuEntry(menu, M_(WMGetFromPLString(title)),
-				     shortcut ? WMGetFromPLString(shortcut) : NULL,
-				     WMGetFromPLString(command),
-				     params ? WMGetFromPLString(params) : NULL, "WMRootMenu");
+			entry = addMenuEntry(menu, M_(spec.title), spec.shortcut,
+					     spec.command, spec.parameter, "WMRootMenu");
+			if (entry && spec.icon)
+				entry->icon = loadMenuIcon(scr, spec.icon);
 		}
 		continue;
 
