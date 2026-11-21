@@ -29,6 +29,7 @@
 #include "editmenu.h"
 #include "PanelLayout.h"
 #include "../src/menuentry.h"
+#include "../src/applications_menu.h"
 #include <X11/Xft/Xft.h>
 
 typedef enum {
@@ -41,6 +42,7 @@ typedef enum {
 	DirectoryInfo,
 	WSMenuInfo,
 	WWindowListInfo,
+	ApplicationsInfo,
 	LastInfo
 } InfoType;
 
@@ -116,6 +118,9 @@ typedef struct _Panel {
 	WMButton *iconBrowseB;
 	WMButton *iconClearB;
 
+	WMFrame *applicationsF;
+	WMPopUpButton *applicationsP;
+
 	WMList *icommandL;
 
 	WMFrame *paramF;
@@ -159,6 +164,9 @@ typedef struct {
 			char *command;
 			unsigned stripExt:1;
 		} directory;
+		struct {
+			char *category;
+		} applications;
 	} param;
 } ItemData;
 
@@ -575,6 +583,7 @@ static void createPanel(_Panel * p)
 		panel->markerPix[DirectoryInfo] = pixm;
 		panel->markerPix[WSMenuInfo] = pixm;
 		panel->markerPix[WWindowListInfo] = pixm;
+		panel->markerPix[ApplicationsInfo] = pixm;
 
 		XFreeGC(dpy, gc);
 	}
@@ -613,6 +622,9 @@ static void createPanel(_Panel * p)
 		putNewItem(panel, pad, DirectoryInfo, _("Directory Contents"));
 		putNewItem(panel, pad, WSMenuInfo, _("Workspace Menu"));
 		putNewItem(panel, pad, WWindowListInfo, _("Window List Menu"));
+#ifdef HAVE_GIO
+		putNewItem(panel, pad, ApplicationsInfo, _("Applications"));
+#endif
 
 		panel->itemPad[0] = sview;
 		panel->factory[0] = pad;
@@ -897,6 +909,21 @@ static void createPanel(_Panel * p)
 				WMWidgetView(panel->iconT));
 	finishGroup(&icon);
 
+	WPrefsGroup applications = menuGroup(panel, _("Applications to Include"));
+	panel->applicationsF = applications.frame;
+	panel->applicationsP = WMCreatePopUpButton(applications.content);
+	for (unsigned int i = 0; i < WM_APPLICATION_CATEGORY_COUNT; i++)
+		WMAddPopUpButtonItem(panel->applicationsP, _(wApplicationsCategories[i].title));
+	WMSetPopUpButtonSelectedItem(panel->applicationsP, 0);
+	WMSetPopUpButtonAction(panel->applicationsP, buttonClicked, panel);
+	WMPackBoxSubview(applications.content, panel->applicationsP,
+			 WMGetPopUpButtonPreferredSize(panel->applicationsP), False, 8);
+	packExplanation(applications.content,
+			_("Built from installed applications when opened.\n"
+			  "Includes system and user .desktop files,\n"
+			  "with application icons and localized names."), width);
+	finishGroup(&applications);
+
 	/* internal command */
 
 	panel->icommandL = WMCreateList(panel->optionsF);
@@ -1004,6 +1031,8 @@ static void createPanel(_Panel * p)
 	panel->sections[DirectoryInfo][2] = panel->iconF;
 	panel->sections[WSMenuInfo][0] = panel->iconF;
 	panel->sections[WWindowListInfo][0] = panel->iconF;
+	panel->sections[ApplicationsInfo][0] = panel->applicationsF;
+	panel->sections[ApplicationsInfo][1] = panel->iconF;
 
 	panel->currentType = NoInfo;
 	{
@@ -1077,6 +1106,9 @@ static void freeItemData(ItemData * data)
 	CFREE(data->icon);
 	/* TODO */
 	switch (data->type) {
+	case ApplicationsInfo:
+		CFREE(data->param.applications.category);
+		break;
 	case CommandInfo:
 		CFREE(data->param.command.parameter);
 		CFREE(data->param.command.shortcut);
@@ -1233,6 +1265,14 @@ static ItemData *parseCommand(WMPropList * item)
 		data->type = WSMenuInfo;
 	} else if (strcmp(command, "WINDOWS_MENU") == 0) {
 		data->type = WWindowListInfo;
+	} else if (strcmp(command, "APPLICATIONS_MENU") == 0) {
+		if (parameter && !wApplicationsCategoryValid(parameter)) {
+			wwarning(_("invalid Applications menu category \"%s\""), parameter);
+			wfree(data);
+			return NULL;
+		}
+		data->type = ApplicationsInfo;
+		data->param.applications.category = parameter ? wstrdup(parameter) : NULL;
 	} else {
 		int cmd;
 
@@ -1320,6 +1360,10 @@ static void updateFrameTitle(_Panel * panel, const char *title, InfoType type)
 			tmp = wstrconcat(title, _(": Open Window List Submenu"));
 			break;
 
+		case ApplicationsInfo:
+			tmp = wstrconcat(title, _(": Installed Applications"));
+			break;
+
 		default:
 			tmp = NULL;
 			break;
@@ -1374,6 +1418,17 @@ static void updateMenuItem(_Panel * panel, WEditMenuItem * item, WMWidget * chan
 	}
 
 	switch (data->type) {
+	case ApplicationsInfo:
+		if (changedWidget == panel->applicationsP) {
+			int selected = WMGetPopUpButtonSelectedItem(panel->applicationsP);
+			assert(selected >= 0 && selected < WMGetPopUpButtonNumberOfItems(panel->applicationsP));
+			const char *category = selected < (int)WM_APPLICATION_CATEGORY_COUNT ?
+				wApplicationsCategories[selected].id :
+				WMGetPopUpButtonItem(panel->applicationsP, selected);
+
+			REPLACE(data->param.applications.category, *category ? wstrdup(category) : NULL);
+		}
+		break;
 	case ExecInfo:
 		if (changedWidget == panel->commandT) {
 			REPLACE(data->param.exec.command, WMGetTextFieldText(panel->commandT));
@@ -1473,6 +1528,9 @@ menuItemCloned(WEditMenuDelegate * delegate, WEditMenu * menu, WEditMenuItem * o
 	newData->icon = DUP(data->icon);
 
 	switch (data->type) {
+	case ApplicationsInfo:
+		newData->param.applications.category = DUP(data->param.applications.category);
+		break;
 	case ExecInfo:
 		newData->param.exec.command = DUP(data->param.exec.command);
 		newData->param.exec.shortcut = DUP(data->param.exec.shortcut);
@@ -1583,6 +1641,22 @@ static void menuItemSelected(WEditMenuDelegate * delegate, WEditMenu * menu, WEd
 		WMSetTextFieldText(panel->iconT, data->icon);
 
 		switch (data->type) {
+		case ApplicationsInfo:
+			{
+				const char *category = data->param.applications.category;
+				unsigned int i;
+
+				for (i = 0; i < WM_APPLICATION_CATEGORY_COUNT; i++)
+					if (strcmp(category ? category : "", wApplicationsCategories[i].id) == 0)
+						break;
+				if (i == WM_APPLICATION_CATEGORY_COUNT) {
+					if (WMGetPopUpButtonNumberOfItems(panel->applicationsP) > (int)i)
+						WMRemovePopUpButtonItem(panel->applicationsP, i);
+					WMAddPopUpButtonItem(panel->applicationsP, category);
+				}
+				WMSetPopUpButtonSelectedItem(panel->applicationsP, i);
+			}
+			break;
 		case NoInfo:
 			break;
 
@@ -1851,6 +1925,19 @@ static WMPropList *processData(const char *title, ItemData * data)
 	}
 
 	switch (data->type) {
+	case ApplicationsInfo:
+		{
+			WMPropList *value = WMCreatePLString("APPLICATIONS_MENU");
+
+			WMAddToPLArray(item, value);
+			WMReleasePropList(value);
+			if (data->param.applications.category) {
+				value = WMCreatePLString(data->param.applications.category);
+				WMAddToPLArray(item, value);
+				WMReleasePropList(value);
+			}
+		}
+		break;
 	case ExecInfo:
 		if (data->param.exec.command == NULL)
 			goto return_null;

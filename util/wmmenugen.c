@@ -28,6 +28,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <errno.h>
+#include <locale.h>
 
 #include "wmmenugen.h"
 
@@ -62,6 +63,12 @@ static void print_help(void)
 	puts("  -h, --help\t\tdisplay this help and exit");
 	puts("  -parser=<name>\tspecify the format of the input, see below");
 	puts("  --version\t\toutput version information and exit");
+	puts("  --applications\tgenerate the installed XDG Applications menu");
+	puts("  --category=<id>\tinclude only this desktop-entry category");
+	puts("  --no-icons\t\tomit icons from the Applications menu");
+	puts("  --icon-theme=<name>\tselect an icon theme");
+	puts("  --icon-size=<pixels>\tpreferred icon size (default: 24)");
+	puts("  --launch=<id>\t\tlaunch a desktop file ID or absolute filename");
 	puts("");
 	puts("fspec: the file to be converted or the directory containing all the menu files");
 	puts("");
@@ -90,6 +97,19 @@ int main(int argc, char **argv)
 	int *previousDepth;
 
 	prog_name = argv[0];
+	for (i = 1; i < argc; i++)
+		if (strcmp(argv[i], "--applications") == 0 || strcmp(argv[i], "--launch") == 0 ||
+		    strncmp(argv[i], "--launch=", 9) == 0)
+			break;
+	if (i < argc) {
+		setlocale(LC_ALL, "");
+#if defined(HAVE_LIBINTL_H) && defined(I18N)
+		bindtextdomain("wmgenmenu", LOCALEDIR);
+		bind_textdomain_codeset("wmgenmenu", "UTF-8");
+		textdomain("wmgenmenu");
+#endif
+		return wmDesktopMenuMain(argc, argv);
+	}
 	plMenuNodes = WMCreateArray(8); /* grows on demand */
 	menu = (WMTreeNode *)NULL;
 	parse = NULL;

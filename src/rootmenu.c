@@ -58,6 +58,7 @@
 #include "switchmenu.h"
 #include "pixmap.h"
 #include "menuentry.h"
+#include "applications_menu.h"
 
 #include <WINGs/WUtil.h>
 
@@ -883,7 +884,36 @@ static WMenuEntry *addMenuEntry(WMenu *menu, const char *title, const char *shor
 	if (!menu)
 		return NULL;
 	scr = menu->frame->screen_ptr;
-	if (strcmp(command, "OPEN_MENU") == 0) {
+	if (strcmp(command, "APPLICATIONS_MENU") == 0) {
+#ifdef HAVE_GIO
+		char *pipe;
+		char size[32];
+		WMenu *dummy;
+		WMenuEntry *unavailable;
+
+		if (params && !wApplicationsCategoryValid(params)) {
+			wwarning(_("%s:invalid Applications menu category \"%s\""), file_name, params);
+			return NULL;
+		}
+		snprintf(size, sizeof(size), "%d", WMAX(12, WMFontHeight(scr->menu_entry_font) + 2));
+		pipe = wstrconcat("|| wmmenugen --applications --icon-size ", size);
+		if (params) {
+			char *withCategory = wstrconcat(pipe, " --category ");
+			wfree(pipe);
+			pipe = wstrconcat(withCategory, params);
+			wfree(withCategory);
+		}
+		dummy = wMenuCreate(scr, title, False);
+		dummy->on_destroy = removeShortcutsForMenu;
+		unavailable = wMenuAddCallback(dummy, _("Applications unavailable"), NULL, NULL);
+		unavailable->flags.enabled = 0;
+		entry = wMenuAddCallback(menu, title, constructPLMenuFromPipe, pipe);
+		entry->free_cdata = wfree;
+		wMenuEntrySetCascade(menu, entry, dummy);
+#else
+		wwarning(_("%s:Applications menus were built without GIO support"), file_name);
+#endif
+	} else if (strcmp(command, "OPEN_MENU") == 0) {
 		if (!params) {
 			wwarning(_("%s:missing parameter for menu command \"%s\""), file_name, command);
 		} else {
@@ -1714,6 +1744,11 @@ WMenu *configureMenu(WScreen *scr, WMPropList *definition)
 		wfree(tmp);
 	}
 
+	if (menu->entry_no == 0) {
+		WMenuEntry *empty = wMenuAddCallback(menu, _("(No items)"), NULL, NULL);
+
+		empty->flags.enabled = 0;
+	}
 	return menu;
 }
 

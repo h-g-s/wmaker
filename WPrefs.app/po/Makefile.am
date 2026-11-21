@@ -20,6 +20,7 @@ POTFILES  = \
 	$(top_srcdir)/WPrefs.app/Icons.c \
 	$(top_srcdir)/WPrefs.app/KeyboardShortcuts.c \
 	$(top_srcdir)/WPrefs.app/Menu.c \
+	$(top_srcdir)/src/applications_menu.h \
 	$(top_srcdir)/WPrefs.app/MenuPreferences.c \
 	$(top_srcdir)/src/monitor_layout.c \
 	$(top_srcdir)/WPrefs.app/MouseSettings.c \

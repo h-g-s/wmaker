@@ -147,7 +147,9 @@ int main(int argc, char **argv)
 		"(PLPipe, OPEN_PLMENU, \"| pl-command\"),"
 		"(Files, ICON, \"files.png\", OPEN_MENU, \"-noext /tmp WITH opener\"),"
 		"(Workspaces, WORKSPACE_MENU), (Windows, WINDOWS_MENU),"
-		"(Nested, (Child, EXEC, \"nested-command\")))";
+		"(Nested, (Child, EXEC, \"nested-command\")),"
+		"(Applications, APPLICATIONS_MENU),"
+		"(Network, ICON, network.png, APPLICATIONS_MENU, Network))";
 
 	entrySyntax();
 	if (!getenv("DISPLAY"))
@@ -334,6 +336,35 @@ int main(int argc, char **argv)
 		assert(strcmp(((ItemData *)WGetEditMenuItemData(clone))->param.exec.command,
 			      "xterm -sb -sl 2000 -bg black -fg white") == 0);
 		WRemoveEditMenuItem(panel->menu, clone);
+		item = WGetEditMenuItem(panel->menu, 10);
+		menuItemSelected(&menuDelegate, panel->menu, item);
+		assert(panel->currentType == ApplicationsInfo);
+		assert(WMGetPopUpButtonSelectedItem(panel->applicationsP) == 0);
+		assert(!((ItemData *)WGetEditMenuItemData(item))->param.applications.category);
+		unsigned int terminal;
+		for (terminal = 0; terminal < WM_APPLICATION_CATEGORY_COUNT; terminal++)
+			if (strcmp(wApplicationsCategories[terminal].id, "TerminalEmulator") == 0)
+				break;
+		assert(terminal < WM_APPLICATION_CATEGORY_COUNT);
+		WMSetPopUpButtonSelectedItem(panel->applicationsP, terminal);
+		buttonClicked(panel->applicationsP, panel);
+		assert(strcmp(((ItemData *)WGetEditMenuItemData(item))->param.applications.category,
+			      "TerminalEmulator") == 0);
+		clone = WInsertMenuItemWithTitle(panel->menu, 1, "Copied Applications");
+		menuItemCloned(&menuDelegate, panel->menu, item, clone);
+		assert(((ItemData *)WGetEditMenuItemData(clone))->param.applications.category !=
+		       ((ItemData *)WGetEditMenuItemData(item))->param.applications.category);
+		WMSetPopUpButtonSelectedItem(panel->applicationsP, 0);
+		buttonClicked(panel->applicationsP, panel);
+		assert(!((ItemData *)WGetEditMenuItemData(item))->param.applications.category);
+		assert(strcmp(((ItemData *)WGetEditMenuItemData(clone))->param.applications.category,
+			      "TerminalEmulator") == 0);
+		WRemoveEditMenuItem(panel->menu, clone);
+		item = WGetEditMenuItem(panel->menu, 11);
+		menuItemSelected(&menuDelegate, panel->menu, item);
+		assert(strcmp(((ItemData *)WGetEditMenuItemData(item))->param.applications.category, "Network") == 0);
+		assert(strcmp(((ItemData *)WGetEditMenuItemData(item))->icon, "network.png") == 0);
+		formBounds(panel);
 		saved = buildPLFromMenu(panel);
 		copy = buildSubmenu(panel, saved);
 		roundtrip = processSubmenu(copy);

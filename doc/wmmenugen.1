@@ -22,8 +22,38 @@ is a directory instead of a file, then
 will read all the files present in the hierarchy of this directory.
 .SH "OPTIONS"
 .TP
+.B \-\-applications
+Generate a categorized menu from installed desktop entries. Searches
+XDG_DATA_HOME/applications and XDG_DATA_DIRS/applications, including nested
+directories, with user overrides and hidden entries taking precedence.
+Defaults are ~/.local/share, /usr/local/share and /usr/share.
+.TP
+.BI \-\-category " CATEGORY"
+Include only entries in this desktop-entry category, as a flat submenu.
+Examples: Network, TerminalEmulator, Development and Office.
+Other selects entries without a recognized main category.
+.TP
 .BR \-\-help ", " \-h
 print a help message with the list of options
+.TP
+.BI \-\-icon-size " PIXELS"
+Preferred icon size, from 1 to 512 pixels (default 24). The nearest available
+theme size is chosen and Window Maker scales the image to its menu row.
+.TP
+.BI \-\-icon-theme " THEME"
+Override the icon theme. By default, gtk-icon-theme-name is read from GTK 4
+then GTK 3 settings.ini under XDG_CONFIG_HOME, then ~/.gtkrc-2.0.
+Theme inheritance and hicolor are searched before unthemed icons and pixmaps.
+XDG data directories and ~/.icons are searched, with user icons taking precedence.
+PNG and XPM are supported; SVG icons require an ImageMagick-enabled build.
+.TP
+.BI \-\-launch " DESKTOP-ID"
+Launch a desktop file ID or absolute desktop filename using GIO. This preserves
+desktop-entry argument quoting and field codes, Terminal, Path and D-Bus activation,
+rather than interpreting Exec as a shell command.
+.TP
+.B \-\-no-icons
+Omit icons from the Applications menu.
 .TP
 .B \-parser
 specify the format of the file to be parsed
@@ -41,6 +71,37 @@ the format of the menu generation tool for X of the same name
 the format of the menu specification as defined by the
 .I FreeDesktop
 standard, currently at version 1.1
+.SH "APPLICATIONS MENUS"
+The Applications item in WPrefs creates a dynamic submenu, either the whole tree
+or one selected category. Names are localized. NoDisplay, Hidden, OnlyShowIn,
+NotShowIn and TryExec are honored. XDG_CURRENT_DESKTOP is used for visibility;
+if unset, WindowMaker is assumed.
+.PP
+The whole tree uses the standard main categories, with terminal emulators grouped
+under Terminals. It is not an implementation of distribution-specific .menu XML
+layouts or merge rules.
+.PP
+Example WMRootMenu entries:
+.nf
+("Applications", APPLICATIONS_MENU)
+("Network", APPLICATIONS_MENU, Network)
+("Terminals", APPLICATIONS_MENU, TerminalEmulator)
+.fi
+.PP
+Standalone generation: wmmenugen --applications --category Network
+.PP
+Generation runs when the submenu is opened, so application installations,
+removals, user overrides and icon-theme changes appear without restarting.
+Theme metadata, directory listings and icon results are cached within each
+invocation; there is no stale persistent menu cache.
+An empty category displays a disabled "(No items)" entry.
+.PP
+Applications mode requires GIO support at build time. Legacy parsers and
+wmgenmenu remain available without it.
+.PP
+Desktop entries also expose GenericName, Comment, Keywords, MIME associations
+and application Actions. These are useful for future search, tooltips and
+per-application action menus; they are not currently displayed in this menu.
 .SH "RETURN VALUE"
 The exit status from the
 .B wmmenugen

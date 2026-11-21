@@ -60,8 +60,11 @@ check_PROGRAMS = wmsetbg_refresh_test
 wmsetbg_refresh_test_SOURCES = wmsetbg_refresh_test.c
 wmsetbg_refresh_test_LDADD = $(wmsetbg_LDADD)
 
-check-local: wmsetbg_refresh_test
+check-local: wmsetbg_refresh_test wmmenugen
 	./wmsetbg_refresh_test || test $$? -eq 77
+	python3 "$(srcdir)/wmmenugen_desktop_test.py" ./wmmenugen || test $$? -eq 77
+
+EXTRA_DIST += wmmenugen_desktop_test.py
 
 wmgenmenu_LDADD = \
 	$(top_builddir)/WINGs/libWUtil.la \
@@ -71,11 +74,13 @@ wmgenmenu_SOURCES = wmgenmenu.c wmgenmenu.h
 
 wmmenugen_LDADD = \
 	$(top_builddir)/WINGs/libWUtil.la \
+	@GIO_LIBS@ \
 	@INTLIBS@
 
+wmmenugen_CPPFLAGS = $(AM_CPPFLAGS) @GIO_CFLAGS@
 wmmenugen_SOURCES = wmmenugen.c wmmenugen.h wmmenugen_misc.c \
 	wmmenugen_parse_wmconfig.c \
-	wmmenugen_parse_xdg.c
+	wmmenugen_parse_xdg.c wmmenugen_desktop.c
 
 wmiv_CFLAGS = @PANGO_CFLAGS@ @PTHREAD_CFLAGS@
 

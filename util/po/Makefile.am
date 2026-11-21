@@ -8,7 +8,9 @@ EXTRA_DIST = de.po es.po fr.po fy.po nl.po pt.po sr.po
 
 POTFILES  = \
 	$(top_srcdir)/util/wmgenmenu.c \
-	$(top_srcdir)/util/wmgenmenu.h
+	$(top_srcdir)/util/wmgenmenu.h \
+	$(top_srcdir)/util/wmmenugen_desktop.c \
+	$(top_srcdir)/src/applications_menu.h
 
 SUFFIXES = .po .mo
 

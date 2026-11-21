@@ -232,6 +232,15 @@ languages written in right-to-left direction, in some widgets.
 If detected, it will be automatically used; you may request explicit support/ignore through (@pxref{Configure Options}).
 You can get it from @uref{http://www.pango.org/Download}
 
+@item @emph{GIO} 2.44 or newer
+
+The @file{gio-unix-2.0} development package provides standards-aware discovery
+and launching of desktop applications for @command{wmmenugen} and the
+@emph{Applications} item in WPrefs. If detected, support is enabled automatically.
+Use @option{--enable-desktop-menus} to require it or
+@option{--disable-desktop-menus} to build without it. Existing menu generators
+remain available without GIO.
+
 @item @emph{libbsd}
 
 This library can be used by the @emph{WINGs} utility library to make use of @command{strlcat} and
@@ -494,6 +503,10 @@ Disable @emph{ImageMagick's MagickWand} support in @emph{WRaster}, used to suppo
 
 @item --disable-pango
 Disable @emph{Pango} text layout support in @emph{WINGs}.
+
+@item --disable-desktop-menus
+Disable GIO-based dynamic Applications menus. Use @option{--enable-desktop-menus}
+to require the @file{gio-unix-2.0} development package.
 
 @item --disable-png
 Disable PNG support in @emph{WRaster}; when enabled use @file{libpng}.

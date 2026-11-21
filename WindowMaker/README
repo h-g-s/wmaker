@@ -39,6 +39,14 @@ and workspace/window-list entries), not ordinary submenu headings or the
 plain text menu format. WindowListAppIcons still controls only the automatic
 application icons inside the window list.
 
+WPrefs also offers an Applications item that generates a submenu from installed
+.desktop files each time it is opened. Select All Applications or one category
+such as Network or Terminals in its editor. System and XDG user application
+directories are combined, honoring user overrides, visibility and localized
+names. The generated icons use the configured GTK icon theme, inheritance and
+hicolor fallback. This requires GIO support when building Window Maker.
+See wmmenugen(1) for standalone generation, icon-theme overrides and details.
+
 If you are unsure to wich format to use, stick with the plain text menus
 as they are more flexible. If for some psychological reason you are
 scared by text based configuration, use the property list menu.

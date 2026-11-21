@@ -8,13 +8,14 @@ import tempfile
 import time
 
 
-def wait_for(check):
+def wait_for(check, diagnostic=None):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if check():
             return
         time.sleep(0.05)
-    raise AssertionError("Timed out waiting for isolated menu test")
+    detail = diagnostic() if diagnostic else ""
+    raise AssertionError(f"Timed out waiting for isolated menu test: {detail}")
 
 
 def stop(process):
@@ -51,6 +52,24 @@ def main():
             xpm(root / "tall.xpm", 1, 256, "#00ff00")
             xpm(root / "wide.xpm", 256, 1, "#0000ff")
             (root / "broken.xpm").write_text("not an image\n")
+            data = root / "data"
+            applications = data / "applications"
+            applications.mkdir(parents=True)
+            desktop = (
+                "[Desktop Entry]\nType=Application\nName=Network Test\n"
+                f"Exec={shutil.which('touch')} {root}/application-launched\n"
+                f"Icon={root}/square.xpm\nCategories=Network;\n"
+            )
+            (applications / "net'work%test.desktop").write_text(desktop)
+            generator = Path(wmaker).parent.parent / "util" / "wmmenugen"
+            assert generator.exists(), "Build wmmenugen before running the menu icon test"
+            generator_env = dict(os.environ, HOME=directory, XDG_DATA_HOME=str(data),
+                                 XDG_DATA_DIRS=str(root / "empty"), XDG_CONFIG_HOME=str(root / "config"),
+                                 XDG_CURRENT_DESKTOP="WindowMaker")
+            probe = subprocess.run([str(generator), "--applications"], env=generator_env,
+                                   capture_output=True, text=True, timeout=10)
+            supports_applications = probe.returncode == 0
+            assert supports_applications or "built without GIO" in probe.stderr, probe.stderr
             (defaults / "WindowMaker").write_text(
                 '{ WindowListAppIcons = NO; MenuTextFont = "Sans:pixelsize=12";'
                 f' IconPath = ("{root}"); WorkspaceBack = (solid, "#333333"); }}'
@@ -63,7 +82,8 @@ def main():
                 f'(Wide, ICON, "{root}/wide.xpm", REFRESH),'
                 '(Missing, ICON, absent.xpm, REFRESH),'
                 '(Broken, ICON, broken.xpm, REFRESH),'
-                '(Malformed, ICON, ()), (Legacy, REFRESH))'
+                '(Malformed, ICON, ()), (Legacy, REFRESH)'
+                + (', ("Auto Apps", APPLICATIONS_MENU, Network)' if supports_applications else '') + ')'
             )
             menu_file = defaults / "WMRootMenu"
             menu_file.write_text(with_icon)
@@ -75,7 +95,8 @@ def main():
                 assert select.select([server.stdout], [], [], 10)[0], "Xvfb did not start"
                 display = server.stdout.readline().strip()
                 assert display.isdigit(), "Xvfb failed to allocate a display"
-                env = dict(os.environ, DISPLAY=f":{display}", HOME=directory, WMAKER_USER_ROOT=directory)
+                env = dict(generator_env, DISPLAY=f":{display}", WMAKER_USER_ROOT=directory,
+                           PATH=f"{generator.parent}:{os.environ.get('PATH', '/usr/bin:/bin')}")
 
                 def run(*args):
                     return subprocess.check_output(args, env=env, stderr=subprocess.STDOUT, timeout=10)
@@ -102,7 +123,8 @@ def main():
                     return result
 
                 run("xdotool", "mousemove", "100", "100", "click", "3")
-                wait_for(lambda: len(pixels()) == 3)
+                wait_for(lambda: len(pixels()) == 3,
+                         lambda: f"{pixels()}\n{(root / 'wmaker.log').read_text()}")
                 sizes = pixels()
                 x, y, size, height = sizes[b"\xff\x00\x00"]
                 assert 12 <= size < 32 and size == height, sizes
@@ -118,6 +140,34 @@ def main():
                 wait_for(lambda: len(pixels()) == 2)
                 assert b"\xff\x00\x00" not in pixels()
                 assert manager.poll() is None
+                if supports_applications:
+                    def open_applications():
+                        run("xdotool", "mousemove", "600", "500", "click", "1")
+                        run("xdotool", "mousemove", "110", "110", "click", "3")
+                        colors = pixels()
+                        green = colors[b"\x00\xff\x00"]
+                        blue = colors[b"\x00\x00\xff"]
+                        row_height = blue[1] - green[1] - (size - 1) // 2
+                        run("xdotool", "mousemove", str(green[0] + 40),
+                            str(green[1] + size // 2 + 5 * row_height), "click", "1")
+
+                    open_applications()
+                    wait_for(lambda: b"\xff\x00\x00" in pixels(),
+                             lambda: f"{pixels()}\n{(root / 'wmaker.log').read_text()}")
+                    red = pixels()[b"\xff\x00\x00"]
+                    run("xdotool", "mousemove", str(red[0] + size // 2),
+                        str(red[1] + size // 2), "click", "1")
+                    wait_for(lambda: (root / "application-launched").exists(),
+                             lambda: (root / "wmaker.log").read_text())
+                    (applications / "second.desktop").write_text(desktop.replace("Network Test", "Second Network"))
+                    open_applications()
+                    wait_for(lambda: pixels().get(b"\xff\x00\x00", (0, 0, 0, 0))[3] > size)
+                    (applications / "net'work%test.desktop").unlink()
+                    (applications / "second.desktop").unlink()
+                    open_applications()
+                    wait_for(lambda: b"\xff\x00\x00" not in pixels())
+                    time.sleep(0.2)
+                    assert manager.poll() is None, (root / "wmaker.log").read_text()
                 stop(manager)
                 manager_log.seek(0)
                 log = manager_log.read()
@@ -128,7 +178,7 @@ def main():
     finally:
         stop(manager)
         stop(server)
-    print("PASS: desktop menu icons, scaling, command execution, removal and invalid-image warnings")
+    print("PASS: desktop menu icons, scaling, execution, Applications generation/refresh and invalid-image warnings")
     return 0
 
 

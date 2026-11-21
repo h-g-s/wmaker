@@ -70,6 +70,7 @@ wmaker_SOURCES = 	\
 	rootmenu.c \
 	rootmenu.h \
 	menuentry.h \
+	applications_menu.h \
 	screen.c \
 	screen.h \
 	session.h \
@@ -202,6 +203,7 @@ winoverview_navigation_test_LDADD = $(wmaker_LDADD)
 check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRAMS) wmaker
 	./randr_hotplug_test || test $$? -eq 77
 	./winoverview_navigation_test
+	$(MAKE) -C "$(top_builddir)/util" wmmenugen
 	python3 "$(srcdir)/menu_icon_test.py" ./wmaker || test $$? -eq 77
 
 EXTRA_DIST += menu_icon_test.py
