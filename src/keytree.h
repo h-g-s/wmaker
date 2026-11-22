@@ -31,7 +31,8 @@
 
 typedef enum {
 	WKN_WKBD,   /* action: wKeyBindings command (WKBD_* index) */
-	WKN_MENU    /* action: root-menu entry callback */
+	WKN_MENU,   /* action: root-menu entry callback */
+	WKN_COMMAND /* action: shell command */
 } WKeyActionType;
 
 /*
@@ -47,6 +48,7 @@ typedef struct WKeyAction {
 			void *menu;   /* WKN_MENU: cast to WMenu */
 			void *entry;  /* WKN_MENU: cast to WMenuEntry */
 		} menu;
+		char *command;
 	} u;
 	struct WKeyAction *next;  /* next action for this key sequence, or NULL */
 } WKeyAction;

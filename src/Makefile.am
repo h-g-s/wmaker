@@ -205,8 +205,9 @@ check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRA
 	./winoverview_navigation_test
 	$(MAKE) -C "$(top_builddir)/util" wmmenugen
 	python3 "$(srcdir)/menu_icon_test.py" ./wmaker || test $$? -eq 77
+	python3 "$(srcdir)/command_shortcuts_test.py" ./wmaker || test $$? -eq 77
 
-EXTRA_DIST += menu_icon_test.py
+EXTRA_DIST += menu_icon_test.py command_shortcuts_test.py
 
 # Check that the callback functions used to load the configuration match
 # the type of the variable where the value will be stored

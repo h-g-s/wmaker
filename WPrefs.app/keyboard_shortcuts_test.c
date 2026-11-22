@@ -8,6 +8,23 @@
 static WMPropList *domain;
 static WMWindow *testWindow;
 
+WMPropList *GetObjectForKey(const char *key)
+{
+	WMPropList *name = WMCreatePLString(key);
+	WMPropList *value = WMGetFromPLDictionary(domain, name);
+
+	WMReleasePropList(name);
+	return value;
+}
+
+void SetObjectForKey(WMPropList *value, const char *key)
+{
+	WMPropList *name = WMCreatePLString(key);
+
+	WMPutInPLDictionary(domain, name, value);
+	WMReleasePropList(name);
+}
+
 char *GetStringForKey(const char *key)
 {
 	WMPropList *name = WMCreatePLString(key);
@@ -121,6 +138,8 @@ static void testPanel(WMScreen *screen)
 		WMReleaseFont(boldFont);
 		testWindow = WMCreateWindow(screen, "keyboardShortcutsTest");
 		WMRealizeWidget(testWindow);
+		WMMapWidget(testWindow);
+		XSync(WMScreenDisplay(screen), False);
 		panel = (_Panel *)InitKeyboardShortcuts(testWindow);
 		assert(panel->callbacks.automaticLayout);
 		createPanel((Panel *)panel);
@@ -167,6 +186,77 @@ static void testPanel(WMScreen *screen)
 		WMPerformButtonClick(panel->cleB);
 		storeData(panel);
 		assert(strcmp(GetStringForKey("RunKey"), "None") == 0);
+
+		WMSelectTabViewItemAtIndex(panel->tabv, 1);
+		checkBounds(WMWidgetView(panel->box));
+		WMPerformButtonClick(panel->commandAddB);
+		assert(WMGetListNumberOfRows(panel->commandLs) == 1);
+		WMSetTextFieldText(panel->commandT, "printf 'hello world' > /tmp/test");
+		WMSetTextFieldText(panel->commandShortcutT, "Control+F8");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) == NULL);
+		WMSetTextFieldText(panel->commandShortcutT, "Mod1+F10");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) != NULL);
+		WMSetTextFieldText(panel->commandShortcutT, "Control+X");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) != NULL);
+		WMSetTextFieldText(panel->commandShortcutT, "NotAKey");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) != NULL);
+		WMSetTextFieldText(panel->commandShortcutT, "Control+X Z");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) == NULL);
+		WMSetTextFieldText(panel->commandShortcutT, "Control+F8");
+		commandChanged(panel, NULL);
+		storeData(panel);
+		{
+			WMPropList *array = GetObjectForKey("CommandShortcuts");
+			WMPropList *pair = WMGetFromPLArray(array, 0);
+
+			assert(WMGetPropListItemCount(array) == 1);
+			assert(strcmp(WMGetFromPLString(WMGetFromPLArray(pair, 0)), "Control+F8") == 0);
+			assert(strcmp(WMGetFromPLString(WMGetFromPLArray(pair, 1)),
+				      "printf 'hello world' > /tmp/test") == 0);
+		}
+		showCommands(panel);
+		WMSelectListItem(panel->commandLs, 0);
+		commandSelection(panel);
+		queueChord(screen, XK_y, 0);
+		queueChord(screen, XK_x, ControlMask);
+		captureCommandShortcut(panel->commandCaptureB, panel);
+		assert(strcmp(((CommandItem *)WMGetListSelectedItem(panel->commandLs)->clientData)->shortcut,
+			      "Control+X Y") == 0);
+		storeData(panel);
+		WMPerformButtonClick(panel->commandAddB);
+		WMSetTextFieldText(panel->commandT, "second");
+		WMSetTextFieldText(panel->commandShortcutT, "Control+X Y");
+		commandChanged(panel, NULL);
+		assert(commandValidationError(panel) != NULL);
+		WMPerformButtonClick(panel->commandRemoveB);
+		assert(commandValidationError(panel) == NULL);
+		WMSelectListItem(panel->commandLs, 0);
+		commandSelection(panel);
+		WMPerformButtonClick(panel->commandRemoveB);
+		storeData(panel);
+		assert(WMGetPropListItemCount(GetObjectForKey("CommandShortcuts")) == 0);
+		{
+			WMPropList *array = WMCreatePLArray(NULL, NULL);
+			WMPropList *invalid = WMCreatePLString("malformed");
+
+			WMAddToPLArray(array, invalid);
+			SetObjectForKey(array, "CommandShortcuts");
+			WMReleasePropList(invalid);
+			WMReleasePropList(array);
+		}
+		showCommands(panel);
+		WMPerformButtonClick(panel->commandAddB);
+		WMSetTextFieldText(panel->commandT, "echo test");
+		WMSetTextFieldText(panel->commandShortcutT, "Mod4+F7");
+		commandChanged(panel, NULL);
+		storeData(panel);
+		assert(WMIsPLString(WMGetFromPLArray(GetObjectForKey("CommandShortcuts"), 0)));
+		WMSelectTabViewItemAtIndex(panel->tabv, 0);
 		SetStringForKey("Mod4+R", "RunKey");
 		showData(panel);
 		assert(strcmp(panel->shortcuts[run], "Mod4+R") == 0);
@@ -180,6 +270,10 @@ static void testPanel(WMScreen *screen)
 		WMResizeWidget(testWindow, size.width + 4, size.height + 4);
 		checkBounds(WMWidgetView(panel->box));
 		WMRemoveNotificationObserver(panel);
+		while (WMGetListNumberOfRows(panel->commandLs)) {
+			freeCommandItem(WMGetListItem(panel->commandLs, 0)->clientData);
+			WMRemoveListItem(panel->commandLs, 0);
+		}
 		WMDestroyWidget(testWindow);
 		for (int row = 0; row < panel->actionCount; row++)
 			if (panel->shortcuts[row])

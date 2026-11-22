@@ -63,6 +63,7 @@
 #include "misc.h"
 #include "winmenu.h"
 #include "rootmenu.h"
+#include "startup.h"
 
 typedef struct _WDefaultEntry  WDefaultEntry;
 typedef int (WDECallbackConvert) (WScreen *scr, WDefaultEntry *entry, WMPropList *plvalue, void *addr, void **tdata);
@@ -101,6 +102,15 @@ static WDECallbackConvert getColor;
 static WDECallbackConvert getKeybind;
 static WDECallbackConvert getModMask;
 static WDECallbackConvert getPropList;
+
+typedef struct CommandShortcut {
+	WShortKey key;
+	char *command;
+	struct CommandShortcut *next;
+} CommandShortcut;
+
+static CommandShortcut *commandShortcuts;
+static Bool readCommandShortcuts(WScreen *scr, WMPropList *dict, Bool force);
 
 /* value setting functions */
 static WDECallbackUpdate setJustify;
@@ -1295,6 +1305,17 @@ void wReadDefaults(WScreen * scr, WMPropList * new_dict)
 		}
 	}
 
+	{
+		WMPropList *key = WMCreatePLString("CommandShortcuts");
+		WMPropList *current = new_dict ? WMGetFromPLDictionary(new_dict, key) : NULL;
+		WMPropList *previous = old_dict ? WMGetFromPLDictionary(old_dict, key) : NULL;
+
+		if (!old_dict || (current != previous &&
+		    (!current || !previous || !WMIsPropListEqualTo(current, previous))))
+			readCommandShortcuts(scr, new_dict, True);
+		WMReleasePropList(key);
+	}
+
 	if (needs_refresh != 0 && !scr->flags.startup) {
 		int foo;
 
@@ -1403,7 +1424,8 @@ void wReadKeybindings(WScreen *scr, WMPropList *dict)
 		}
 	}
 
-	if (keybindings_changed)
+	/* Reparse command bindings as their keycodes may also have changed. */
+	if (!readCommandShortcuts(scr, dict, False) && keybindings_changed)
 		wKeyTreeRebuild(scr);
 }
 
@@ -1437,10 +1459,19 @@ void wDefaultUpdateIcons(WScreen *scr)
 void wKeyTreeRebuild(WScreen *scr)
 {
 	int i;
+	CommandShortcut *shortcut;
 
 	/* Parameter not used */
 	(void)scr;
 
+	if (w_global.shortcut.curpos) {
+		if (w_global.shortcut.chain_timeout_handler) {
+			WMDeleteTimerHandler(w_global.shortcut.chain_timeout_handler);
+			w_global.shortcut.chain_timeout_handler = NULL;
+		}
+		XUngrabKeyboard(dpy, CurrentTime);
+		w_global.shortcut.curpos = NULL;
+	}
 	wKeyTreeDestroy(wKeyTreeRoot);
 	wKeyTreeRoot = NULL;
 
@@ -1482,6 +1513,138 @@ void wKeyTreeRebuild(WScreen *scr)
 
 	/* Insert root-menu shortcuts */
 	wRootMenuInsertIntoTree();
+
+	for (shortcut = commandShortcuts; shortcut; shortcut = shortcut->next) {
+		WShortKey *k = &shortcut->key;
+		int len = k->chain_length, j;
+		unsigned int *mods = wmalloc(len * sizeof(*mods));
+		KeyCode *keys = wmalloc(len * sizeof(*keys));
+		WKeyNode *leaf;
+		WKeyAction *action;
+
+		mods[0] = k->modifier;
+		keys[0] = k->keycode;
+		for (j = 1; j < len; j++) {
+			mods[j] = k->chain_modifiers[j - 1];
+			keys[j] = k->chain_keycodes[j - 1];
+		}
+		leaf = wKeyTreeInsert(&wKeyTreeRoot, mods, keys, len);
+		action = wKeyNodeAddAction(leaf, WKN_COMMAND);
+		action->u.command = wstrdup(shortcut->command);
+		wfree(mods);
+		wfree(keys);
+	}
+}
+
+void wCommandShortcutsBind(Window window)
+{
+	CommandShortcut *shortcut;
+
+	for (shortcut = commandShortcuts; shortcut; shortcut = shortcut->next) {
+		WShortKey *key = &shortcut->key;
+		if (key->modifier != AnyModifier) {
+			XGrabKey(dpy, key->keycode, key->modifier | LockMask, window,
+				 True, GrabModeAsync, GrabModeAsync);
+#ifdef NUMLOCK_HACK
+			wHackedGrabKey(key->keycode, key->modifier, window,
+				       True, GrabModeAsync, GrabModeAsync);
+#endif
+		}
+		XGrabKey(dpy, key->keycode, key->modifier, window,
+			 True, GrabModeAsync, GrabModeAsync);
+	}
+}
+
+static void freeCommandShortcuts(CommandShortcut *list)
+{
+	while (list) {
+		CommandShortcut *next = list->next;
+
+		wShortKeyFree(&list->key);
+		wfree(list->command);
+		wfree(list);
+		list = next;
+	}
+}
+
+static Bool sameCommandShortcuts(CommandShortcut *a, CommandShortcut *b)
+{
+	for (; a && b; a = a->next, b = b->next) {
+		int n = a->key.chain_length - 1;
+
+		if (a->key.keycode != b->key.keycode || a->key.modifier != b->key.modifier ||
+		    a->key.chain_length != b->key.chain_length || strcmp(a->command, b->command) ||
+		    (n > 0 && (memcmp(a->key.chain_modifiers, b->key.chain_modifiers,
+				       n * sizeof(unsigned int)) ||
+			       memcmp(a->key.chain_keycodes, b->key.chain_keycodes, n * sizeof(KeyCode)))))
+			return False;
+	}
+	return !a && !b;
+}
+
+static Bool readCommandShortcuts(WScreen *scr, WMPropList *dict, Bool force)
+{
+	WMPropList *name = WMCreatePLString("CommandShortcuts");
+	WMPropList *array = dict ? WMGetFromPLDictionary(dict, name) : NULL;
+	CommandShortcut *list = NULL, *shortcut, **tail = &list;
+	WDefaultEntry entry = { "CommandShortcuts", "None", NULL, NULL, NULL, NULL, NULL, NULL };
+	WWindow *window;
+	int i;
+
+	WMReleasePropList(name);
+	if (array && !WMIsPLArray(array)) {
+		wwarning(_("Wrong option format for key \"%s\". Should be %s."),
+			 "CommandShortcuts", "array");
+		array = NULL;
+	}
+	for (i = 0; array && i < WMGetPropListItemCount(array); i++) {
+		WMPropList *pair = WMGetFromPLArray(array, i);
+		WMPropList *binding, *command;
+		WShortKey *key;
+		void *result;
+
+		if (!WMIsPLArray(pair) || WMGetPropListItemCount(pair) != 2 ||
+		    !(binding = WMGetFromPLArray(pair, 0)) || !WMIsPLString(binding) ||
+		    !(command = WMGetFromPLArray(pair, 1)) || !WMIsPLString(command) ||
+		    !*WMGetFromPLString(command) ||
+		    strspn(WMGetFromPLString(command), " \t\r\n") == strlen(WMGetFromPLString(command)) ||
+		    strlen(WMGetFromPLString(binding)) >= MAX_SHORTCUT_LENGTH ||
+		    !getKeybind(scr, &entry, binding, NULL, &result)) {
+			wwarning(_("Invalid entry in CommandShortcuts at index %d"), i);
+			continue;
+		}
+		key = result;
+		if (!key->keycode) {
+			wwarning(_("Invalid entry in CommandShortcuts at index %d"), i);
+			continue;
+		}
+		shortcut = wmalloc(sizeof(*shortcut));
+		shortcut->key = *key;
+		if (key->chain_length > 1) {
+			int n = key->chain_length - 1;
+			shortcut->key.chain_modifiers = wmalloc(n * sizeof(unsigned int));
+			shortcut->key.chain_keycodes = wmalloc(n * sizeof(KeyCode));
+			memcpy(shortcut->key.chain_modifiers, key->chain_modifiers, n * sizeof(unsigned int));
+			memcpy(shortcut->key.chain_keycodes, key->chain_keycodes, n * sizeof(KeyCode));
+		}
+		shortcut->command = wstrdup(WMGetFromPLString(command));
+		shortcut->next = NULL;
+		*tail = shortcut;
+		tail = &shortcut->next;
+	}
+	if (!force && sameCommandShortcuts(commandShortcuts, list)) {
+		freeCommandShortcuts(list);
+		return False;
+	}
+	freeCommandShortcuts(commandShortcuts);
+	commandShortcuts = list;
+	for (window = scr->focused_window; window; window = window->prev) {
+		XUngrabKey(dpy, AnyKey, AnyModifier, window->frame->core->window);
+		if (!WFLAGP(window, no_bind_keys))
+			wWindowSetKeyGrabs(window);
+	}
+	wKeyTreeRebuild(scr);
+	return True;
 }
 
 /* --------------------------- Local ----------------------- */

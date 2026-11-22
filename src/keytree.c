@@ -78,6 +78,8 @@ void wKeyTreeDestroy(WKeyNode *node)
 		wKeyTreeDestroy(node->first_child);
 		for (act = node->actions; act != NULL; act = next_act) {
 			next_act = act->next;
+			if (act->type == WKN_COMMAND)
+				wfree(act->u.command);
 			wfree(act);
 		}
 		wfree(node);

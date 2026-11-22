@@ -126,7 +126,7 @@ paths_test_LDADD = $(WPrefs_LDADD)
 configurations_test_SOURCES = configurations_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 configurations_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 configurations_test_LDADD = $(WPrefs_LDADD)
-keyboard_shortcuts_test_SOURCES = keyboard_shortcuts_test.c PanelLayout.c PanelLayout.h
+keyboard_shortcuts_test_SOURCES = keyboard_shortcuts_test.c PanelLayout.c PanelLayout.h xmodifier.c
 keyboard_shortcuts_test_CPPFLAGS = $(AM_CPPFLAGS)
 keyboard_shortcuts_test_LDADD = $(WPrefs_LDADD)
 hot_corner_test_SOURCES = hot_corner_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h

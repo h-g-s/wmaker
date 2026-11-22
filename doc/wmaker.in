@@ -66,6 +66,15 @@ specify the ID of the visual to use; see
 .BR xdpyinfo (1)
 for a list of visuals available in your display
 .PP
+.SH COMMAND SHORTCUTS
+The Keyboard Shortcut Preferences panel can bind a shortcut or key chain to a
+shell command on its Commands tab. Commands are executed by \fB/bin/sh\fP.
+Bindings are stored in the WindowMaker defaults as an array of shortcut and
+command pairs, for example:
+.EX
+CommandShortcuts = (("Mod4+T", "xterm"), ("Control+X C", "xterm -e top"));
+.EE
+Avoid using a shortcut that is also assigned to an action or menu entry.
 .SH FILES
 .TP
 .B ~/GNUstep/Defaults/WindowMaker

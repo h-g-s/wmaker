@@ -22,12 +22,19 @@
 
 #include "WPrefs.h"
 #include "PanelLayout.h"
+#include "../src/keybind.h"
 #include <ctype.h>
 #include <sys/select.h>
 #include <sys/time.h>
 
 #include <X11/keysym.h>
 #include <X11/XKBlib.h>
+
+typedef struct {
+	char *command;
+	char *shortcut;
+	WMPropList *invalid;
+} CommandItem;
 
 typedef struct _Panel {
 	WMBox *box;
@@ -40,7 +47,7 @@ typedef struct _Panel {
 
 	WMWidget *parent;
 
-	WMLabel *actL;
+	WMTabView *tabv;
 	WMList *actLs;
 
 	WMFrame *shoF;
@@ -49,6 +56,17 @@ typedef struct _Panel {
 	WMButton *defB;
 
 	WMLabel *instructionsL;
+	WMList *commandLs;
+	WMTextField *commandT;
+	WMTextField *commandShortcutT;
+	WMButton *commandAddB;
+	WMButton *commandRemoveB;
+	WMButton *commandClearB;
+	WMButton *commandCaptureB;
+	WMLabel *commandInstructionsL;
+	Bool updatingCommand;
+	Bool commandsDirty;
+	Bool commandsInvalid;
 
 	WMColor *white;
 	WMColor *black;
@@ -486,10 +504,17 @@ static void captureClick(WMWidget * w, void *data)
 	char *shortcut;
 
 	if (!panel->capturing) {
+		if (XGrabKeyboard(dpy, WMWidgetXID(panel->parent), True, GrabModeAsync,
+				  GrabModeAsync, CurrentTime) != GrabSuccess) {
+			WMRunAlertPanel(WMWidgetScreen(w), GetWindow(), _("Error"),
+					_("Could not capture the keyboard shortcut."),
+					_("OK"), NULL, NULL);
+			return;
+		}
 		panel->capturing = 1;
 		WMSetButtonText(w, _("Cancel"));
 		WMSetLabelText(panel->instructionsL, _(captureInstructions));
-		XGrabKeyboard(dpy, WMWidgetXID(panel->parent), True, GrabModeAsync, GrabModeAsync, CurrentTime);
+		WMSetTabViewEnabled(panel->tabv, False);
 		shortcut = capture_shortcut(dpy, &panel->capturing, 1);
 		if (shortcut) {
 			int key_idx = -1;
@@ -523,6 +548,7 @@ static void captureClick(WMWidget * w, void *data)
 	panel->capturing = 0;
 	WMSetButtonText(w, _("Capture"));
 	WMSetLabelText(panel->instructionsL, _(shortcutInstructions));
+	WMSetTabViewEnabled(panel->tabv, True);
 	XUngrabKeyboard(dpy, CurrentTime);
 }
 
@@ -576,6 +602,270 @@ static void listClick(WMWidget * w, void *data)
 	WMSetTextFieldText(panel->shoT, panel->shortcuts[row]);
 }
 
+static void freeCommandItem(CommandItem *item)
+{
+	if (item->invalid)
+		WMReleasePropList(item->invalid);
+	wfree(item->command);
+	wfree(item->shortcut);
+	wfree(item);
+}
+
+typedef struct {
+	KeyCode keys[MAX_SHORTCUT_LENGTH];
+	unsigned int mods[MAX_SHORTCUT_LENGTH];
+	int count;
+} ShortcutSequence;
+
+static Bool parseShortcut(Display *dpy, const char *text, ShortcutSequence *sequence)
+{
+	char buffer[MAX_SHORTCUT_LENGTH], *token, *save;
+
+	sequence->count = 0;
+	if (!text || strlen(text) >= sizeof(buffer))
+		return False;
+	wstrlcpy(buffer, text, sizeof(buffer));
+	for (token = strtok_r(buffer, " ", &save); token; token = strtok_r(NULL, " ", &save)) {
+		char *part = token, *next;
+		unsigned int mods = 0;
+		KeySym symbol;
+		KeyCode key;
+
+		while ((next = strchr(part, '+'))) {
+			int index;
+			*next = '\0';
+			index = ModifierFromKey(dpy, part);
+			if (index < 0 || index > 7)
+				return False;
+			mods |= 1U << index;
+			part = next + 1;
+		}
+		symbol = XStringToKeysym(part);
+		if (symbol == NoSymbol || !(key = XKeysymToKeycode(dpy, symbol)))
+			return False;
+		sequence->mods[sequence->count] = mods;
+		sequence->keys[sequence->count++] = key;
+	}
+	return sequence->count > 0;
+}
+
+static Bool sequencesConflict(const ShortcutSequence *a, const ShortcutSequence *b)
+{
+	int i, count = WMIN(a->count, b->count);
+
+	for (i = 0; i < count; i++)
+		if (a->keys[i] != b->keys[i] || a->mods[i] != b->mods[i])
+			return False;
+	return True;
+}
+
+static Bool commandShortcutConflict(_Panel *panel, ShortcutSequence *sequence, CommandItem *except)
+{
+	Display *dpy = WMScreenDisplay(WMWidgetScreen(panel->parent));
+	ShortcutSequence other;
+	int i;
+
+	for (i = 0; i < panel->actionCount; i++)
+		if (parseShortcut(dpy, panel->shortcuts[i], &other) && sequencesConflict(sequence, &other))
+			return True;
+	for (i = 0; i < WMGetListNumberOfRows(panel->commandLs); i++) {
+		CommandItem *item = WMGetListItem(panel->commandLs, i)->clientData;
+		if (item != except && !item->invalid &&
+		    parseShortcut(dpy, item->shortcut, &other) && sequencesConflict(sequence, &other))
+			return True;
+	}
+	return False;
+}
+
+static const char *commandValidationError(_Panel *panel)
+{
+	Display *dpy = WMScreenDisplay(WMWidgetScreen(panel->parent));
+	int i;
+
+	for (i = 0; i < WMGetListNumberOfRows(panel->commandLs); i++) {
+		CommandItem *item = WMGetListItem(panel->commandLs, i)->clientData;
+		ShortcutSequence sequence;
+		char *command;
+		Bool empty;
+
+		if (item->invalid)
+			continue;
+		command = wtrimspace(item->command);
+		empty = !*command;
+		wfree(command);
+		if (empty || !parseShortcut(dpy, item->shortcut, &sequence))
+			return _("Each command must have a command and a valid shortcut.");
+		if (commandShortcutConflict(panel, &sequence, item))
+			return _("A command shortcut conflicts with another shortcut or key chain.");
+	}
+	return NULL;
+}
+
+static void commandSelection(_Panel *panel)
+{
+	WMListItem *row = WMGetListSelectedItem(panel->commandLs);
+	CommandItem *item = row ? row->clientData : NULL;
+	Bool editable = item && !item->invalid;
+
+	panel->capturing = False;
+	panel->updatingCommand = True;
+	WMSetTextFieldText(panel->commandT, editable ? item->command : "");
+	WMSetTextFieldText(panel->commandShortcutT, editable ? item->shortcut : "");
+	panel->updatingCommand = False;
+	WMSetTextFieldEditable(panel->commandT, editable);
+	WMSetTextFieldEditable(panel->commandShortcutT, editable);
+	WMSetButtonEnabled(panel->commandRemoveB, item != NULL);
+	WMSetButtonEnabled(panel->commandClearB, editable);
+	WMSetButtonEnabled(panel->commandCaptureB, editable);
+}
+
+static void commandListClick(WMWidget *w, void *data)
+{
+	(void)w;
+	commandSelection(data);
+}
+
+static void commandChanged(void *data, WMNotification *notification)
+{
+	_Panel *panel = data;
+	WMListItem *row = WMGetListSelectedItem(panel->commandLs);
+	CommandItem *item;
+
+	(void)notification;
+	if (panel->updatingCommand || !row)
+		return;
+	item = row->clientData;
+	if (item->invalid)
+		return;
+	wfree(item->command);
+	wfree(item->shortcut);
+	item->command = WMGetTextFieldText(panel->commandT);
+	item->shortcut = WMGetTextFieldText(panel->commandShortcutT);
+	wfree(row->text);
+	row->text = wstrdup(*item->command ? item->command : _("New command"));
+	panel->commandsDirty = True;
+	WMRedisplayWidget(panel->commandLs);
+}
+
+static void addCommandItem(_Panel *panel, const char *shortcut, const char *command, WMPropList *invalid)
+{
+	CommandItem *item = wmalloc(sizeof(*item));
+	WMListItem *row;
+
+	item->command = wstrdup(command ? command : "");
+	item->shortcut = wstrdup(shortcut ? shortcut : "");
+	item->invalid = invalid ? WMRetainPropList(invalid) : NULL;
+	row = WMAddListItem(panel->commandLs, invalid ? _("Invalid command shortcut") :
+			    (*item->command ? item->command : _("New command")));
+	row->clientData = item;
+}
+
+static void commandButtonClick(WMWidget *w, void *data)
+{
+	_Panel *panel = data;
+	int row = WMGetListSelectedItemRow(panel->commandLs);
+
+	if (w == panel->commandAddB) {
+		addCommandItem(panel, "", "", NULL);
+		row = WMGetListNumberOfRows(panel->commandLs) - 1;
+		WMSelectListItem(panel->commandLs, row);
+		WMSetListBottomPosition(panel->commandLs, row);
+	} else if (w == panel->commandRemoveB && row >= 0) {
+		freeCommandItem(WMGetListItem(panel->commandLs, row)->clientData);
+		WMRemoveListItem(panel->commandLs, row);
+		if (WMGetListNumberOfRows(panel->commandLs) > 0) {
+			row = WMIN(row, WMGetListNumberOfRows(panel->commandLs) - 1);
+			WMSelectListItem(panel->commandLs, row);
+		}
+	}
+	panel->commandsDirty = True;
+	commandSelection(panel);
+}
+
+static void clearCommandShortcut(WMWidget *w, void *data)
+{
+	_Panel *panel = data;
+	(void)w;
+	panel->capturing = False;
+	WMSetTextFieldText(panel->commandShortcutT, "");
+	commandChanged(panel, NULL);
+}
+
+static void captureCommandShortcut(WMWidget *w, void *data)
+{
+	_Panel *panel = data;
+	Display *dpy = WMScreenDisplay(WMWidgetScreen(panel->parent));
+	char *shortcut;
+
+	if (!panel->capturing) {
+		if (XGrabKeyboard(dpy, WMWidgetXID(panel->parent), True, GrabModeAsync,
+				  GrabModeAsync, CurrentTime) != GrabSuccess) {
+			WMRunAlertPanel(WMWidgetScreen(w), GetWindow(), _("Error"),
+					_("Could not capture the keyboard shortcut."),
+					_("OK"), NULL, NULL);
+			return;
+		}
+		panel->capturing = True;
+		WMSetButtonText(w, _("Cancel"));
+		WMSetLabelText(panel->commandInstructionsL, _(captureInstructions));
+		WMSetTabViewEnabled(panel->tabv, False);
+		shortcut = capture_shortcut(dpy, &panel->capturing, True);
+		if (shortcut) {
+			int index = isKeySet(panel, shortcut);
+
+			if (index >= 0) {
+				char *msg = wstrconcat(_("Key shortcut already in use by the "),
+						       _(keyOptions[index].title));
+				WMRunAlertPanel(WMWidgetScreen(w), GetWindow(), _("Error"), msg, _("OK"), NULL, NULL);
+				wfree(msg);
+			} else {
+				WMSetTextFieldText(panel->commandShortcutT, shortcut);
+				commandChanged(panel, NULL);
+			}
+			wfree(shortcut);
+		}
+	}
+	panel->capturing = False;
+	WMSetButtonText(w, _("Capture"));
+	WMSetLabelText(panel->commandInstructionsL, _(shortcutInstructions));
+	WMSetTabViewEnabled(panel->tabv, True);
+	XUngrabKeyboard(dpy, CurrentTime);
+}
+
+static void showCommands(_Panel *panel)
+{
+	WMPropList *array = GetObjectForKey("CommandShortcuts");
+	int i;
+
+	while (WMGetListNumberOfRows(panel->commandLs)) {
+		freeCommandItem(WMGetListItem(panel->commandLs, 0)->clientData);
+		WMRemoveListItem(panel->commandLs, 0);
+	}
+	if (array && !WMIsPLArray(array)) {
+		wwarning(_("Wrong option format for CommandShortcuts; expected an array."));
+		panel->commandsInvalid = True;
+		WMSetButtonEnabled(panel->commandAddB, False);
+		commandSelection(panel);
+		return;
+	}
+	panel->commandsInvalid = False;
+	WMSetButtonEnabled(panel->commandAddB, True);
+	for (i = 0; array && i < WMGetPropListItemCount(array); i++) {
+		WMPropList *pair = WMGetFromPLArray(array, i);
+		WMPropList *shortcut, *command;
+
+		if (!WMIsPLArray(pair) || WMGetPropListItemCount(pair) != 2 ||
+		    !(shortcut = WMGetFromPLArray(pair, 0)) || !WMIsPLString(shortcut) ||
+		    !(command = WMGetFromPLArray(pair, 1)) || !WMIsPLString(command)) {
+			addCommandItem(panel, NULL, NULL, pair);
+			continue;
+		}
+		addCommandItem(panel, WMGetFromPLString(shortcut), WMGetFromPLString(command), NULL);
+	}
+	panel->commandsDirty = False;
+	commandSelection(panel);
+}
+
 static void showData(_Panel * panel)
 {
 	char *str;
@@ -598,6 +888,7 @@ static void showData(_Panel * panel)
 		}
 	}
 	WMRedisplayWidget(panel->actLs);
+	showCommands(panel);
 }
 
 static void paintItem(WMList * lPtr, int index, Drawable d, char *text, int state, WMRect * rect)
@@ -640,16 +931,109 @@ static int cmpKeyOptions(const void *v1, const void *v2)
 	return 0;
 }
 
+static WMSize createCommandPage(_Panel *panel)
+{
+	WMFrame *frame = WMCreateFrame(panel->box);
+	WMTabViewItem *tab = WMCreateTabViewItemWithIdentifier(1);
+	WMBox *page = WMCreateBox(frame), *left = WMCreateBox(page);
+	WMBox *buttons = WMCreateBox(left), *editorButtons, *spacer;
+	WPrefsGroup editor;
+	WMLabel *label;
+	WMSize field, clear, capture, cancel, instructions, active, size;
+	int rowHeight = WMFontHeight(panel->font) + 4;
+	int width;
+
+	WMSetFrameRelief(frame, WRFlat);
+	WMSetTabViewItemView(tab, WMWidgetView(frame));
+	WMSetTabViewItemLabel(tab, _("Commands"));
+	WMAddItemInTabView(panel->tabv, tab);
+	WMSetBoxBorderWidth(page, 10);
+	WMSetBoxHorizontal(page, True);
+	panel->commandLs = WMCreateList(left);
+	WMSetListAction(panel->commandLs, commandListClick, panel);
+	width = WMWidthOfString(panel->font, "M", 1) * 28;
+	WMPackBoxSubview(left, panel->commandLs, wmksize(width, rowHeight * 10 + 4), True, 8);
+	WMSetBoxHorizontal(buttons, True);
+	panel->commandAddB = WMCreateCommandButton(buttons);
+	WMSetButtonText(panel->commandAddB, _("Add"));
+	WMSetButtonAction(panel->commandAddB, commandButtonClick, panel);
+	panel->commandRemoveB = WMCreateCommandButton(buttons);
+	WMSetButtonText(panel->commandRemoveB, _("Remove"));
+	WMSetButtonAction(panel->commandRemoveB, commandButtonClick, panel);
+	spacer = WMCreateBox(buttons);
+	WMPackBoxSubview(buttons, spacer, wmksize(1, 1), True, 0);
+	WPrefsPackButton(buttons, panel->commandAddB, 8);
+	WPrefsPackButton(buttons, panel->commandRemoveB, 0);
+	WMPackBoxSubview(left, buttons, WMGetBoxMinimumSize(buttons), False, 0);
+	WMPackBoxSubview(page, left, WMGetBoxMinimumSize(left), True, 12);
+
+	editor = WPrefsCreateGroup(page, _("Command"));
+	label = WMCreateLabel(editor.content);
+	WMSetLabelText(label, _("Command:"));
+	WPrefsPackLabel(editor.content, label, 2);
+	panel->commandT = WMCreateTextField(editor.content);
+	WMSetBalloonTextForView(_("Commands are run by /bin/sh."), WMWidgetView(panel->commandT));
+	field = WMGetTextFieldPreferredSize(panel->commandT, 24);
+	WMPackBoxSubview(editor.content, panel->commandT, field, False, 10);
+	WMAddNotificationObserver(commandChanged, panel, WMTextDidChangeNotification, panel->commandT);
+	label = WMCreateLabel(editor.content);
+	WMSetLabelText(label, _("Shortcut:"));
+	WPrefsPackLabel(editor.content, label, 2);
+	panel->commandShortcutT = WMCreateTextField(editor.content);
+	WMPackBoxSubview(editor.content, panel->commandShortcutT, field, False, 10);
+	WMAddNotificationObserver(commandChanged, panel, WMTextDidChangeNotification, panel->commandShortcutT);
+	editorButtons = WMCreateBox(editor.content);
+	WMSetBoxHorizontal(editorButtons, True);
+	panel->commandClearB = WMCreateCommandButton(editorButtons);
+	WMSetButtonText(panel->commandClearB, _("Clear"));
+	WMSetButtonAction(panel->commandClearB, clearCommandShortcut, panel);
+	clear = WMGetButtonPreferredSize(panel->commandClearB);
+	panel->commandCaptureB = WMCreateCommandButton(editorButtons);
+	WMSetButtonText(panel->commandCaptureB, _("Cancel"));
+	cancel = WMGetButtonPreferredSize(panel->commandCaptureB);
+	WMSetButtonText(panel->commandCaptureB, _("Capture"));
+	capture = WMGetButtonPreferredSize(panel->commandCaptureB);
+	capture.width = WMAX(capture.width, cancel.width);
+	capture.height = WMAX(capture.height, cancel.height);
+	WMSetButtonAction(panel->commandCaptureB, captureCommandShortcut, panel);
+	WMPackBoxSubview(editorButtons, panel->commandClearB, clear, True, 8);
+	WMPackBoxSubview(editorButtons, panel->commandCaptureB, capture, True, 0);
+	WMPackBoxSubview(editor.content, editorButtons, WMGetBoxMinimumSize(editorButtons), False, 12);
+	panel->commandInstructionsL = WMCreateLabel(editor.content);
+	WMSetLabelWraps(panel->commandInstructionsL, True);
+	WMSetLabelTextAlignment(panel->commandInstructionsL, WACenter);
+	width = WMAX(field.width, WMGetBoxMinimumSize(editorButtons).width);
+	WMSetLabelText(panel->commandInstructionsL, _(captureInstructions));
+	active = WMGetLabelPreferredSizeForWidth(panel->commandInstructionsL, width);
+	WMSetLabelText(panel->commandInstructionsL, _(shortcutInstructions));
+	instructions = WMGetLabelPreferredSizeForWidth(panel->commandInstructionsL, width);
+	instructions.height = WMAX(instructions.height, active.height);
+	WMPackBoxSubview(editor.content, panel->commandInstructionsL, instructions, False, 0);
+	spacer = WMCreateBox(editor.content);
+	WMPackBoxSubview(editor.content, spacer, wmksize(1, 1), True, 0);
+	WPrefsPackGroup(page, &editor, False, 0);
+
+	size = WMGetBoxMinimumSize(page);
+	WMResizeWidget(frame, size.width, size.height);
+	WMSetViewExpandsToParent(WMWidgetView(page), 0, 0, 0, 0);
+	WMMapSubwidgets(buttons);
+	WMMapSubwidgets(left);
+	WMMapSubwidgets(editorButtons);
+	WMMapSubwidgets(page);
+	WMMapSubwidgets(frame);
+	return size;
+}
 
 static void createPanel(Panel * p)
 {
 	_Panel *panel = (_Panel *) p;
 	WMScreen *scr = WMWidgetScreen(panel->parent);
-	WMColor *color;
-	WMFont *boldFont;
-	WMBox *actions, *buttons, *spacer;
+	WMFrame *actionFrame;
+	WMTabViewItem *tab;
+	WMBox *page, *actions, *buttons, *spacer;
 	WPrefsGroup shortcut;
 	WMSize fieldSize, clearSize, captureSize, cancelSize, instructionsSize, activeSize;
+	WMSize actionSize, commandSize, tabSize;
 	int i, listWidth = 0, rowHeight, editorWidth;
 
 	panel->capturing = 0;
@@ -662,22 +1046,20 @@ static void createPanel(Panel * p)
 	rowHeight = WMFontHeight(panel->font) + 4;
 
 	panel->box = WPrefsCreatePanelBox(panel->parent);
-	WMSetBoxHorizontal(panel->box, True);
-	actions = WMCreateBox(panel->box);
-
-	boldFont = WMDefaultBoldSystemFont(scr);
+	panel->tabv = WMCreateTabView(panel->box);
+	WMSetTabViewFont(panel->tabv, panel->font);
+	actionFrame = WMCreateFrame(panel->box);
+	WMSetFrameRelief(actionFrame, WRFlat);
+	tab = WMCreateTabViewItemWithIdentifier(0);
+	WMSetTabViewItemView(tab, WMWidgetView(actionFrame));
+	WMSetTabViewItemLabel(tab, _("Actions"));
+	WMAddItemInTabView(panel->tabv, tab);
+	page = WMCreateBox(actionFrame);
+	WMSetBoxBorderWidth(page, 10);
+	WMSetBoxHorizontal(page, True);
+	actions = WMCreateBox(page);
 
 	/* **************** Actions **************** */
-	panel->actL = WMCreateLabel(actions);
-	WMSetLabelFont(panel->actL, boldFont);
-	WMSetLabelText(panel->actL, _("Actions"));
-	WMSetLabelRelief(panel->actL, WRSunken);
-	WMSetLabelTextAlignment(panel->actL, WACenter);
-	color = WMDarkGrayColor(scr);
-	WMSetWidgetBackgroundColor(panel->actL, color);
-	WMReleaseColor(color);
-	WMSetLabelTextColor(panel->actL, panel->white);
-
 	panel->actLs = WMCreateList(actions);
 	WMSetListUserDrawProc(panel->actLs, paintItem);
 	WMSetListUserDrawItemHeight(panel->actLs, rowHeight);
@@ -693,15 +1075,14 @@ static void createPanel(Panel * p)
 
 	panel->actionCount = WMGetListNumberOfRows(panel->actLs);
 	panel->shortcuts = wmalloc(sizeof(char *) * panel->actionCount);
-	WPrefsPackLabel(actions, panel->actL, 2);
 	WMPackBoxSubview(actions, panel->actLs,
 			 wmksize(listWidth + panel->indicatorWidth + WMGetScrollerWidth(WMGetListScroller(panel->actLs)) + 4,
 				 rowHeight * 10 + 4), True, 0);
-	WMPackBoxSubview(panel->box, actions, WMGetBoxMinimumSize(actions), True, 12);
+	WMPackBoxSubview(page, actions, WMGetBoxMinimumSize(actions), True, 12);
 
     /***************** Shortcut ****************/
 
-	shortcut = WPrefsCreateGroup(panel->box, _("Shortcut"));
+	shortcut = WPrefsCreateGroup(page, _("Shortcut"));
 	panel->shoF = shortcut.frame;
 
 	panel->shoT = WMCreateTextField(shortcut.content);
@@ -740,11 +1121,18 @@ static void createPanel(Panel * p)
 	WMPackBoxSubview(shortcut.content, panel->instructionsL, instructionsSize, False, 0);
 	spacer = WMCreateBox(shortcut.content);
 	WMPackBoxSubview(shortcut.content, spacer, wmksize(1, 1), True, 0);
-	WPrefsPackGroup(panel->box, &shortcut, False, 0);
+	WPrefsPackGroup(page, &shortcut, False, 0);
 	WMMapSubwidgets(buttons);
 	WMMapSubwidgets(actions);
-
-	WMReleaseFont(boldFont);
+	actionSize = WMGetBoxMinimumSize(page);
+	WMResizeWidget(actionFrame, actionSize.width, actionSize.height);
+	WMSetViewExpandsToParent(WMWidgetView(page), 0, 0, 0, 0);
+	WMMapSubwidgets(page);
+	WMMapSubwidgets(actionFrame);
+	commandSize = createCommandPage(panel);
+	tabSize = WMGetTabViewPreferredSize(panel->tabv,
+		wmksize(WMAX(actionSize.width, commandSize.width), WMAX(actionSize.height, commandSize.height)));
+	WMPackBoxSubview(panel->box, panel->tabv, tabSize, True, 0);
 
 	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
@@ -756,6 +1144,17 @@ static void storeData(_Panel * panel)
 {
 	int i;
 	char *str;
+	const char *error = commandValidationError(panel);
+
+	if (error || panel->commandsInvalid) {
+		char *message = wstrconcat(error ? error : _("The command shortcut settings are invalid."),
+					   _(" Keyboard shortcut changes were not saved."));
+
+		WMRunAlertPanel(WMWidgetScreen(panel->parent), GetWindow(), _("Error"),
+				message, _("OK"), NULL, NULL);
+		wfree(message);
+		return;
+	}
 
 	for (i = 0; i < panel->actionCount; i++) {
 		str = NULL;
@@ -773,6 +1172,29 @@ static void storeData(_Panel * panel)
 			SetStringForKey("None", keyOptions[i].key);
 		}
 	}
+	if (panel->commandsDirty) {
+		WMPropList *array = WMCreatePLArray(NULL, NULL);
+
+		for (i = 0; i < WMGetListNumberOfRows(panel->commandLs); i++) {
+			CommandItem *item = WMGetListItem(panel->commandLs, i)->clientData;
+			WMPropList *pair, *shortcut, *command;
+
+			if (item->invalid) {
+				WMAddToPLArray(array, item->invalid);
+				continue;
+			}
+			shortcut = WMCreatePLString(item->shortcut);
+			command = WMCreatePLString(item->command);
+			pair = WMCreatePLArray(shortcut, command, NULL);
+			WMAddToPLArray(array, pair);
+			WMReleasePropList(pair);
+			WMReleasePropList(shortcut);
+			WMReleasePropList(command);
+		}
+		SetObjectForKey(array, "CommandShortcuts");
+		WMReleasePropList(array);
+		panel->commandsDirty = False;
+	}
 }
 
 Panel *InitKeyboardShortcuts(WMWidget *parent)
@@ -783,8 +1205,7 @@ Panel *InitKeyboardShortcuts(WMWidget *parent)
 
 	panel->sectionName = _("Keyboard Shortcut Preferences");
 
-	panel->description = _("Change the keyboard shortcuts for actions such\n"
-			       "as changing workspaces and opening menus.");
+	panel->description = _("Change keyboard shortcuts for actions and commands.");
 
 	panel->parent = parent;
 

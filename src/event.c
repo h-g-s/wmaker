@@ -2309,6 +2309,8 @@ static void handleKeyPress(XEvent * event)
 			WMenuEntry *entry = (WMenuEntry *) act->u.menu.entry;
 
 			(*entry->callback)(menu, entry);
+		} else if (act->type == WKN_COMMAND) {
+			ExecuteShellCommand(scr, act->u.command);
 		} else {
 			dispatchWKBDCommand(act->u.wkbd_idx, scr, wwin, event);
 		}

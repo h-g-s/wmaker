@@ -2764,6 +2764,7 @@ void wWindowSetKeyGrabs(WWindow * wwin)
 	}
 
 	wRootMenuBindShortcuts(wwin->frame->core->window);
+	wCommandShortcutsBind(wwin->frame->core->window);
 }
 
 void wWindowResetMouseGrabs(WWindow * wwin)

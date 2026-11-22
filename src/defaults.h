@@ -59,4 +59,5 @@ RImage *get_rimage_from_file(WScreen *scr, const char *file_name, int max_size);
 
 void wDefaultPurgeInfo(const char *instance, const char *class);
 void wKeyTreeRebuild(WScreen *scr);	/* Rebuild the key-chain trie from the current key bindings */
+void wCommandShortcutsBind(Window window);
 #endif /* WMDEFAULTS_H_ */
