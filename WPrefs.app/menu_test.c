@@ -190,6 +190,10 @@ int main(int argc, char **argv)
 		panel = (_Panel *)InitMenu(content);
 		assert(panel->callbacks.automaticLayout);
 		createPanel(panel);
+#ifdef HAVE_GIO
+		assert(((ItemData *)WGetEditMenuItemData(WGetEditMenuItem(panel->factory[0], 0)))->type ==
+		       ApplicationsInfo);
+#endif
 		assert(!panel->loaded && !panel->menu && !panel->menuPath);
 		assert(W_VIEW(panel->box)->flags.realized);
 		WMView *temporary = W_CreateUnmanagedTopView(screen);

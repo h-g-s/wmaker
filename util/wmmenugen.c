@@ -65,6 +65,7 @@ static void print_help(void)
 	puts("  --version\t\toutput version information and exit");
 	puts("  --applications\tgenerate the installed XDG Applications menu");
 	puts("  --category=<id>\tinclude only this desktop-entry category");
+	puts("  --no-cache\t\tgenerate without reading or writing the menu cache");
 	puts("  --no-icons\t\tomit icons from the Applications menu");
 	puts("  --icon-theme=<name>\tselect an icon theme");
 	puts("  --icon-size=<pixels>\tpreferred icon size (default: 24)");

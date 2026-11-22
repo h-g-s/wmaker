@@ -1,4 +1,5 @@
 import ast
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,166 @@ def icon(base, name, size=16):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"icon lookup fixture")
     return str(path)
+
+
+def test_cache(generator, root, original_env):
+    root = root / "cache-tests"
+    user, system, home, config = (root / name for name in ("user", "system", "home", "config"))
+    binary = root / "bin"
+    binary.mkdir(parents=True)
+    home.mkdir()
+    env = dict(original_env, HOME=str(home), XDG_DATA_HOME=str(user), XDG_DATA_DIRS=str(system),
+               XDG_CONFIG_HOME=str(config), XDG_CACHE_HOME=str(root / "cache"), LANGUAGE="",
+               PATH=f"{binary}:{original_env['PATH']}")
+    selected = theme(user, "Cached")
+    gtk = config / "gtk-4.0" / "settings.ini"
+    gtk.parent.mkdir(parents=True)
+    gtk.write_text("[Settings]\ngtk-icon-theme-name=Cached\n")
+    application = user / "applications" / "cached.desktop"
+    extra = "Categories=Network;\nIcon=late-icon\n"
+    desktop(application, "Original App", extra)
+
+    def generate(*args, warning=None):
+        result = subprocess.run([generator, "--applications", "--icon-size", "16", *args],
+                                env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        if warning:
+            assert warning in result.stderr, result.stderr
+        else:
+            assert not result.stderr, result.stderr
+        return result.stdout
+
+    probe = subprocess.run([generator, "--applications", "--icon-size", "16"], env=env,
+                           capture_output=True, text=True, timeout=15)
+    assert probe.returncode == 0, probe.stderr
+    if "menu caching is disabled" in probe.stderr:
+        print("SKIP: persistent menu caching needs high-resolution filesystem timestamps")
+        return
+    assert not probe.stderr, probe.stderr
+    output = probe.stdout
+    cache, = (root / "cache" / "WindowMaker" / "menus").glob("applications-*.cache")
+
+    def assert_hit():
+        before = cache.stat()
+        data = cache.read_bytes()
+        result = generate()
+        after = cache.stat()
+        assert (before.st_ino, before.st_mtime_ns, data) == (after.st_ino, after.st_mtime_ns, cache.read_bytes())
+        return result
+
+    assert assert_hit() == output
+    assert generate("--no-cache") == output
+    cache.write_text("broken cache\n")
+    assert generate("--no-cache") == output
+    assert cache.read_text() == "broken cache\n"
+    assert generate(warning="menu cache") == output
+    assert assert_hit() == output
+
+    before = application.stat()
+    desktop(application, "Modified App", extra)
+    os.utime(application, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert application.stat().st_size == before.st_size
+    assert entries(plist(generate())).keys() == {"Modified App"}
+    assert_hit()
+
+    nested = system / "applications" / "nested" / "tool.desktop"
+    desktop(nested, "Nested App")
+    assert "Nested App" in entries(plist(generate()))
+    assert_hit()
+    desktop(nested, "Changed Nested App")
+    assert "Changed Nested App" in entries(plist(generate()))
+    nested.unlink()
+    assert "Changed Nested App" not in entries(plist(generate()))
+
+    themed_icon = Path(icon(selected, "late-icon"))
+    assert entries(plist(generate()))["Modified App"][1:3] == ["ICON", str(themed_icon)]
+    assert_hit()
+    themed_icon.unlink()
+    assert entries(plist(generate()))["Modified App"][1] == "EXEC"
+    target = root / "target.png"
+    target.write_bytes(b"symlink target")
+    themed_icon.symlink_to(target)
+    assert entries(plist(generate()))["Modified App"][2] == str(themed_icon)
+    assert_hit()
+    target.unlink()
+    assert entries(plist(generate()))["Modified App"][1] == "EXEC"
+
+    absolute = root / "new-absolute.png"
+    desktop(user / "applications" / "absolute.desktop", "Absolute", f"Icon={absolute}\n")
+    assert entries(plist(generate()))["Absolute"][1] == "EXEC"
+    assert_hit()
+    absolute.write_bytes(b"absolute icon")
+    assert entries(plist(generate()))["Absolute"][1:3] == ["ICON", str(absolute)]
+
+    parent = theme(system, "Parent")
+    parent_icon = icon(parent, "late-icon")
+    assert entries(plist(generate()))["Modified App"][1] == "EXEC"
+    theme(user, "Cached", "Parent")
+    assert entries(plist(generate()))["Modified App"][1:3] == ["ICON", parent_icon]
+    assert_hit()
+
+    # A newly created higher-priority theme root must supersede the inherited icon.
+    preferred = theme(user, "Parent")
+    preferred_icon = icon(preferred, "late-icon")
+    assert entries(plist(generate()))["Modified App"][2] == preferred_icon
+    assert_hit()
+
+    desktop(user / "applications" / "tryexec.desktop", "TryExec App", "TryExec=wm-cache-tryexec\n")
+    desktop(user / "applications" / "exec.desktop", "Exec App", command="wm-cache-exec")
+    assert not {"TryExec App", "Exec App"} & entries(plist(generate())).keys()
+    assert_hit()
+    executable = binary / "wm-cache-tryexec"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    assert "TryExec App" in entries(plist(generate()))
+    assert_hit()
+    executable.chmod(0o644)
+    assert "TryExec App" not in entries(plist(generate()))
+    executable.chmod(0o755)
+    assert "TryExec App" in entries(plist(generate()))
+    executable.unlink()
+    assert "TryExec App" not in entries(plist(generate()))
+    executable = binary / "wm-cache-exec"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    assert "Exec App" in entries(plist(generate()))
+    assert_hit()
+    env["PATH"] = original_env["PATH"]
+    assert "Exec App" not in entries(plist(generate()))
+    env["PATH"] = f"{binary}:{original_env['PATH']}"
+    assert "Exec App" in entries(plist(generate()))
+    executable.unlink()
+    assert "Exec App" not in entries(plist(generate()))
+
+    # Concurrent cold generators must leave one complete cache, then reuse it.
+    cache.unlink()
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        outputs = list(workers.map(lambda _: generate(), range(4)))
+    assert len(set(outputs)) == 1
+    assert assert_hit() == outputs[0]
+    cache.write_text(cache.read_text().replace("Modified App", "Corrupted App"))
+    assert "Modified App" in entries(plist(generate(warning="corrupted menu cache")))
+    assert_hit()
+
+    alternate = theme(user, "Alternate")
+    alternate_icon = icon(alternate, "late-icon")
+    gtk.write_text("[Settings]\ngtk-icon-theme-name=Alternate\n")
+    assert entries(plist(generate()))["Modified App"][2] == alternate_icon
+    assert all(item[1] == "EXEC" for item in entries(plist(generate("--no-icons"))).values())
+    desktop(application, "Modified App", extra + "Name[fr]=Application locale\n")
+    env["LANGUAGE"] = "fr"
+    assert "Application locale" in entries(plist(generate()))
+    env["LANGUAGE"] = ""
+    assert "Modified App" in entries(plist(generate()))
+    desktop(user / "applications" / "desktop.desktop", "Other Desktop", "OnlyShowIn=GNOME;\n")
+    assert "Other Desktop" not in entries(plist(generate()))
+    env["XDG_CURRENT_DESKTOP"] = "GNOME"
+    assert "Other Desktop" in entries(plist(generate()))
+
+    blocked = root / "unusable-cache"
+    blocked.write_text("not a directory")
+    env["XDG_CACHE_HOME"] = str(blocked)
+    assert "Modified App" in entries(plist(generate(warning="menu cache directory")))
 
 
 def main():
@@ -172,7 +333,8 @@ def main():
         arguments, cwd = json.loads(output.read_text())
         assert arguments == ["two words", "Launch App", str(launcher), "--icon", "browser", "%"], arguments
         assert cwd == str(working), cwd
-    print("PASS: XDG discovery, overrides, visibility, localization, categories, GTK icon themes and desktop launching")
+        test_cache(generator, root, env)
+    print("PASS: XDG discovery, icons, launching, cache reuse, invalidation, corruption and concurrent generation")
     return 0
 
 

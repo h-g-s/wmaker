@@ -613,6 +613,9 @@ static void createPanel(_Panel * p)
 		WMMapWidget(pad);
 		WMMapSubwidgets(sview);
 
+#ifdef HAVE_GIO
+		putNewItem(panel, pad, ApplicationsInfo, _("Applications"));
+#endif
 		putNewItem(panel, pad, ExecInfo, _("Run Program"));
 		putNewItem(panel, pad, CommandInfo, _("Internal Command"));
 		putNewSubmenu(pad, _("Submenu"));
@@ -622,9 +625,6 @@ static void createPanel(_Panel * p)
 		putNewItem(panel, pad, DirectoryInfo, _("Directory Contents"));
 		putNewItem(panel, pad, WSMenuInfo, _("Workspace Menu"));
 		putNewItem(panel, pad, WWindowListInfo, _("Window List Menu"));
-#ifdef HAVE_GIO
-		putNewItem(panel, pad, ApplicationsInfo, _("Applications"));
-#endif
 
 		panel->itemPad[0] = sview;
 		panel->factory[0] = pad;

@@ -10,6 +10,7 @@ POTFILES  = \
 	$(top_srcdir)/util/wmgenmenu.c \
 	$(top_srcdir)/util/wmgenmenu.h \
 	$(top_srcdir)/util/wmmenugen_desktop.c \
+	$(top_srcdir)/util/wmmenugen_cache.c \
 	$(top_srcdir)/src/applications_menu.h
 
 SUFFIXES = .po .mo

@@ -7,6 +7,7 @@
 #ifdef HAVE_GIO
 #include <gio/gdesktopappinfo.h>
 #include "../src/applications_menu.h"
+#include "wmmenugen_cache.h"
 
 typedef struct {
 	char *path;
@@ -26,6 +27,7 @@ typedef struct {
 	GHashTable *icons;
 	char *name;
 	int size;
+	WMApplicationsCache *cache;
 } IconLookup;
 
 static void freeIconDirectory(gpointer data)
@@ -84,6 +86,7 @@ static void addThemeDirectories(IconLookup *lookup, IconTheme *theme, GKeyFile *
 	for (unsigned int i = 0; i < lookup->bases->len; i++) {
 		char *path = g_build_filename(g_ptr_array_index(lookup->bases, i), name, NULL);
 
+		wApplicationsCacheWatchPath(lookup->cache, path);
 		if (g_file_test(path, G_FILE_TEST_IS_DIR))
 			g_ptr_array_add(roots, path);
 		else
@@ -150,7 +153,10 @@ static IconTheme *loadTheme(IconLookup *lookup, const char *name)
 	for (unsigned int i = 0; i < lookup->bases->len; i++) {
 		char *path = g_build_filename(g_ptr_array_index(lookup->bases, i), name, "index.theme", NULL);
 		GError *error = NULL;
-		gboolean loaded = g_key_file_load_from_file(index, path, G_KEY_FILE_NONE, &error);
+		gboolean loaded;
+
+		wApplicationsCacheWatchPath(lookup->cache, path);
+		loaded = g_key_file_load_from_file(index, path, G_KEY_FILE_NONE, &error);
 
 		if (!loaded && !g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
 			wwarning(_("could not read icon theme \"%s\": %s"), path, error->message);
@@ -167,7 +173,7 @@ static IconTheme *loadTheme(IconLookup *lookup, const char *name)
 	return theme;
 }
 
-static char *findIconFile(IconDirectory *directory, const char *name)
+static char *findIconFile(IconLookup *lookup, IconDirectory *directory, const char *name)
 {
 	static const char *extensions[] = { ".png", ".xpm",
 #ifdef USE_MAGICK
@@ -177,9 +183,11 @@ static char *findIconFile(IconDirectory *directory, const char *name)
 	};
 
 	if (!directory->files) {
-		GDir *dir = g_dir_open(directory->path, 0, NULL);
+		GDir *dir;
 		const char *file;
 
+		wApplicationsCacheWatchPath(lookup->cache, directory->path);
+		dir = g_dir_open(directory->path, 0, NULL);
 		directory->files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 		if (dir) {
 			while ((file = g_dir_read_name(dir)))
@@ -195,6 +203,7 @@ static char *findIconFile(IconDirectory *directory, const char *name)
 			path = g_build_filename(directory->path, file, NULL);
 		g_free(file);
 		if (path) {
+			wApplicationsCacheWatchPath(lookup->cache, path);
 			if (g_file_test(path, G_FILE_TEST_IS_REGULAR))
 				return path;
 			g_free(path);
@@ -219,7 +228,7 @@ static char *findThemeIcon(IconLookup *lookup, const char *themeName, const char
 
 		if (directory->distance >= distance)
 			continue;
-		candidate = findIconFile(directory, name);
+		candidate = findIconFile(lookup, directory, name);
 		if (candidate) {
 			g_free(path);
 			path = candidate;
@@ -251,7 +260,7 @@ static char *findNamedIcon(IconLookup *lookup, const char *name)
 		path = findThemeIcon(lookup, "hicolor", name, visited);
 	g_hash_table_unref(visited);
 	for (unsigned int i = 0; !path && i < lookup->fallbacks->len; i++)
-		path = findIconFile(g_ptr_array_index(lookup->fallbacks, i), name);
+		path = findIconFile(lookup, g_ptr_array_index(lookup->fallbacks, i), name);
 	return path;
 }
 
@@ -272,6 +281,7 @@ static const char *resolveIcon(IconLookup *lookup, GIcon *icon)
 	}
 	if (G_IS_FILE_ICON(icon)) {
 		path = g_file_get_path(g_file_icon_get_file(G_FILE_ICON(icon)));
+		wApplicationsCacheWatchPath(lookup->cache, path);
 		if (path && !g_file_test(path, G_FILE_TEST_IS_REGULAR))
 			g_clear_pointer(&path, g_free);
 	} else if (G_IS_THEMED_ICON(icon)) {
@@ -433,13 +443,14 @@ static char *configuredIconTheme(void)
 
 int wmDesktopMenuMain(int argc, char **argv)
 {
-	gboolean applications = FALSE, noIcons = FALSE;
+	gboolean applications = FALSE, noIcons = FALSE, noCache = FALSE;
 	char *category = NULL, *launch = NULL, *themeName = NULL;
 	int iconSize = 24, status = 0;
 	GError *error = NULL;
 	GOptionEntry options[] = {
 		{ "applications", 0, 0, G_OPTION_ARG_NONE, &applications, "Generate the XDG Applications menu", NULL },
 		{ "category", 0, 0, G_OPTION_ARG_STRING, &category, "Include only this desktop-entry category", "CATEGORY" },
+		{ "no-cache", 0, 0, G_OPTION_ARG_NONE, &noCache, "Generate without reading or writing the menu cache", NULL },
 		{ "no-icons", 0, 0, G_OPTION_ARG_NONE, &noIcons, "Omit application icons", NULL },
 		{ "icon-theme", 0, 0, G_OPTION_ARG_STRING, &themeName, "Select an icon theme (default: GTK setting or hicolor)", "THEME" },
 		{ "icon-size", 0, 0, G_OPTION_ARG_INT, &iconSize, "Preferred icon size in pixels (default: 24)", "SIZE" },
@@ -458,7 +469,7 @@ int wmDesktopMenuMain(int argc, char **argv)
 	if (argc != 1 || applications == (launch != NULL) ||
 	    (category && !wApplicationsCategoryValid(category)) ||
 	    (themeName && !validThemeName(themeName)) || iconSize < 1 || iconSize > 512 ||
-	    (launch && (category || themeName || noIcons || iconSize != 24))) {
+	    (launch && (category || themeName || noIcons || noCache || iconSize != 24))) {
 		fprintf(stderr, "%s: invalid Applications menu arguments\n", argv[0]);
 		status = 2;
 		goto finish;
@@ -482,14 +493,27 @@ int wmDesktopMenuMain(int argc, char **argv)
 		GList *apps;
 		IconLookup icons;
 		WMPropList *result;
-		GHashTable *submenus = g_hash_table_new(g_str_hash, g_str_equal);
+		GHashTable *submenus;
+		WMApplicationsCache *cache;
 		char *description;
 
 		if (!g_getenv("XDG_CURRENT_DESKTOP"))
 			g_setenv("XDG_CURRENT_DESKTOP", "WindowMaker", FALSE);
 		if (!themeName)
 			themeName = configuredIconTheme();
+		cache = noCache ? NULL : wApplicationsCacheCreate(argv[0], category, themeName, iconSize, noIcons);
+		description = wApplicationsCacheLoad(cache);
+		if (description) {
+			if (puts(description) == EOF)
+				status = 1;
+			g_free(description);
+			wApplicationsCacheDestroy(cache);
+			goto finish;
+		}
+		wApplicationsCachePrepare(cache);
 		initializeIcons(&icons, themeName, iconSize);
+		icons.cache = cache;
+		submenus = g_hash_table_new(g_str_hash, g_str_equal);
 		result = newSubmenu(category ? _(wApplicationsCategoryTitle(category)) : _("Applications"));
 		apps = g_list_sort(g_app_info_get_all(), compareApps);
 		for (GList *node = apps; node; node = node->next) {
@@ -525,6 +549,7 @@ int wmDesktopMenuMain(int argc, char **argv)
 			}
 		}
 		description = WMGetPropListDescription(result, TRUE);
+		wApplicationsCacheSave(cache, description);
 		if (puts(description) == EOF)
 			status = 1;
 		wfree(description);
@@ -536,6 +561,7 @@ int wmDesktopMenuMain(int argc, char **argv)
 		g_ptr_array_unref(icons.fallbacks);
 		g_ptr_array_unref(icons.bases);
 		g_free(icons.name);
+		wApplicationsCacheDestroy(cache);
 	}
 finish:
 	g_option_context_free(context);

@@ -52,6 +52,9 @@ Launch a desktop file ID or absolute desktop filename using GIO. This preserves
 desktop-entry argument quoting and field codes, Terminal, Path and D-Bus activation,
 rather than interpreting Exec as a shell command.
 .TP
+.B \-\-no-cache
+Generate the Applications menu without reading or writing its persistent cache.
+.TP
 .B \-\-no-icons
 Omit icons from the Applications menu.
 .TP
@@ -92,8 +95,16 @@ Standalone generation: wmmenugen --applications --category Network
 .PP
 Generation runs when the submenu is opened, so application installations,
 removals, user overrides and icon-theme changes appear without restarting.
-Theme metadata, directory listings and icon results are cached within each
-invocation; there is no stale persistent menu cache.
+Generated menus are cached privately below $XDG_CACHE_HOME/WindowMaker/menus
+(normally ~/.cache/WindowMaker/menus). Each invocation validates application
+files, executable availability and the icon-theme files and directories used
+by that menu. Changes invalidate the cache immediately; no timed refresh or
+window-manager restart is needed. Category, icon options, locale and desktop
+environment have separate cache entries. Cache files are replaced atomically;
+unusable or corrupt caches produce a warning and menus are generated normally.
+Use --no-cache to bypass caching for troubleshooting or timing generation.
+Caching requires high-resolution filesystem timestamps; otherwise menus are
+generated normally.
 An empty category displays a disabled "(No items)" entry.
 .PP
 Applications mode requires GIO support at build time. Legacy parsers and

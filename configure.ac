@@ -747,6 +747,9 @@ AS_IF([test "x$enable_desktop_menus" != xno], [
             [AC_MSG_WARN([GIO not found; Applications menus will be unavailable])])])
 ])
 
+AC_CHECK_MEMBERS([struct stat.st_mtim.tv_nsec, struct stat.st_ctim.tv_nsec,
+    struct stat.st_mtimespec.tv_nsec, struct stat.st_ctimespec.tv_nsec],
+    [], [], [[#include <sys/stat.h>]])
 
 dnl ==============================================
 dnl         Graphic Format Libraries

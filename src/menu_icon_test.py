@@ -64,6 +64,7 @@ def main():
             generator = Path(wmaker).parent.parent / "util" / "wmmenugen"
             assert generator.exists(), "Build wmmenugen before running the menu icon test"
             generator_env = dict(os.environ, HOME=directory, XDG_DATA_HOME=str(data),
+                                 XDG_CACHE_HOME=str(Path(directory) / "cache"),
                                  XDG_DATA_DIRS=str(root / "empty"), XDG_CONFIG_HOME=str(root / "config"),
                                  XDG_CURRENT_DESKTOP="WindowMaker")
             probe = subprocess.run([str(generator), "--applications"], env=generator_env,
