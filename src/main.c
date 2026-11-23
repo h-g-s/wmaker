@@ -56,6 +56,7 @@
 #include "main.h"
 #include "monitor.h"
 #include "misc.h"
+#include "autostart.h"
 
 #include <WINGs/WUtil.h>
 
@@ -812,6 +813,8 @@ static int real_main(int argc, char **argv)
 		multiHead = False;
 
 	execInitScript();
+	wAutostartRun(wScreenWithNumber(0), w_global.domain.wmaker->dictionary,
+		      wPreferences.flags.restarting != 0);
 #ifdef HAVE_INOTIFY
 	inotifyWatchConfig();
 #endif

@@ -84,6 +84,7 @@ WINGs/layout_test
 WINGs/scroller_test
 WPrefs.app/font_simple_test
 WPrefs.app/menu_test
+WPrefs.app/autostart_test
 
 WPrefs.app/WPrefs
 WPrefs.app/font_controls_test
@@ -162,5 +163,6 @@ WPrefs.app/wmwallpaper.desktop
 .pc
 src/randr_hotplug_test
 src/winoverview_navigation_test
+src/autostart_name_test
 util/wmsetbg_refresh_test
 WPrefs.app/appearance_test

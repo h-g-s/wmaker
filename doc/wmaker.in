@@ -75,6 +75,24 @@ command pairs, for example:
 CommandShortcuts = (("Mod4+T", "xterm"), ("Control+X C", "xterm -e top"));
 .EE
 Avoid using a shortcut that is also assigned to an action or menu entry.
+.SH AUTOSTART COMMANDS
+The Autostart Preferences panel lists commands started, in order, each time
+Window Maker starts, after the \fBautostart\fP script. Each command is run in
+the background by \fB/bin/sh\fP and never delays startup. Commands are stored
+in the WindowMaker defaults, for example:
+.EX
+AutostartCommands = (
+  {Command = "picom --backend glx --vsync"; NoRelaunch = YES;},
+  {Command = "xscreensaver -no-splash"; Delay = 5; Priority = Low;}
+);
+.EE
+\fBDelay\fP is the number of seconds after startup to wait before running the
+command. \fBPriority\fP is \fBLow\fP (nice 10), \fBNormal\fP or \fBHigh\fP
+(nice value lowered by 5, which usually requires privileges).
+\fBEnabled = NO\fP keeps an entry without running it. With
+\fBNoRelaunch = YES\fP, a restart of Window Maker skips the command when one of
+the user's processes is still running the same program, which avoids
+duplicate system tray applications.
 .SH FILES
 .TP
 .B ~/GNUstep/Defaults/WindowMaker
@@ -101,7 +119,8 @@ from, if it's necessary to write configuration changes back into these
 files, user's files will be written to.
 .TP
 .B ~/GNUstep/Library/WindowMaker/autostart
-This script is automatically executed when Window Maker is started.
+This script is automatically executed when Window Maker is started, before
+the commands configured in the Autostart Preferences panel.
 .TP
 .B ~/GNUstep/Library/WindowMaker/exitscript
 This script is automatically executed immediately before Window Maker is

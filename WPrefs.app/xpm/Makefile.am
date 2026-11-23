@@ -5,6 +5,7 @@ dist_xpmdata_DATA = \
 	advancetonewworkspace.xpm \
 	animations.xpm \
 	appearance.xpm \
+	autostart.xpm \
 	clip.xpm \
 	clip-preview.xpm \
 	configs.xpm \

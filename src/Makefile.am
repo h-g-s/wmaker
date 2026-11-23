@@ -17,6 +17,8 @@ wmaker_SOURCES = 	\
 	application.h \
 	appmenu.c \
 	appmenu.h \
+	autostart.c \
+	autostart.h \
 	balloon.c \
 	balloon.h \
 	client.c \
@@ -191,7 +193,10 @@ am__v_CHKOPTS_  = $(am__v_CHKOPTS_$(AM_DEFAULT_VERBOSITY))
 am__v_CHKOPTS_0 = @echo "  CHK      $@" ;
 am__v_CHKOPTS_1 =
 
-check_PROGRAMS = randr_hotplug_test winoverview_navigation_test
+check_PROGRAMS = randr_hotplug_test winoverview_navigation_test autostart_name_test
+autostart_name_test_SOURCES = autostart_name_test.c
+autostart_name_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
+autostart_name_test_LDADD = $(wmaker_LDADD)
 randr_hotplug_test_SOURCES = randr_hotplug_test.c monitor_layout.c monitor_layout.h
 randr_hotplug_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
 randr_hotplug_test_LDADD = $(wmaker_LDADD)
@@ -203,11 +208,13 @@ winoverview_navigation_test_LDADD = $(wmaker_LDADD)
 check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRAMS) wmaker
 	./randr_hotplug_test || test $$? -eq 77
 	./winoverview_navigation_test
+	./autostart_name_test
 	$(MAKE) -C "$(top_builddir)/util" wmmenugen
 	python3 "$(srcdir)/menu_icon_test.py" ./wmaker || test $$? -eq 77
 	python3 "$(srcdir)/command_shortcuts_test.py" ./wmaker || test $$? -eq 77
+	python3 "$(srcdir)/autostart_test.py" ./wmaker || test $$? -eq 77
 
-EXTRA_DIST += menu_icon_test.py command_shortcuts_test.py
+EXTRA_DIST += menu_icon_test.py command_shortcuts_test.py autostart_test.py
 
 # Check that the callback functions used to load the configuration match
 # the type of the variable where the value will be stored

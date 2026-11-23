@@ -5,6 +5,7 @@ dist_tiffdata_DATA = \
 	advancetonewworkspace.tiff \
 	animations.tiff \
 	appearance.tiff \
+	autostart.tiff \
 	clip.tiff \
 	clip-preview.tiff \
 	configs.tiff \

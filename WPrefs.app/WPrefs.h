@@ -153,6 +153,7 @@ void Initialize(WMScreen *scr);
 
 /* in alphabetical order - in case you'd want to add one */
 Panel *InitAppearance(WMWidget *parent);
+Panel *InitAutostart(WMWidget *parent);
 Panel *InitConfigurations(WMWidget *parent);
 Panel *InitDocks(WMWidget *parent);
 Panel *InitExpert(WMWidget *parent);

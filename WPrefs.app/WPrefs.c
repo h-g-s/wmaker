@@ -614,6 +614,7 @@ void Initialize(WMScreen * scr)
 	InitConfigurations(WPrefs.banner);
 
 	InitMenu(WPrefs.banner);
+	InitAutostart(WPrefs.banner);
 
 #ifdef not_yet_fully_implemented
 	InitKeyboardSettings(WPrefs.banner);
