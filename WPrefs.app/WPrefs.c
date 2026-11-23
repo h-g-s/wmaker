@@ -605,7 +605,6 @@ void Initialize(WMScreen * scr)
 	InitFocus(WPrefs.banner);
 	InitWindowHandling(WPrefs.banner);
 
-	InitMenuPreferences(WPrefs.banner);
 	InitIcons(WPrefs.banner);
 	InitPreferences(WPrefs.banner);
 

@@ -28,6 +28,7 @@
 
 #include "editmenu.h"
 #include "PanelLayout.h"
+#include "MenuPreferences.h"
 #include "../src/menuentry.h"
 #include "../src/applications_menu.h"
 #include <X11/Xft/Xft.h>
@@ -83,6 +84,7 @@ typedef struct _Panel {
 	WMLabel *instructionsL;
 	WMFrame *instructionsContent;
 	WMLabel *saveLocationL;
+	WPrefsMenuPreferences preferences;
 
 	WMFrame *commandF;
 	WMTextField *commandT;	/* command to run */
@@ -436,6 +438,10 @@ static int layoutInstructionText(_Panel *panel, int width)
 		WMResizeWidget(panel->saveLocationL, width, WMAX(1, location.height));
 		height += gap + location.height;
 	}
+	height += gap;
+	WMMoveWidget(panel->preferences.box, 0, height);
+	WMResizeWidget(panel->preferences.box, width, WMGetBoxMinimumSize(panel->preferences.box).height);
+	height += WMWidgetHeight(panel->preferences.box);
 	WMResizeWidget(panel->instructionsContent, width, WMAX(1, height));
 	return height;
 }
@@ -444,6 +450,7 @@ static void layoutInstructions(_Panel *panel)
 {
 	int width = WMWidgetWidth(panel->optionsF) - 20;
 	int height = WMWidgetHeight(panel->optionsF) - WMFontHeight(panel->normalFont) - 18;
+	int minimum = WMGetBoxMinimumSize(panel->preferences.box).width;
 
 	for (WMView *view = W_VIEW(panel->box)->parent; view; view = view->parent) {
 		if (view->self && WMWidgetClass(view->self) == WC_ScrollView) {
@@ -459,10 +466,18 @@ static void layoutInstructions(_Panel *panel)
 	width = WMAX(1, width);
 	height = WMAX(1, height);
 	WMResizeWidget(panel->instructionsV, width, height);
+	WMSetScrollViewHasHorizontalScroller(panel->instructionsV, False);
 	WMSetScrollViewHasVerticalScroller(panel->instructionsV, False);
-	if (layoutInstructionText(panel, width) > height)
-		WMSetScrollViewHasVerticalScroller(panel->instructionsV, True);
-	width = WMGetScrollViewVisibleRect(panel->instructionsV).size.width;
+	for (int i = 0; i < 2; i++) {
+		WMSize visible = WMGetScrollViewVisibleRect(panel->instructionsV).size;
+
+		width = WMAX(minimum, (int)visible.width);
+		if (width > visible.width)
+			WMSetScrollViewHasHorizontalScroller(panel->instructionsV, True);
+		if (layoutInstructionText(panel, width) > WMGetScrollViewVisibleRect(panel->instructionsV).size.height)
+			WMSetScrollViewHasVerticalScroller(panel->instructionsV, True);
+	}
+	width = WMAX(minimum, (int)WMGetScrollViewVisibleRect(panel->instructionsV).size.width);
 	layoutInstructionText(panel, width);
 }
 
@@ -970,6 +985,8 @@ static void createPanel(_Panel * p)
 	WMMapWidget(panel->instructionsContent);
 	panel->saveLocationL = WMCreateLabel(panel->instructionsContent);
 	WMSetLabelWraps(panel->saveLocationL, True);
+	WPrefsCreateMenuPreferences(&panel->preferences, panel->instructionsContent, font);
+	WMMapWidget(panel->preferences.box);
 	{
 		FcPattern *pattern = FcPatternDuplicate(font->font->pattern);
 		double pixels;
@@ -998,13 +1015,11 @@ static void createPanel(_Panel * p)
 	}
 	WMMapWidget(label);
 	WMSetLabelText(label,
-		       _("Instructions:\n\n"
-			 " - drag items from the left to the menu to add new items\n"
-			 " - drag items out of the menu to remove items\n"
-			 " - drag items in menu to change their position\n"
-			 " - drag items with Control pressed to copy them\n"
-			 " - double click in a menu item to change the label\n"
-			 " - click on a menu item to change related information"));
+		       _("Instructions:\n"
+			 " - drag items into or out of the menu to add or remove them\n"
+			 " - drag items within the menu to move them, or hold Control to copy\n"
+			 " - double click an item to change its label\n"
+			 " - click an item to change its other information"));
 	WMMapWidget(label);
 
 	panel->sections[NoInfo][0] = panel->instructionsV;
@@ -1057,6 +1072,8 @@ static void createPanel(_Panel * p)
 		WMResizeWidget(panel->instructionsV, instructions.width, instructions.height + 4 * rows);
 		layoutOptions(panel, True);
 		panel->optionSize.width = WMAX(panel->optionSize.width, WMWidgetWidth(panel->paramF) + 20);
+		panel->optionSize.width = WMAX(panel->optionSize.width,
+					       WMGetBoxMinimumSize(panel->preferences.box).width + 40);
 
 		for (int i = 0; i < 3; i++)
 			paletteWidth = WMAX(paletteWidth, WMWidgetWidth(panel->factory[i]) +
@@ -2100,6 +2117,7 @@ static void storeData(_Panel * panel)
 {
 	WMPropList *menu;
 
+	WPrefsStoreMenuPreferences(&panel->preferences);
 	if (panel->dontSave)
 		return;
 
@@ -2143,7 +2161,7 @@ Panel *InitMenu(WMWidget *parent)
 
 	panel->sectionName = _("Applications Menu Definition");
 
-	panel->description = _("Edit the menu for launching applications.");
+	panel->description = _("Edit the applications menu and its behavior.");
 
 	panel->parent = parent;
 

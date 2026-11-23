@@ -52,6 +52,7 @@ WPrefs_SOURCES = \
 	KeyboardShortcuts.c \
 	Menu.c \
 	MenuPreferences.c \
+	MenuPreferences.h \
 	MouseSettings.c \
 	Paths.c \
 	PanelLayout.c \
@@ -107,7 +108,8 @@ wallpaper_test_LDADD = $(WPrefs_LDADD)
 appearance_test_SOURCES = appearance_test.c FontControls.c FontControls.h PanelLayout.c PanelLayout.h
 appearance_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 appearance_test_LDADD = $(WPrefs_LDADD)
-menu_test_SOURCES = menu_test.c editmenu.h xmodifier.c PanelLayout.c PanelLayout.h
+menu_test_SOURCES = menu_test.c editmenu.h xmodifier.c PanelLayout.c PanelLayout.h MenuPreferences.c MenuPreferences.h FontControls.c FontControls.h
+menu_test_CPPFLAGS = $(AM_CPPFLAGS) -DTEST_IMAGE_PATH=\"$(abs_srcdir)/tiff\"
 menu_test_LDADD = $(WPrefs_LDADD)
 font_simple_test_SOURCES = font_simple_test.c PanelLayout.c PanelLayout.h
 font_simple_test_LDADD = $(WPrefs_LDADD)

@@ -162,7 +162,6 @@ Panel *InitHotCornerShortcuts(WMWidget *parent);
 Panel *InitIcons(WMWidget *parent);
 Panel *InitKeyboardShortcuts(WMWidget *parent);
 Panel *InitMenu(WMWidget *parent);
-Panel *InitMenuPreferences(WMWidget *parent);
 Panel *InitMouseSettings(WMWidget *parent);
 Panel *InitPaths(WMWidget *parent);
 Panel *InitPreferences(WMWidget *parent);

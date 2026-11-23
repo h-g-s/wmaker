@@ -20,33 +20,9 @@
 
 #include "WPrefs.h"
 #include "PanelLayout.h"
-#include "FontControls.h"
+#include "MenuPreferences.h"
 
-typedef struct _Panel {
-	WMBox *box;
-
-	char *sectionName;
-
-	char *description;
-
-	CallbackRec callbacks;
-
-	WMWidget *parent;
-
-	WPrefsSpeedControl speed;
-
-	WMButton *aliyB;
-	WMButton *alinB;
-
-	WMButton *autoB;
-	WMButton *autoC;
-	WMButton *wrapB;
-
-} _Panel;
-
-#define ICON_FILE	"menuprefs"
-
-static void showData(_Panel * panel)
+static void showData(WPrefsMenuPreferences *panel)
 {
 	WPrefsSetSpeedControlValue(&panel->speed, GetSpeedForKey("MenuScrollSpeed"));
 
@@ -62,7 +38,7 @@ static void showData(_Panel * panel)
 	WMSetButtonSelected(panel->autoC, GetBoolForKey("ViKeyMenus"));
 }
 
-static void storeData(_Panel * panel)
+void WPrefsStoreMenuPreferences(WPrefsMenuPreferences *panel)
 {
 	SetSpeedForKey(WPrefsGetSpeedControlValue(&panel->speed), "MenuScrollSpeed");
 
@@ -73,16 +49,13 @@ static void storeData(_Panel * panel)
 	SetBoolForKey(WMGetButtonSelected(panel->autoC), "ViKeyMenus");
 }
 
-static void createPanel(Panel * p)
+void WPrefsCreateMenuPreferences(WPrefsMenuPreferences *panel, WMWidget *parent, WMFont *font)
 {
-	_Panel *panel = (_Panel *) p;
-	WMScreen *scr = WMWidgetScreen(panel->parent);
-	WMFont *font = WMDefaultSystemFont(scr);
 	WPrefsGroup scrolling, alignment, options;
 	WMBox *top, *choices;
 	WMSize size;
 
-	panel->box = WPrefsCreatePanelBox(panel->parent);
+	panel->box = WMCreateBox(parent);
 	top = WMCreateBox(panel->box);
 	WMSetBoxHorizontal(top, True);
 	scrolling = WPrefsCreateGroup(top, _("Menu Scrolling Speed"));
@@ -119,32 +92,9 @@ static void createPanel(Panel * p)
 	WPrefsPackButton(options.content, panel->wrapB, 8);
 	WPrefsPackButton(options.content, panel->autoB, 8);
 	WPrefsPackButton(options.content, panel->autoC, 0);
-	WPrefsPackGroup(panel->box, &options, True, 0);
-	WMReleaseFont(font);
+	WPrefsPackGroup(panel->box, &options, False, 0);
 
-	WMRealizeWidget(panel->box);
 	WMMapSubwidgets(panel->box);
 
 	showData(panel);
-}
-
-Panel *InitMenuPreferences(WMWidget *parent)
-{
-	_Panel *panel;
-
-	panel = wmalloc(sizeof(_Panel));
-
-	panel->sectionName = _("Menu Preferences");
-
-	panel->description = _("Menu usability related options. Scrolling speed,\n" "alignment of submenus etc.");
-
-	panel->parent = parent;
-
-	panel->callbacks.createWidgets = createPanel;
-	panel->callbacks.automaticLayout = True;
-	panel->callbacks.updateDomain = storeData;
-
-	AddSection(panel, ICON_FILE);
-
-	return panel;
 }

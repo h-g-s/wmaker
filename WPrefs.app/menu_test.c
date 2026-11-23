@@ -5,6 +5,49 @@
 #include "Menu.c"
 #include "editmenu.c"
 
+static int speed = 2;
+static Bool align = True, wrap = True, scroll = False, vi = True;
+
+char *LocateImage(const char *name)
+{
+	char *path = wmalloc(strlen(TEST_IMAGE_PATH) + strlen(name) + 7);
+
+	sprintf(path, "%s/%s.tiff", TEST_IMAGE_PATH, name);
+	return path;
+}
+
+Bool GetBoolForKey(const char *key)
+{
+	if (strcmp(key, "AlignSubmenus") == 0) return align;
+	if (strcmp(key, "WrapMenus") == 0) return wrap;
+	if (strcmp(key, "ScrollableMenus") == 0) return scroll;
+	assert(strcmp(key, "ViKeyMenus") == 0);
+	return vi;
+}
+
+void SetBoolForKey(Bool value, const char *key)
+{
+	if (strcmp(key, "AlignSubmenus") == 0) align = value;
+	else if (strcmp(key, "WrapMenus") == 0) wrap = value;
+	else if (strcmp(key, "ScrollableMenus") == 0) scroll = value;
+	else {
+		assert(strcmp(key, "ViKeyMenus") == 0);
+		vi = value;
+	}
+}
+
+int GetSpeedForKey(const char *key)
+{
+	assert(strcmp(key, "MenuScrollSpeed") == 0);
+	return speed;
+}
+
+void SetSpeedForKey(int value, const char *key)
+{
+	assert(strcmp(key, "MenuScrollSpeed") == 0);
+	speed = value;
+}
+
 void AddSection(Panel *panel, const char *icon)
 {
 	(void)panel;
@@ -190,6 +233,11 @@ int main(int argc, char **argv)
 		panel = (_Panel *)InitMenu(content);
 		assert(panel->callbacks.automaticLayout);
 		createPanel(panel);
+		assert(WPrefsGetSpeedControlValue(&panel->preferences.speed) == speed);
+		assert(WMGetButtonSelected(panel->preferences.aliyB) == align);
+		assert(WMGetButtonSelected(panel->preferences.wrapB) == wrap);
+		assert(WMGetButtonSelected(panel->preferences.autoB) == scroll);
+		assert(WMGetButtonSelected(panel->preferences.autoC) == vi);
 #ifdef HAVE_GIO
 		assert(((ItemData *)WGetEditMenuItemData(WGetEditMenuItem(panel->factory[0], 0)))->type ==
 		       ApplicationsInfo);
@@ -241,7 +289,7 @@ int main(int argc, char **argv)
 		       instructions->pos.x + instructions->size.width <= visible.size.width);
 		assert(W_VIEW(panel->box)->pos.y + W_VIEW(panel->optionsF)->pos.y +
 		       instructions->pos.y + instructions->size.height <= visible.size.height);
-		assert(WMWidgetWidth(panel->instructionsL) ==
+		assert(WMWidgetWidth(panel->instructionsL) >=
 		       WMGetScrollViewVisibleRect(panel->instructionsV).size.width);
 		assert(WMWidgetHeight(panel->instructionsL) >=
 		       WMGetLabelPreferredSizeForWidth(panel->instructionsL, WMWidgetWidth(panel->instructionsL)).height);
@@ -263,7 +311,11 @@ int main(int argc, char **argv)
 		WMResizeWidget(window, 900, 500);
 		bounds(W_VIEW(panel->instructionsContent));
 		assert(WMWidgetHeight(panel->instructionsContent) >=
-		       W_VIEW(panel->saveLocationL)->pos.y + WMWidgetHeight(panel->saveLocationL));
+		       W_VIEW(panel->preferences.box)->pos.y + WMWidgetHeight(panel->preferences.box));
+		WMResizeWidget(window, 400, 350);
+		assert(WMGetScrollViewHorizontalScroller(panel->instructionsV));
+		assert(WMGetScrollViewVerticalScroller(panel->instructionsV));
+		bounds(W_VIEW(panel->instructionsContent));
 		WMResizeWidget(window, size.width + 204, size.height + 104);
 		copy = panel->menu;
 		showMenus(panel);
@@ -376,6 +428,20 @@ int main(int argc, char **argv)
 		WMReleasePropList(roundtrip);
 		WMDestroyWidget(copy);
 		storeData(panel);
+		roundtrip = WMReadPropListFromFile(path);
+		assert(WMIsPropListEqualTo(saved, roundtrip));
+		WMReleasePropList(roundtrip);
+		WPrefsSetSpeedControlValue(&panel->preferences.speed, (speed + 1) % 5);
+		WMPerformButtonClick(align ? panel->preferences.alinB : panel->preferences.aliyB);
+		WMSetButtonSelected(panel->preferences.wrapB, !wrap);
+		WMSetButtonSelected(panel->preferences.autoB, !scroll);
+		WMSetButtonSelected(panel->preferences.autoC, !vi);
+		int oldSpeed = speed;
+		Bool oldAlign = align, oldWrap = wrap, oldScroll = scroll, oldVi = vi;
+		panel->dontSave = True;
+		storeData(panel);
+		assert(speed == (oldSpeed + 1) % 5 && align == !oldAlign && wrap == !oldWrap &&
+		       scroll == !oldScroll && vi == !oldVi);
 		roundtrip = WMReadPropListFromFile(path);
 		assert(WMIsPropListEqualTo(saved, roundtrip));
 		WMReleasePropList(roundtrip);
