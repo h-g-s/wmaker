@@ -23,8 +23,6 @@
 #ifdef USE_RANDR
 
 #include <string.h>
-#include <errno.h>
-#include <unistd.h>
 #include <X11/Xlib.h>
 
 #include "randr.h"
@@ -40,6 +38,8 @@
 
 #define RANDR_MAX_OUTPUTS     32
 #define RANDR_DEBOUNCE_DELAY  100   /* milliseconds */
+#define RANDR_RESTORE_RETRY_DELAY 500  /* milliseconds */
+#define RANDR_RESTORE_ATTEMPTS 5
 
 typedef struct {
     RROutput xid;
@@ -55,6 +55,8 @@ typedef struct {
 typedef struct {
     WRandROutput outputs[RANDR_MAX_OUTPUTS];
     int n_outputs;
+    Bool restore_pending;  /* connected monitors changed; look for a saved layout */
+    int restore_attempts;
 } WRandRState;
 
 /* Initial output scan to populate state from scratch */
@@ -508,43 +510,38 @@ static void wRandR_MarkOutputsAsRestored(WRandRState *state)
         state->outputs[i].activate_pending = False;
 }
 
-static Bool wRandR_RestoreSavedLayout(WScreen *scr)
+/* Apply the saved layout for exactly the connected set of monitors, if any */
+static MonitorLayoutStatus wRandR_RestoreSavedLayout(WScreen *scr)
 {
     char *path;
     char error[512];
     MonitorLayout *layout;
+    MonitorLayoutStatus status;
 
-    /* The monitor editor saves a layout for the default X screen. */
+    /* The monitor editor saves layouts for the default X screen. */
     if (scr->screen != DefaultScreen(dpy))
-        return False;
-
-    path = wdefaultspathfordomain("WMMonitorLayout");
-    if (access(path, F_OK) < 0) {
-        if (errno != ENOENT && errno != ENOTDIR)
-            wwarning("RandR: could not access saved monitor layout %s: %s", path, strerror(errno));
-        wfree(path);
-        return False;
-    }
+        return MONITOR_LAYOUT_NONE;
 
     layout = MonitorLayoutQuery(dpy, scr->root_win, error, sizeof(error));
     if (!layout) {
         wwarning("RandR: could not restore saved monitor layout: %s", error);
-        wfree(path);
-        return False;
+        return MONITOR_LAYOUT_FAILED;
     }
-    if (!MonitorLayoutLoadExact(layout, path, error, sizeof(error)) ||
-        !MonitorLayoutApply(dpy, scr->root_win, layout, error, sizeof(error))) {
-        wwarning("RandR: saved monitor layout was not applied: %s", error);
-        MonitorLayoutFree(layout);
-        wfree(path);
-        return False;
-    } else {
+
+    path = wdefaultspathfordomain("WMMonitorLayout");
+    status = MonitorLayoutLoadExact(layout, path, error, sizeof(error));
+    if (status == MONITOR_LAYOUT_LOADED &&
+        !MonitorLayoutApply(dpy, scr->root_win, layout, error, sizeof(error)))
+        status = MONITOR_LAYOUT_FAILED;
+
+    if (status == MONITOR_LAYOUT_LOADED)
         wmessage("RandR: restored saved monitor layout from %s", path);
-    }
+    else if (status == MONITOR_LAYOUT_FAILED)
+        wwarning("RandR: saved monitor layout was not applied: %s", error);
 
     MonitorLayoutFree(layout);
     wfree(path);
-    return True;
+    return status;
 }
 
 /* Synchronize RandR state with the X server */
@@ -553,7 +550,7 @@ static void wRandR_Update(WScreen *scr)
     WRandRState *state = (WRandRState *)scr->randr_state;
     XRRScreenResources *sr;
     int i, j;
-    Bool geometry_changed;
+    Bool geometry_changed, connection_changed = False;
 
     /* Assume all outputs removed until server confirms */
     for (i = 0; i < state->n_outputs; i++)
@@ -591,6 +588,8 @@ static void wRandR_Update(WScreen *scr)
         }
 
         if (found) {
+            if ((oi->connection == RR_Connected) != found->connected)
+                connection_changed = True;
             found->stale = False;
             if (oi->connection == RR_Connected && !found->connected)
                 found->activate_pending = True;
@@ -618,11 +617,56 @@ static void wRandR_Update(WScreen *scr)
         XRRFreeOutputInfo(oi);
     }
 
+    /* Remove outputs not reported by server at all; removing a connected
+     * one (e.g. a DP-MST dock output) is a connection change. */
+    for (i = 0, j = 0; i < state->n_outputs; i++) {
+        if (state->outputs[i].stale) {
+            if (state->outputs[i].connected)
+                connection_changed = True;
+            continue;
+        }
+        if (j != i)
+            state->outputs[j] = state->outputs[i];
+        j++;
+    }
+    state->n_outputs = j;
+
     /* When HotplugMonitor is enabled, actively manage CRTC lifecycle */
     if (wPreferences.hotplug_monitor) {
         Bool changed;
+        int delay = RANDR_DEBOUNCE_DELAY;
+
+        if (connection_changed) {
+            state->restore_pending = True;
+            state->restore_attempts = 0;
+        }
 
         changed = wRandR_AutoDeactivate(scr, state, sr);
+
+        /* A saved layout for the new set of monitors takes precedence over
+         * placing new monitors automatically. Docks may expose monitors
+         * before their modes are ready, so retry a failed restore briefly. */
+        if (!changed && state->restore_pending) {
+            switch (wRandR_RestoreSavedLayout(scr)) {
+            case MONITOR_LAYOUT_LOADED:
+                state->restore_pending = False;
+                wRandR_MarkOutputsAsRestored(state);
+                changed = True;
+                break;
+            case MONITOR_LAYOUT_FAILED:
+                if (++state->restore_attempts < RANDR_RESTORE_ATTEMPTS) {
+                    changed = True;
+                    delay = RANDR_RESTORE_RETRY_DELAY;
+                } else {
+                    state->restore_pending = False;
+                }
+                break;
+            default:
+                state->restore_pending = False;
+                break;
+            }
+        }
+
         if (!changed)
             changed = wRandR_AutoActivate(scr, state, sr);
         if (changed) {
@@ -630,22 +674,14 @@ static void wRandR_Update(WScreen *scr)
             if (scr->randr_debounce_timer)
                 WMDeleteTimerHandler(scr->randr_debounce_timer);
             scr->randr_debounce_timer =
-                WMAddTimerHandler(RANDR_DEBOUNCE_DELAY, wRandRDebounceTimerFired, scr);
+                WMAddTimerHandler(delay, wRandRDebounceTimerFired, scr);
             return;
         }
+    } else {
+        state->restore_pending = False;
     }
 
     XRRFreeScreenResources(sr);
-
-    /* Remove outputs not reported by server at all */
-    for (i = 0, j = 0; i < state->n_outputs; i++) {
-        if (!state->outputs[i].stale) {
-            if (j != i)
-                state->outputs[j] = state->outputs[i];
-            j++;
-        }
-    }
-    state->n_outputs = j;
 
     /* Apply new geometry to the Xinerama head layer */
     i = scr->xine_info.primary_head;
@@ -707,7 +743,7 @@ void wRandRInit(WScreen *scr)
     memset(state, 0, sizeof(*state));
     scr->randr_state = state;
 
-    restored = wRandR_RestoreSavedLayout(scr);
+    restored = wRandR_RestoreSavedLayout(scr) == MONITOR_LAYOUT_LOADED;
     wRandR_Scan(scr, state);
     if (restored)
         wRandR_MarkOutputsAsRestored(state);

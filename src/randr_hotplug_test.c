@@ -1,3 +1,7 @@
+#define MonitorLayoutQuery testLayoutQuery
+#define MonitorLayoutLoadExact testLayoutLoadExact
+#define MonitorLayoutApply testLayoutApply
+#define MonitorLayoutFree testLayoutFree
 #include "randr.c"
 
 #undef NDEBUG
@@ -20,6 +24,32 @@ static int max_width = 8192;
 static int configured, resized, refreshed;
 static int configured_x;
 static Rotation configured_rotation;
+static MonitorLayoutStatus saved_status = MONITOR_LAYOUT_NONE;
+static int loads, applied;
+static MonitorLayout query_layout;
+
+MonitorLayout *testLayoutQuery(Display *display, Window root, char *error, size_t size)
+{
+	return &query_layout;
+}
+
+MonitorLayoutStatus testLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size)
+{
+	loads++;
+	if (saved_status == MONITOR_LAYOUT_FAILED)
+		snprintf(error, size, "mode not ready");
+	return saved_status;
+}
+
+Bool testLayoutApply(Display *display, Window root, const MonitorLayout *layout, char *error, size_t size)
+{
+	applied++;
+	return True;
+}
+
+void testLayoutFree(MonitorLayout *layout)
+{
+}
 
 Status XGetWindowAttributes(Display *display, Window window, XWindowAttributes *attrs)
 {
@@ -104,6 +134,7 @@ int main(void)
 	WRandRState state = { 0 };
 	XRRModeInfo mode_info = { 0 };
 	Screen xscreen = { 0 };
+	int i;
 
 	dpy = (Display *)wmalloc(sizeof(*(_XPrivDisplay)dpy));
 	((_XPrivDisplay)dpy)->screens = &xscreen;
@@ -211,9 +242,69 @@ int main(void)
 	wRandR_Update(&screen);
 	output_info.connection = RR_Connected;
 	wRandR_Update(&screen);
-	assert(configured == 1);
+	assert(configured == 1 && loads && !applied);
 	WMDeleteTimerHandler(screen.randr_debounce_timer);
 	screen.randr_debounce_timer = NULL;
+
+	/* Reconnecting a monitor set with a saved layout restores it instead. */
+	output_info.crtc = None;
+	output_info.connection = RR_Disconnected;
+	loads = 0;
+	wRandR_Update(&screen);
+	assert(loads == 1 && !applied);
+	output_info.connection = RR_Connected;
+	saved_status = MONITOR_LAYOUT_LOADED;
+	configured = 0;
+	wRandR_Update(&screen);
+	assert(loads == 2 && applied == 1 && configured == 0);
+	assert(!state.outputs[0].activate_pending && !state.restore_pending);
+	assert(screen.randr_debounce_timer);
+	WMDeleteTimerHandler(screen.randr_debounce_timer);
+	screen.randr_debounce_timer = NULL;
+	/* Our own reconfiguration does not trigger another restore. */
+	wRandR_Update(&screen);
+	assert(loads == 2 && applied == 1);
+
+	/* An output that vanishes entirely (DP-MST) triggers exactly one restore. */
+	state.outputs[1] = state.outputs[0];
+	state.outputs[1].xid = 99;
+	state.outputs[1].crtc = None;
+	state.n_outputs = 2;
+	wRandR_Update(&screen);
+	assert(loads == 3 && applied == 2 && state.n_outputs == 1);
+	WMDeleteTimerHandler(screen.randr_debounce_timer);
+	screen.randr_debounce_timer = NULL;
+	wRandR_Update(&screen);
+	assert(loads == 3 && applied == 2);
+
+	/* A matching layout that is not ready yet is retried before falling back. */
+	output_info.connection = RR_Disconnected;
+	saved_status = MONITOR_LAYOUT_NONE;
+	wRandR_Update(&screen);
+	output_info.connection = RR_Connected;
+	saved_status = MONITOR_LAYOUT_FAILED;
+	loads = 0;
+	for (i = 1; i < RANDR_RESTORE_ATTEMPTS; i++) {
+		wRandR_Update(&screen);
+		assert(loads == i && configured == 0 && state.restore_pending);
+		assert(screen.randr_debounce_timer);
+		WMDeleteTimerHandler(screen.randr_debounce_timer);
+		screen.randr_debounce_timer = NULL;
+	}
+	wRandR_Update(&screen);
+	assert(loads == RANDR_RESTORE_ATTEMPTS && configured == 1 && !state.restore_pending);
+	WMDeleteTimerHandler(screen.randr_debounce_timer);
+	screen.randr_debounce_timer = NULL;
+
+	/* Without HotplugMonitor, connection changes never reconfigure outputs. */
+	output_info.crtc = None;
+	output_info.connection = RR_Disconnected;
+	wPreferences.hotplug_monitor = False;
+	wRandR_Update(&screen);
+	output_info.connection = RR_Connected;
+	loads = 0;
+	wRandR_Update(&screen);
+	assert(loads == 0 && configured == 1);
 
 	wfree(screen.xine_info.screens);
 	wfree(screen.usableArea);

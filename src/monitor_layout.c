@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 
 static Bool fail(char *error, size_t size, const char *format, ...)
 {
@@ -31,6 +32,8 @@ void MonitorLayoutFree(MonitorLayout *layout)
 		MonitorOutput *o = &layout->outputs[i];
 
 		wfree(o->name);
+		if (o->identity)
+			wfree(o->identity);
 		wfree(o->crtcs);
 		for (j = 0; j < o->nmode; j++)
 			wfree(o->modes[j].name);
@@ -53,6 +56,7 @@ MonitorLayout *MonitorLayoutCopy(const MonitorLayout *layout)
 
 		*o = *src;
 		o->name = wstrdup(src->name);
+		o->identity = src->identity ? wstrdup(src->identity) : NULL;
 		o->crtcs = wmalloc(sizeof(*o->crtcs) * WMAX(1, o->ncrtc));
 		memcpy(o->crtcs, src->crtcs, sizeof(*o->crtcs) * o->ncrtc);
 		o->modes = wmalloc(sizeof(*o->modes) * WMAX(1, o->nmode));
@@ -78,17 +82,44 @@ static unsigned long modeRate(const XRRModeInfo *mode)
 	return (unsigned long)(rate + 0.5);
 }
 
+/* Connector names can change (e.g. DP-MST renumbering) or be reused by another
+ * dock, so the EDID vendor, product and serial identify the attached monitor. */
+static char *outputIdentity(Display *dpy, RROutput output, Atom edid)
+{
+	static const unsigned char header[] = { 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0 };
+	unsigned char *data = NULL;
+	unsigned long count, after;
+	Atom type;
+	int format, i;
+	char *identity = NULL;
+
+	if (edid == None ||
+	    XRRGetOutputProperty(dpy, output, edid, 0, 32, False, False, AnyPropertyType,
+				 &type, &format, &count, &after, &data) != Success)
+		return NULL;
+	if (data && format == 8 && count >= 18 && !memcmp(data, header, sizeof(header))) {
+		identity = wmalloc(21);
+		for (i = 0; i < 10; i++)
+			snprintf(identity + i * 2, 3, "%02x", data[8 + i]);
+	}
+	if (data)
+		XFree(data);
+	return identity;
+}
+
 MonitorLayout *MonitorLayoutQuery(Display *dpy, Window root, char *error, size_t size)
 {
 	XRRScreenResources *resources;
 	XWindowAttributes attrs;
 	MonitorLayout *layout;
+	Atom edid;
 	int i, j, k;
 
 	if (!XGetWindowAttributes(dpy, root, &attrs)) {
 		fail(error, size, _("Could not query the desktop geometry."));
 		return NULL;
 	}
+	edid = XInternAtom(dpy, RR_PROPERTY_RANDR_EDID, True);
 	resources = XRRGetScreenResourcesCurrent(dpy, root);
 	if (!resources) {
 		fail(error, size, _("Could not query RandR outputs."));
@@ -116,6 +147,8 @@ MonitorLayout *MonitorLayoutQuery(Display *dpy, Window root, char *error, size_t
 		memcpy(o->name, info->name, info->nameLen);
 		o->name[info->nameLen] = '\0';
 		o->connected = info->connection == RR_Connected;
+		if (o->connected)
+			o->identity = outputIdentity(dpy, o->id, edid);
 		o->crtc = info->crtc;
 		o->rotation = RR_Rotate_0;
 		o->mode = -1;
@@ -266,6 +299,7 @@ Bool MonitorLayoutSame(const MonitorLayout *a, const MonitorLayout *b, Bool topo
 		const MonitorOutput *o = &a->outputs[i], *p = &b->outputs[i];
 
 		if (o->id != p->id || strcmp(o->name, p->name) || o->connected != p->connected ||
+		    (!o->identity) != (!p->identity) || (o->identity && strcmp(o->identity, p->identity)) ||
 		    o->nmode != p->nmode || o->ncrtc != p->ncrtc || o->supported != p->supported)
 			return False;
 		for (j = 0; j < o->nmode; j++)
@@ -516,19 +550,14 @@ static void setNumber(WMPropList *dict, const char *name, long value)
 	setValue(dict, name, text);
 }
 
-Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *error, size_t size)
+#define MAX_SAVED_LAYOUTS 32
+
+static WMPropList *profileFromLayout(const MonitorLayout *layout)
 {
 	WMPropList *dict = WMCreatePLDictionary(NULL, NULL);
 	WMPropList *outputs = WMCreatePLDictionary(NULL, NULL), *key;
-	Bool success;
 	int i;
 
-	if (!MonitorLayoutValidate(layout, error, size)) {
-		WMReleasePropList(dict);
-		WMReleasePropList(outputs);
-		return False;
-	}
-	setValue(dict, "Version", "1");
 	for (i = 0; i < layout->count; i++) {
 		const MonitorOutput *o = &layout->outputs[i];
 		WMPropList *entry;
@@ -544,6 +573,8 @@ Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *erro
 			setValue(entry, "Mode", o->modes[o->mode].name);
 			setNumber(entry, "Rate", o->modes[o->mode].rate);
 		}
+		if (o->identity)
+			setValue(entry, "Identity", o->identity);
 		key = WMCreatePLString(o->name);
 		WMPutInPLDictionary(outputs, key, entry);
 		WMReleasePropList(key);
@@ -555,11 +586,7 @@ Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *erro
 	WMPutInPLDictionary(dict, key, outputs);
 	WMReleasePropList(key);
 	WMReleasePropList(outputs);
-	success = WMWritePropListToFile(dict, path);
-	WMReleasePropList(dict);
-	if (!success)
-		return fail(error, size, _("Could not save the monitor layout to %s."), path);
-	return True;
+	return dict;
 }
 
 static Bool readNumber(WMPropList *dict, const char *key, long *number)
@@ -575,55 +602,196 @@ static Bool readNumber(WMPropList *dict, const char *key, long *number)
 	return !errno && end != text && !*end;
 }
 
-static Bool monitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size,
-			      Bool exact)
+/* Returns a retained array of saved layouts, most recently saved first.
+ * Version 1 files hold a single layout at the top level. */
+static WMPropList *readProfiles(const char *path, Bool *missing, char *error, size_t size)
 {
-	WMPropList *dict = WMReadPropListFromFile(path), *outputs, *primary;
-	MonitorLayout *copy = MonitorLayoutCopy(layout);
+	WMPropList *dict, *profiles = NULL, *layouts;
 	long version;
-	int i, j, matched = 0, connected = 0;
-	Bool success = False;
+	int i;
 
-	if (!dict || !WMIsPLDictionary(dict) || !readNumber(dict, "Version", &version) || version != 1) {
-		fail(error, size, _("Could not read a supported monitor layout from %s."), path);
-		goto done;
+	*missing = False;
+	if (access(path, F_OK) < 0 && (errno == ENOENT || errno == ENOTDIR)) {
+		*missing = True;
+		fail(error, size, _("No monitor layout has been saved yet."));
+		return NULL;
 	}
-	outputs = getValue(dict, "Outputs");
-	primary = getValue(dict, "Primary");
-	if (!outputs || !WMIsPLDictionary(outputs) || (primary && !WMIsPLString(primary)))
-		goto invalid;
-	if (exact) {
-		WMPropList *keys = WMGetPLDictionaryKeys(outputs);
-		int key_count = WMGetPropListItemCount(keys);
+	dict = WMReadPropListFromFile(path);
+	if (!dict || !WMIsPLDictionary(dict) || !readNumber(dict, "Version", &version))
+		goto unsupported;
+	if (version == 1) {
+		profiles = WMCreatePLArray(dict, NULL);
+	} else if (version == 2) {
+		layouts = getValue(dict, "Layouts");
+		if (!layouts || !WMIsPLArray(layouts))
+			goto unsupported;
+		for (i = 0; i < WMGetPropListItemCount(layouts); i++)
+			if (!WMIsPLDictionary(WMGetFromPLArray(layouts, i)))
+				goto unsupported;
+		profiles = WMRetainPropList(layouts);
+	} else {
+		goto unsupported;
+	}
+	WMReleasePropList(dict);
+	return profiles;
 
-		WMReleasePropList(keys);
-		for (i = 0; i < copy->count; i++)
-			if (copy->outputs[i].connected)
-				connected++;
-		if (key_count != connected) {
-			fail(error, size, _("The saved layout contains %d monitors, but %d are connected."),
-			     key_count, connected);
-			goto done;
+unsupported:
+	if (dict)
+		WMReleasePropList(dict);
+	fail(error, size, _("Could not read a supported monitor layout from %s."), path);
+	return NULL;
+}
+
+static const char *entryIdentity(WMPropList *entry)
+{
+	WMPropList *value = entry && WMIsPLDictionary(entry) ? getValue(entry, "Identity") : NULL;
+
+	return value && WMIsPLString(value) ? WMGetFromPLString(value) : NULL;
+}
+
+/* Map connected outputs to saved entries: by connector name when the monitor
+ * identity agrees (or is unknown), then by identity alone for renamed
+ * connectors.  Returns the number of mapped outputs, or -1 if invalid. */
+static int matchProfile(WMPropList *profile, const MonitorLayout *layout, WMPropList **keys,
+			Bool *exact)
+{
+	WMPropList *outputs = getValue(profile, "Outputs"), *names;
+	int i, j, k, count, matched = 0, connected = 0;
+	Bool *used;
+
+	*exact = False;
+	for (i = 0; i < layout->count; i++)
+		keys[i] = NULL;
+	if (!outputs || !WMIsPLDictionary(outputs))
+		return -1;
+	names = WMGetPLDictionaryKeys(outputs);
+	count = WMGetPropListItemCount(names);
+	for (j = 0; j < count; j++)
+		if (!WMIsPLString(WMGetFromPLArray(names, j))) {
+			WMReleasePropList(names);
+			return -1;
 		}
-	}
-	copy->primary = None;
-	for (i = 0; i < copy->count; i++) {
-		MonitorOutput *o = &copy->outputs[i];
-		WMPropList *entry = getValue(outputs, o->name), *mode;
-		long enabled, x, y, rotation, rate;
+	used = wmalloc(sizeof(*used) * WMAX(1, count));
+	for (i = 0; i < layout->count; i++) {
+		const MonitorOutput *o = &layout->outputs[i];
 
 		if (!o->connected)
 			continue;
-		if (!entry) {
-			if (exact) {
-				fail(error, size, _("The saved layout does not include connected monitor %s."),
-				     o->name);
-				goto done;
-			}
+		connected++;
+		for (j = 0; j < count; j++) {
+			WMPropList *name = WMGetFromPLArray(names, j);
+			const char *identity = entryIdentity(WMGetFromPLDictionary(outputs, name));
+
+			if (!used[j] && !strcmp(WMGetFromPLString(name), o->name) &&
+			    (!identity || !o->identity || !strcmp(identity, o->identity)))
+				break;
+		}
+		if (j < count) {
+			used[j] = True;
+			keys[i] = WMGetFromPLArray(names, j);
+			matched++;
+		}
+	}
+	for (i = 0; i < layout->count; i++) {
+		const MonitorOutput *o = &layout->outputs[i];
+		int candidate = -1;
+
+		if (!o->connected || keys[i] || !o->identity)
+			continue;
+		for (k = 0; k < layout->count; k++)
+			if (k != i && layout->outputs[k].connected && !keys[k] && layout->outputs[k].identity &&
+			    !strcmp(layout->outputs[k].identity, o->identity))
+				break;
+		if (k < layout->count)
+			continue;
+		for (j = 0; j < count; j++) {
+			const char *identity = entryIdentity(WMGetFromPLDictionary(outputs, WMGetFromPLArray(names, j)));
+
+			if (used[j] || !identity || strcmp(identity, o->identity))
+				continue;
+			candidate = candidate < 0 ? j : -2;
+		}
+		if (candidate >= 0) {
+			used[candidate] = True;
+			keys[i] = WMGetFromPLArray(names, candidate);
+			matched++;
+		}
+	}
+	*exact = matched == connected && matched == count;
+	wfree(used);
+	/* Keys stay valid while the profile dictionary retains them. */
+	WMReleasePropList(names);
+	return matched;
+}
+
+Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *error, size_t size)
+{
+	WMPropList *dict, *profiles, *saved, *key;
+	WMPropList **keys;
+	Bool success, missing, exact;
+	int i;
+
+	if (!MonitorLayoutValidate(layout, error, size))
+		return False;
+	keys = wmalloc(sizeof(*keys) * WMAX(1, layout->count));
+	profiles = WMCreatePLArray(NULL);
+	WMAddToPLArray(profiles, saved = profileFromLayout(layout));
+	WMReleasePropList(saved);
+	/* Keep layouts for other monitor sets; replace the one for this set. */
+	saved = readProfiles(path, &missing, error, size);
+	if (saved) {
+		for (i = 0; i < WMGetPropListItemCount(saved); i++) {
+			WMPropList *profile = WMGetFromPLArray(saved, i);
+
+			if (WMGetPropListItemCount(profiles) >= MAX_SAVED_LAYOUTS)
+				break;
+			if (matchProfile(profile, layout, keys, &exact) < 0 || exact)
+				continue;
+			WMAddToPLArray(profiles, profile);
+		}
+		WMReleasePropList(saved);
+	}
+	wfree(keys);
+	dict = WMCreatePLDictionary(NULL, NULL);
+	setValue(dict, "Version", "2");
+	key = WMCreatePLString("Layouts");
+	WMPutInPLDictionary(dict, key, profiles);
+	WMReleasePropList(key);
+	WMReleasePropList(profiles);
+	success = WMWritePropListToFile(dict, path);
+	WMReleasePropList(dict);
+	if (!success)
+		return fail(error, size, _("Could not save the monitor layout to %s."), path);
+	return True;
+}
+
+static Bool applyProfile(MonitorLayout *layout, WMPropList *profile, WMPropList **keys, Bool exact,
+			 char *error, size_t size)
+{
+	WMPropList *outputs = getValue(profile, "Outputs"), *primary = getValue(profile, "Primary");
+	MonitorLayout *copy;
+	int i, j;
+	Bool success = False;
+
+	if (primary && !WMIsPLString(primary))
+		return fail(error, size, _("The saved monitor layout contains invalid values."));
+	copy = MonitorLayoutCopy(layout);
+	copy->primary = None;
+	for (i = 0; i < copy->count; i++) {
+		MonitorOutput *o = &copy->outputs[i];
+		WMPropList *entry, *mode;
+		long enabled, x, y, rotation, rate;
+
+		if (!o->connected) {
+			/* Exact restores describe every connected monitor; release the rest. */
+			if (exact)
+				o->enabled = False;
 			continue;
 		}
-		matched++;
-		if (!WMIsPLDictionary(entry) || !readNumber(entry, "Enabled", &enabled) ||
+		if (!keys[i])
+			continue;
+		entry = WMGetFromPLDictionary(outputs, keys[i]);
+		if (!entry || !WMIsPLDictionary(entry) || !readNumber(entry, "Enabled", &enabled) ||
 		    !readNumber(entry, "X", &x) || !readNumber(entry, "Y", &y) ||
 		    !readNumber(entry, "Rotation", &rotation) || (enabled != 0 && enabled != 1) ||
 		    x < 0 || y < 0 || x > copy->max_width || y > copy->max_height ||
@@ -647,12 +815,8 @@ static Bool monitorLayoutLoad(MonitorLayout *layout, const char *path, char *err
 			}
 			o->mode = j;
 		}
-		if (primary && !strcmp(WMGetFromPLString(primary), o->name) && o->enabled)
+		if (primary && !strcmp(WMGetFromPLString(primary), WMGetFromPLString(keys[i])) && o->enabled)
 			copy->primary = o->id;
-	}
-	if (!matched) {
-		fail(error, size, _("No connected monitors match the saved layout."));
-		goto done;
 	}
 	MonitorLayoutNormalize(copy);
 	if (!MonitorLayoutValidate(copy, error, size))
@@ -671,18 +835,66 @@ static Bool monitorLayoutLoad(MonitorLayout *layout, const char *path, char *err
 invalid:
 	fail(error, size, _("The saved monitor layout contains invalid values."));
 done:
-	if (dict)
-		WMReleasePropList(dict);
 	MonitorLayoutFree(copy);
 	return success;
 }
 
-Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size)
+static MonitorLayoutStatus monitorLayoutLoad(MonitorLayout *layout, const char *path, char *error,
+					     size_t size, Bool exact)
 {
-	return monitorLayoutLoad(layout, path, error, size, False);
+	WMPropList *profiles, *best = NULL;
+	WMPropList **keys = wmalloc(sizeof(*keys) * WMAX(1, layout->count));
+	WMPropList **best_keys = wmalloc(sizeof(*keys) * WMAX(1, layout->count));
+	MonitorLayoutStatus status = MONITOR_LAYOUT_FAILED;
+	Bool missing, matches_all, best_exact = False;
+	int i, matched, best_matched = 0;
+
+	profiles = readProfiles(path, &missing, error, size);
+	if (!profiles) {
+		if (missing)
+			status = MONITOR_LAYOUT_NONE;
+		goto done;
+	}
+	for (i = 0; i < WMGetPropListItemCount(profiles) && !best_exact; i++) {
+		WMPropList *profile = WMGetFromPLArray(profiles, i);
+
+		matched = matchProfile(profile, layout, keys, &matches_all);
+		if (matched < 0)
+			continue;
+		if (exact && !matches_all)
+			continue;
+		/* The first complete match wins; otherwise prefer the largest overlap. */
+		if (!matches_all && matched <= best_matched)
+			continue;
+		best = profile;
+		best_matched = matched;
+		best_exact = matches_all;
+		memcpy(best_keys, keys, sizeof(*keys) * layout->count);
+	}
+	if (!best) {
+		status = MONITOR_LAYOUT_NONE;
+		if (exact)
+			fail(error, size, _("No saved layout matches the connected monitors."));
+		else
+			fail(error, size, _("No connected monitors match the saved layout."));
+		goto done;
+	}
+	if (applyProfile(layout, best, best_keys, exact, error, size))
+		status = MONITOR_LAYOUT_LOADED;
+done:
+	if (profiles)
+		WMReleasePropList(profiles);
+	wfree(keys);
+	wfree(best_keys);
+	return status;
 }
 
-Bool MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size)
+Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size)
+{
+	return monitorLayoutLoad(layout, path, error, size, False) == MONITOR_LAYOUT_LOADED;
+}
+
+MonitorLayoutStatus MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size)
 {
 	return monitorLayoutLoad(layout, path, error, size, True);
 }

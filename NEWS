@@ -155,8 +155,12 @@ RandR and multi-monitor improvements
 
 RandR version >= 1.3 is automatically enabled when detected. The
 "HotplugMonitor" option in ~/GNUstep/Defaults/WindowMaker (YES by default)
-automatically activates newly connected monitors to the right of the
-existing layout. Set it to NO to manage the layout manually with tools
+restores the layout saved with wmmonitors for the connected set of
+monitors whenever monitors are connected or disconnected, e.g. when
+docking or undocking a laptop. One layout is remembered per set of
+monitors, identified by connector name and EDID. Without a saved layout,
+newly connected monitors are activated to the right of the existing
+layout. Set it to NO to manage the layout manually with tools
 such as xrandr or arandr. Existing explicit NO settings are preserved.
 This option is also available in WPrefs expert panel under
 "Automatically (de)activate monitors on hotplug events".

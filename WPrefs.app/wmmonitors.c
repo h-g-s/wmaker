@@ -855,7 +855,7 @@ static void keepChanges(WMWidget *widget, void *data)
 	MonitorLayoutFree(editor->rollback);
 	editor->rollback = NULL;
 	WMUnmapWidget(editor->confirmation);
-	reload(editor, _("Layout confirmed for this session. Use Save Layout to restore it at startup with the same monitors."));
+	reload(editor, _("Layout confirmed for this session. Use Save Layout to restore it whenever the same monitors are connected."));
 }
 
 static void revertChanges(WMWidget *widget, void *data)
@@ -965,7 +965,7 @@ static void saveLayout(WMWidget *widget, void *data)
 		report(editor, error);
 		return;
 	}
-	snprintf(text, sizeof(text), _("Layout saved to %s. Load Layout stages it now; Window Maker restores it at startup when the same monitors are connected."), editor->path);
+	snprintf(text, sizeof(text), _("Layout saved to %s for these monitors. Window Maker restores it at startup and whenever the same monitors are connected again."), editor->path);
 	WMSetLabelText(editor->status, text);
 	updateButtons(editor);
 }
@@ -986,7 +986,7 @@ static void loadLayout(WMWidget *widget, void *data)
 		return;
 	}
 	edited(editor);
-	WMSetLabelText(editor->status, _("Saved layout staged. Missing monitors are ignored; new monitors keep their settings."));
+	WMSetLabelText(editor->status, _("Saved layout staged. Missing monitors are ignored; monitors without saved settings keep their settings."));
 }
 
 static void monitorChanged(void *data)
@@ -1176,7 +1176,7 @@ static void createEditor(MonitorEditor *editor)
 	WMMapSubwidgets(editor->column);
 	WMMapSubwidgets(editor->window);
 	WMMapWidget(editor->window);
-	WMSetLabelText(editor->status, _("Apply changes for this session. Save Layout restores the layout at startup when the same monitors are connected; Load Layout stages it now."));
+	WMSetLabelText(editor->status, _("Apply changes for this session. Save Layout remembers the layout for these monitors and restores it when they are connected; Load Layout stages it now."));
 	paint(editor);
 }
 #endif

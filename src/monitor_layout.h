@@ -20,6 +20,7 @@ typedef struct {
 typedef struct {
 	RROutput id;
 	char *name;
+	char *identity;	/* EDID vendor/product/serial, or NULL */
 	Bool connected, enabled;
 	RRCrtc crtc;
 	RRCrtc *crtcs;
@@ -39,6 +40,12 @@ typedef struct {
 	Bool transformed;
 } MonitorLayout;
 
+typedef enum {
+	MONITOR_LAYOUT_NONE,	/* no saved layout for the connected monitors */
+	MONITOR_LAYOUT_LOADED,
+	MONITOR_LAYOUT_FAILED	/* a matching layout exists but cannot be used now */
+} MonitorLayoutStatus;
+
 MonitorLayout *MonitorLayoutQuery(Display *dpy, Window root, char *error, size_t size);
 MonitorLayout *MonitorLayoutCopy(const MonitorLayout *layout);
 void MonitorLayoutFree(MonitorLayout *layout);
@@ -50,6 +57,6 @@ Bool MonitorLayoutApply(Display *dpy, Window root, const MonitorLayout *layout, 
 Bool MonitorLayoutRestore(Display *dpy, Window root, const MonitorLayout *layout, char *error, size_t size);
 Bool MonitorLayoutSave(const MonitorLayout *layout, const char *path, char *error, size_t size);
 Bool MonitorLayoutLoad(MonitorLayout *layout, const char *path, char *error, size_t size);
-Bool MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size);
+MonitorLayoutStatus MonitorLayoutLoadExact(MonitorLayout *layout, const char *path, char *error, size_t size);
 #endif
 #endif

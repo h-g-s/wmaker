@@ -122,14 +122,14 @@ static void modelTests(const char *path)
 	assert(MonitorLayoutValidate(layout, error, sizeof(error)));
 	assert(MonitorLayoutSave(layout, path, error, sizeof(error)));
 	copy = MonitorLayoutCopy(layout);
-	assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
 	wfree(copy->outputs[2].name);
 	copy->outputs[2].name = wstrdup("DP-4");
-	assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)) == MONITOR_LAYOUT_NONE);
 	wfree(copy->outputs[2].name);
 	copy->outputs[2].name = wstrdup("DP-3");
 	copy->outputs[2].connected = False;
-	assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+	assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)) == MONITOR_LAYOUT_NONE);
 	copy->outputs[2].connected = True;
 	copy->outputs[0].id = 100;
 	copy->outputs[0].rotation = RR_Rotate_0;
@@ -164,11 +164,133 @@ static void modelTests(const char *path)
 		layout = fixture();
 		copy = MonitorLayoutCopy(layout);
 		assert(!MonitorLayoutLoad(copy, path, error, sizeof(error)));
-		assert(!MonitorLayoutLoadExact(copy, path, error, sizeof(error)));
+		assert(MonitorLayoutLoadExact(copy, path, error, sizeof(error)) != MONITOR_LAYOUT_LOADED);
 		assert(MonitorLayoutSame(layout, copy, False));
 		MonitorLayoutFree(copy);
 		MonitorLayoutFree(layout);
 	}
+}
+
+static int savedLayoutCount(const char *path)
+{
+	WMPropList *dict = WMReadPropListFromFile(path), *key = WMCreatePLString("Layouts");
+	int count = WMGetPropListItemCount(WMGetFromPLDictionary(dict, key));
+
+	WMReleasePropList(key);
+	WMReleasePropList(dict);
+	return count;
+}
+
+/* Docking and undocking switch between layouts saved for each monitor set. */
+static void profileTests(const char *path)
+{
+	MonitorLayout *docked = fixture(), *laptop, *live;
+	char error[512];
+	int i;
+
+	unlink(path);
+	assert(MonitorLayoutLoadExact(docked, path, error, sizeof(error)) == MONITOR_LAYOUT_NONE);
+	for (i = 0; i < 3; i++) {
+		docked->outputs[i].identity = wstrdup(i == 0 ? "aaaa" : i == 1 ? "bbbb" : "cccc");
+		docked->outputs[i].enabled = True;
+		docked->outputs[i].x = (2 - i) * 1920;
+	}
+	docked->width = 5760;
+	docked->primary = 2;
+	assert(MonitorLayoutSave(docked, path, error, sizeof(error)));
+	laptop = MonitorLayoutCopy(docked);
+	laptop->outputs[1].connected = laptop->outputs[2].connected = False;
+	laptop->outputs[1].enabled = laptop->outputs[2].enabled = False;
+	laptop->outputs[0].x = 0;
+	laptop->primary = 1;
+	assert(MonitorLayoutSave(laptop, path, error, sizeof(error)));
+	assert(MonitorLayoutSave(laptop, path, error, sizeof(error)));
+	assert(savedLayoutCount(path) == 2);
+
+	/* Reconnecting the dock restores its layout instead of the live placement. */
+	live = MonitorLayoutCopy(docked);
+	for (i = 0; i < 3; i++)
+		live->outputs[i].x = i * 1920;
+	live->primary = 1;
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+	assert(live->outputs[0].x == 3840 && live->outputs[1].x == 1920 && live->outputs[2].x == 0);
+	assert(live->primary == 2);
+	MonitorLayoutFree(live);
+
+	/* Undocking selects the laptop layout and releases disconnected outputs. */
+	live = MonitorLayoutCopy(laptop);
+	live->outputs[1].enabled = True;
+	live->outputs[0].x = 500;
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+	assert(live->outputs[0].x == 0 && !live->outputs[1].enabled && live->primary == 1);
+	MonitorLayoutFree(live);
+
+	/* Renamed connectors are recognized by EDID identity. */
+	live = MonitorLayoutCopy(docked);
+	wfree(live->outputs[1].name);
+	live->outputs[1].name = wstrdup("DP-7");
+	for (i = 0; i < 3; i++)
+		live->outputs[i].x = i * 1920;
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+	assert(live->outputs[1].x == 1920 && live->outputs[2].x == 0 && live->primary == 2);
+	MonitorLayoutFree(live);
+
+	/* Different monitors on the same connectors do not reuse the layout. */
+	live = MonitorLayoutCopy(docked);
+	wfree(live->outputs[2].identity);
+	live->outputs[2].identity = wstrdup("dddd");
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_NONE);
+	/* A matching layout whose mode is temporarily unavailable is retryable. */
+	wfree(live->outputs[2].identity);
+	live->outputs[2].identity = wstrdup("cccc");
+	live->outputs[2].modes[0].rate = 30000;
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_FAILED);
+	MonitorLayoutFree(live);
+
+	/* Saving the dock layout again replaces only its own entry. */
+	docked->outputs[0].x = 0;
+	docked->outputs[2].x = 3840;
+	assert(MonitorLayoutSave(docked, path, error, sizeof(error)));
+	assert(savedLayoutCount(path) == 2);
+	live = MonitorLayoutCopy(laptop);
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+	MonitorLayoutFree(live);
+	live = MonitorLayoutCopy(docked);
+	docked->outputs[0].x = 3840;
+	docked->outputs[2].x = 0;
+	assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+	assert(live->outputs[0].x == 0 && live->outputs[2].x == 3840);
+	MonitorLayoutFree(live);
+
+	/* Version 1 files without identities remain usable. */
+	{
+		WMPropList *v1 = WMCreatePropListFromDescription(
+			"{Version=1; Primary=\"DP-1\"; Outputs={\"DP-1\"={Enabled=1; X=0; Y=0; Rotation=1; "
+			"Mode=1920x1080; Rate=60000;};};}");
+
+		assert(v1 && WMWritePropListToFile(v1, path));
+		WMReleasePropList(v1);
+		live = MonitorLayoutCopy(laptop);
+		assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_LOADED);
+		MonitorLayoutFree(live);
+		assert(MonitorLayoutSave(docked, path, error, sizeof(error)));
+		assert(savedLayoutCount(path) == 2);
+	}
+	/* Malformed entries are skipped instead of crashing the reader. */
+	{
+		WMPropList *bad = WMCreatePropListFromDescription(
+			"{Version=2; Layouts=({Outputs={<00>={};};});}");
+
+		assert(bad && WMWritePropListToFile(bad, path));
+		WMReleasePropList(bad);
+		live = MonitorLayoutCopy(laptop);
+		assert(MonitorLayoutLoadExact(live, path, error, sizeof(error)) == MONITOR_LAYOUT_NONE);
+		MonitorLayoutFree(live);
+		assert(MonitorLayoutSave(laptop, path, error, sizeof(error)));
+		assert(savedLayoutCount(path) == 1);
+	}
+	MonitorLayoutFree(laptop);
+	MonitorLayoutFree(docked);
 }
 
 static void allocationTests(void)
@@ -578,6 +700,7 @@ int main(int argc, char **argv)
 	path = wstrconcat(directory, "/layout");
 	WMInitializeApplication("monitor_layout_test", &argc, argv);
 	modelTests(path);
+	profileTests(path);
 	allocationTests();
 	dpy = XOpenDisplay(NULL);
 	if (dpy) {

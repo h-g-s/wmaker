@@ -46,16 +46,30 @@ restored safely; the editor reloads the available outputs and reports this.
 .B Save Layout
 stores the confirmed live layout in the GNUstep defaults file
 .BR WMMonitorLayout .
-At startup, Window Maker automatically applies this layout only when the set
-of connected monitor connector names exactly matches the saved set.
-If the sets differ, or a saved mode is no longer available, the layout is not
-applied and Window Maker continues with the current X-server configuration.
+A separate layout is kept for each set of connected monitors, so for example
+a docked multi-monitor layout and a laptop-only layout can both be saved.
+Saving replaces only the layout for the currently connected set.
+Monitors are identified by connector name and by the vendor, product and
+serial number from their EDID; a monitor whose connector was renamed (as can
+happen with DisplayPort MST docks) is still recognized by its EDID, and a
+different monitor on the same connector is not mistaken for the saved one.
+.PP
+At startup, and whenever monitors are connected or disconnected while the
+.B HotplugMonitor
+option is enabled (the default), Window Maker applies the saved layout that
+exactly matches the connected monitors.
+If no saved layout matches, newly connected monitors are placed to the right
+of the active ones using their preferred mode.
+If a matching layout cannot be applied yet, for example because a dock has not
+reported a saved mode, Window Maker retries briefly before falling back.
 .B Load Layout
-stages the saved layout for review; it does not activate it.
-Outputs are matched by connector name, and modes by name and refresh rate,
-not by X-server resource identifiers.
-Missing monitors are ignored, and newly attached monitors retain their live
-settings. Unavailable saved modes and invalid layouts are reported as errors.
+stages the saved layout that best matches the connected monitors for review;
+it does not activate it.
+Modes are matched by name and refresh rate, not by X-server resource
+identifiers.
+Missing monitors are ignored, and monitors without saved settings retain their
+live settings. Unavailable saved modes and invalid layouts are reported as
+errors.
 .SH OPTIONS
 .TP
 .BI \-display " display"
@@ -69,7 +83,7 @@ Print the version and exit.
 .SH FILES
 .TP
 .B ~/GNUstep/Defaults/WMMonitorLayout
-Saved monitor configuration. WMAKER_USER_ROOT can relocate the GNUstep directory.
+Saved monitor layouts, one per set of connected monitors. WMAKER_USER_ROOT can relocate the GNUstep directory.
 .SH SEE ALSO
 .BR WPrefs (1),
 .BR wmwallpaper (1),
