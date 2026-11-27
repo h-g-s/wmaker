@@ -735,7 +735,7 @@ WM_CHECK_LIBPANGO
 
 dnl GIO provides standards-aware desktop application discovery and launching.
 AC_ARG_ENABLE([desktop-menus],
-    [AS_HELP_STRING([--disable-desktop-menus], [disable GIO-based Applications menus])],
+    [AS_HELP_STRING([--disable-desktop-menus], [disable GIO-based Applications menus and default application settings])],
     [AS_CASE([$enableval], [yes|no], [],
         [AC_MSG_ERROR([bad value for --enable-desktop-menus])])],
     [enable_desktop_menus=auto])
@@ -744,7 +744,7 @@ AS_IF([test "x$enable_desktop_menus" != xno], [
         [AC_DEFINE([HAVE_GIO], [1], [Define if GIO desktop application support is available])],
         [AS_IF([test "x$enable_desktop_menus" = xyes],
             [AC_MSG_ERROR([GIO desktop menus require gio-unix-2.0 >= 2.44])],
-            [AC_MSG_WARN([GIO not found; Applications menus will be unavailable])])])
+            [AC_MSG_WARN([GIO not found; Applications menus and default application settings will be unavailable])])])
 ])
 
 AC_CHECK_MEMBERS([struct stat.st_mtim.tv_nsec, struct stat.st_ctim.tv_nsec,

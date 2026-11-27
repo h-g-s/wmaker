@@ -1,0 +1,62 @@
+.TH wmapplications 1 "2026" "Window Maker"
+.SH NAME
+wmapplications \- choose default desktop applications
+.SH SYNOPSIS
+.B wmapplications
+.RI [ options ]
+.SH DESCRIPTION
+.B wmapplications
+is a WINGs dialog for selecting a web browser, email client, terminal
+emulator, file manager and archive manager from installed desktop entries.
+It requires a build with GIO desktop application support.
+.PP
+The Apply button saves changed selections using GIO and the freedesktop.org
+MIME Applications specification. Only MIME types and URL schemes declared
+by the chosen application are changed. Other associations are preserved.
+The browser covers HTTP, HTTPS and HTML, email covers mailto, and the file
+manager covers directories. The archive manager covers common ZIP, tar,
+gzip, bzip2, XZ, 7z, RAR and Zstandard formats that it supports.
+.PP
+If existing associations differ or no default is configured, the dialog
+shows "Keep existing defaults". This option never changes associations.
+Saving multiple associations is not transactional: an error is reported
+if saving fails, but earlier successful changes may remain.
+.PP
+Terminal selection uses the proposed xdg-terminal-exec configuration,
+not a MIME association. It is enabled only when xdg-terminal-exec is
+installed and compatible terminal desktop entries are available.
+Eligible entries have the TerminalEmulator category and an
+X-TerminalArgExec or TerminalArgExec key, which may be empty.
+The selected desktop ID is prepended to the highest-priority applicable
+user xdg-terminals.list file. Existing comments, directives and fallback
+preferences are retained.
+This setting affects programs using xdg-terminal-exec, not legacy terminal
+commands, shell environment variables or system alternatives.
+.SH OPTIONS
+.TP
+.BI \-display " host:display.screen"
+specify display to use.
+.TP
+.BR \-\-help " | " \-h
+print a help message and exit.
+.TP
+.BR \-\-version " | " \-v
+print the version and exit.
+.SH FILES
+.TP
+.B $XDG_CONFIG_HOME/mimeapps.list
+User MIME application associations managed by GIO.
+Desktop-specific associations may take precedence.
+.TP
+.B $XDG_CONFIG_HOME/xdg-terminals.list
+User terminal preferences. A desktop-specific file named
+desktop-xdg-terminals.list is used when XDG_CURRENT_DESKTOP is set.
+.PP
+XDG_CONFIG_HOME defaults to ~/.config.
+Applications are discovered in the XDG data hierarchy's applications
+directories, including ~/.local/share/applications and /usr/share/applications.
+.SH SEE ALSO
+.BR WPrefs (1),
+.BR xdg-mime (1),
+.BR xdg-open (1),
+.BR xdg-terminal-exec (1)

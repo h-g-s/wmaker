@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Default Applications
+Comment=Choose default web, email, terminal, file and archive applications
+Exec=#bindir#/wmapplications
+Icon=preferences-desktop-default-applications
+Categories=Settings;DesktopSettings;
+Terminal=false

@@ -6,7 +6,7 @@ wpexecbindir = @wprefs_bindir@
 
 wpexecbin_PROGRAMS = WPrefs
 
-bin_PROGRAMS = wmwallpaper wmmonitors
+bin_PROGRAMS = wmwallpaper wmmonitors wmapplications
 
 wpdatadir = @wprefs_datadir@
 
@@ -14,7 +14,7 @@ wpdata_DATA = WPrefs.tiff WPrefs.xpm
 
 applicationsdir = @datadir@/applications
 
-applications_DATA = WPrefs.desktop wmmonitors.desktop wmwallpaper.desktop
+applications_DATA = WPrefs.desktop wmmonitors.desktop wmwallpaper.desktop wmapplications.desktop
 
 WPrefs.desktop: WPrefs.desktop.in
 	$(AM_V_GEN)sed -e "s:#wprefs_bindir#:${wprefs_bindir}:" \
@@ -26,12 +26,16 @@ wmmonitors.desktop: wmmonitors.desktop.in
 wmwallpaper.desktop: wmwallpaper.desktop.in
 	$(AM_V_GEN)sed -e "s:#bindir#:$(bindir):" $< > $@
 
+wmapplications.desktop: wmapplications.desktop.in
+	$(AM_V_GEN)sed -e "s:#bindir#:$(bindir):" $< > $@
+
 EXTRA_DIST = $(wpdata_DATA) \
 	KeyboardSettings.c \
 	Themes.c \
 	WPrefs.desktop.in \
 	wmmonitors.desktop.in \
-	wmwallpaper.desktop.in
+	wmwallpaper.desktop.in \
+	wmapplications.desktop.in
 
 DISTCLEANFILES = $(applications_DATA)
 
@@ -101,7 +105,14 @@ wmwallpaper_LDADD = $(WPrefs_LDADD)
 wmmonitors_SOURCES = wmmonitors.c ../src/monitor_layout.c ../src/monitor_layout.h PanelLayout.c PanelLayout.h
 wmmonitors_LDADD = $(WPrefs_LDADD) @LIBXRANDR@
 
-check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test monitor_layout_test autostart_test
+wmapplications_SOURCES = wmapplications.c ApplicationDefaults.c ApplicationDefaults.h PanelLayout.c PanelLayout.h
+wmapplications_CPPFLAGS = $(AM_CPPFLAGS) @GIO_CFLAGS@
+wmapplications_LDADD = $(WPrefs_LDADD) @GIO_LIBS@
+
+check_PROGRAMS = font_controls_test window_handling_test icons_test paths_test configurations_test keyboard_shortcuts_test hot_corner_test mouse_settings_test expert_test font_simple_test menu_test appearance_test wallpaper_test monitor_layout_test autostart_test application_defaults_test
+application_defaults_test_SOURCES = application_defaults_test.c ApplicationDefaults.c ApplicationDefaults.h PanelLayout.c PanelLayout.h
+application_defaults_test_CPPFLAGS = $(AM_CPPFLAGS) @GIO_CFLAGS@
+application_defaults_test_LDADD = $(wmapplications_LDADD)
 autostart_test_SOURCES = autostart_test.c PanelLayout.c PanelLayout.h
 autostart_test_LDADD = $(WPrefs_LDADD)
 monitor_layout_test_SOURCES = monitor_layout_test.c ../src/monitor_layout.h PanelLayout.c PanelLayout.h
@@ -145,6 +156,7 @@ expert_test_CPPFLAGS = $(AM_CPPFLAGS)
 expert_test_LDADD = $(WPrefs_LDADD)
 
 check-local: $(check_PROGRAMS)
+	./application_defaults_test || test $$? -eq 77
 	./font_controls_test || test $$? -eq 77
 	./window_handling_test || test $$? -eq 77
 	./icons_test || test $$? -eq 77

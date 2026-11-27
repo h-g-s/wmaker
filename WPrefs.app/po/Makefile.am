@@ -10,6 +10,8 @@ EXTRA_DIST = bg.po ca.po cs.po de.po es.po et.po fi.po fr.po fy.po hr.po hu.po \
 
 POTFILES  = \
 	$(top_srcdir)/WPrefs.app/Appearance.c \
+	$(top_srcdir)/WPrefs.app/ApplicationDefaults.c \
+	$(top_srcdir)/WPrefs.app/wmapplications.c \
 	$(top_srcdir)/WPrefs.app/Autostart.c \
 	$(top_srcdir)/WPrefs.app/Configurations.c \
 	$(top_srcdir)/WPrefs.app/Docks.c \
@@ -98,4 +100,4 @@ am__v_CHKTRANS_1 =
 # 'make check' will make sure the tranlation sources are in line with the compiled source
 check-local:
 	$(AM_V_CHKTRANS)$(top_srcdir)/script/check-translation-sources.sh \
-		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am" -v WPrefs_SOURCES -v wmmonitors_SOURCES
+		"$(srcdir)" -s "$(top_srcdir)/WPrefs.app/Makefile.am" -v WPrefs_SOURCES -v wmmonitors_SOURCES -v wmapplications_SOURCES
