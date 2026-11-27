@@ -29,6 +29,9 @@
 void wRandRInit(WScreen *scr);
 void wRandRTeardown(WScreen *scr);
 void wRandRHandleNotify(WScreen *scr, XEvent *event);
+WMPropList *wRandRGetPlacements(WScreen *scr);
+void wRandRSetPlacements(WScreen *scr, WMPropList *placements);
+void wRandRApplySavedPlacement(WScreen *scr);
 
 #endif /* USE_RANDR */
 

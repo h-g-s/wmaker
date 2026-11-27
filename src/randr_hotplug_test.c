@@ -120,13 +120,262 @@ void XRRFreeScreenResources(XRRScreenResources *sr)
 }
 
 void wDefaultRefreshWorkspaceBackground(WScreen *scr) { refreshed++; }
-void wDockSwap(WDock *dock) {}
-void wClipSnapToHead(WDock *clip) {}
+static WMRect dock_extent, clip_extent;
+static int dock_head, maximized_head, maximized_calls;
+
+void wDockMoveToEdge(WDock *dock, int head, Bool on_right_side, int y)
+{
+	WMRect r = dock->screen_ptr->xine_info.screens[head];
+
+	dock_head = head;
+	dock->on_right_side = on_right_side;
+	dock->x_pos = on_right_side ? r.pos.x + (int)r.size.width - 64 : r.pos.x;
+	dock->y_pos = y;
+}
+
+void wDockMove(WDock *dock, int x, int y)
+{
+	dock->x_pos = x;
+	dock->y_pos = y;
+}
+
+WMRect wDockGetExtent(WDock *dock)
+{
+	return dock->type == WM_CLIP ? clip_extent : dock_extent;
+}
+
+void wWindowMove(WWindow *wwin, int x, int y)
+{
+	wwin->frame_x = x;
+	wwin->frame_y = y;
+}
+
+void wWindowConfigure(WWindow *wwin, int x, int y, int width, int height)
+{
+	wwin->frame_x = x;
+	wwin->frame_y = y;
+	wwin->frame->core->width = width;
+	wwin->frame->core->height = height;
+}
+
+void wWindowConstrainSize(WWindow *wwin, unsigned int *width, unsigned int *height) {}
+void wWindowSynthConfigureNotify(WWindow *wwin) {}
+
+void wMaximizeWindow(WWindow *wwin, int directions, int head)
+{
+	assert(directions & MAX_KEYBOARD);
+	maximized_head = head;
+	maximized_calls++;
+}
 void wScreenUpdateUsableArea(WScreen *scr) {}
 void wNETWMUpdateWorkarea(WScreen *scr) {}
 void wWindowSnapToHead(WWindow *window) {}
 void wArrangeIcons(WScreen *scr, Bool all) {}
 WMRect wGetRectForHead(WScreen *scr, int head) { return scr->xine_info.screens[head]; }
+
+static void setHeads(WScreen *scr, WRandRState *state, int count, const char **names,
+                     const int (*rects)[4])
+{
+	int i;
+
+	wfree(scr->xine_info.screens);
+	scr->xine_info.screens = wmalloc(sizeof(WMRect) * count);
+	scr->xine_info.count = count;
+	scr->xine_info.primary_head = 0;
+	state->heads.count = count;
+	state->heads.primary = 0;
+	for (i = 0; i < count; i++) {
+		WMRect r = { { rects[i][0], rects[i][1] }, { rects[i][2], rects[i][3] } };
+
+		scr->xine_info.screens[i] = r;
+		state->heads.rects[i] = r;
+		strcpy(state->heads.names[i], names[i]);
+	}
+}
+
+static void initWindow(WWindow *wwin, WFrameWindow *frame, WCoreWindow *core, WScreen *scr,
+                       int x, int y, int w, int h)
+{
+	memset(wwin, 0, sizeof(*wwin));
+	memset(frame, 0, sizeof(*frame));
+	memset(core, 0, sizeof(*core));
+	wwin->screen_ptr = scr;
+	wwin->frame = frame;
+	frame->core = core;
+	wwin->frame_x = x;
+	wwin->frame_y = y;
+	core->width = w;
+	core->height = h;
+	wwin->prev = scr->focused_window;
+	scr->focused_window = wwin;
+}
+
+/* Docking, undocking and redocking the three monitor setup */
+static void placementTests(void)
+{
+	static const char *dock_names[] = { "eDP-1", "DP-1-3", "DP-1-2" };
+	static const int dock_rects[][4] = {
+		{ 4480, 0, 1920, 1200 }, { 0, 0, 1920, 1080 }, { 1920, 0, 2560, 1440 }
+	};
+	static const char *laptop_names[] = { "eDP-1" };
+	static const int laptop_rects[][4] = { { 0, 0, 1920, 1200 } };
+	WScreen scr = { 0 };
+	WRandRState state = { 0 };
+	WDock dock = { 0 }, clip = { 0 };
+	WWorkspace workspace = { 0 }, *workspaces[1] = { &workspace };
+	WWindow on_laptop, on_middle, huge, maximized;
+	WFrameWindow frames[4];
+	WCoreWindow cores[4];
+	WRandRHeads old;
+	char signature[256];
+
+	/* Helpers */
+	setHeads(&scr, &state, 3, dock_names, dock_rects);
+	wRandR_HeadsSignature(&state.heads, signature, sizeof(signature));
+	assert(strcmp(signature, "DP-1-2,DP-1-3,eDP-1") == 0);
+	assert(wRandR_EdgeRelative(10, 1000, 500, 64) == 10);
+	assert(wRandR_EdgeRelative(936, 1000, 500, 64) == 436);
+	/* An oversized clip with icons to the right shows as many as possible */
+	assert(wRandR_ClampSpan(1856, 0, 704, 64, 0, 1920) == 1216);
+	assert(wRandR_ClampSpan(500, 0, 3000, 64, 0, 1920) == 0);
+	assert(wRandR_ClampSpan(500, -3000, 64, 64, 0, 1920) == 1856);
+	assert(wRandR_ClampSpan(-10, -128, 192, 64, 0, 1920) == 128);
+
+	wPreferences.icon_size = 64;
+	wPreferences.flags.noclip = False;
+	scr.workspaces = workspaces;
+	scr.workspace_count = 1;
+	workspace.clip = &clip;
+	scr.dock = &dock;
+	dock.screen_ptr = clip.screen_ptr = &scr;
+	dock.type = WM_DOCK;
+	clip.type = WM_CLIP;
+	clip_extent.size.width = 11 * 64;
+	clip_extent.size.height = 64;
+	dock_extent.size.width = 64;
+	dock_extent.size.height = 5 * 64;
+
+	/* Dock on the right edge of the laptop, clip at the bottom left of the
+	 * middle monitor with its icons extending to the right */
+	dock.on_right_side = True;
+	dock.x_pos = 6400 - 64;
+	dock.y_pos = 0;
+	clip.x_pos = 1920;
+	clip.y_pos = 1440 - 64;
+	initWindow(&on_laptop, &frames[0], &cores[0], &scr, 4500, 100, 800, 600);
+	initWindow(&on_middle, &frames[1], &cores[1], &scr, 3800, 800, 600, 500);
+	initWindow(&huge, &frames[2], &cores[2], &scr, 100, 100, 2000, 1300);
+	initWindow(&maximized, &frames[3], &cores[3], &scr, 1920, 0, 2560, 1440);
+	maximized.flags.maximized = MAX_VERTICAL | MAX_HORIZONTAL;
+	maximized.old_geometry.x = 2000;
+	maximized.old_geometry.y = 50;
+	maximized.old_geometry.width = 600;
+	maximized.old_geometry.height = 400;
+
+	/* Undock: only the laptop remains, now at the origin */
+	old = state.heads;
+	setHeads(&scr, &state, 1, laptop_names, laptop_rects);
+	wRandR_FollowHeads(&scr, &state, &old, True);
+	assert(dock_head == 0 && dock.on_right_side && dock.x_pos == 1920 - 64 && dock.y_pos == 0);
+	assert(clip.x_pos == 0 && clip.y_pos == 1200 - 64);
+	/* Windows follow the laptop panel or move fully onto it */
+	assert(on_laptop.frame_x == 20 && on_laptop.frame_y == 100);
+	assert(on_middle.frame_x == 1240 && on_middle.frame_y == 560);
+	assert(huge.frame_x == 0 && huge.frame_y == 0);
+	assert(cores[2].width == 1920 && cores[2].height == 1200);
+	assert(maximized_calls == 1 && maximized_head == 0);
+	assert(maximized.old_geometry.x == 2000 - 1920);
+
+	/* Clip moved by the user to the bottom right corner of the laptop */
+	clip.x_pos = 1920 - 64;
+	clip.y_pos = 1200 - 64;
+
+	/* Redock: the docked placement comes back, windows follow the laptop */
+	old = state.heads;
+	setHeads(&scr, &state, 3, dock_names, dock_rects);
+	wRandR_FollowHeads(&scr, &state, &old, True);
+	assert(dock_head == 0 && dock.x_pos == 6400 - 64 && dock.y_pos == 0);
+	assert(clip.x_pos == 1920 && clip.y_pos == 1440 - 64);
+	assert(on_laptop.frame_x == 4500 && on_laptop.frame_y == 100);
+
+	/* Undock again: the laptop placement is remembered too, and the clip in
+	 * the corner is moved so that its icons stay visible */
+	old = state.heads;
+	setHeads(&scr, &state, 1, laptop_names, laptop_rects);
+	wRandR_FollowHeads(&scr, &state, &old, True);
+	assert(clip.x_pos == 1920 - 11 * 64 && clip.y_pos == 1200 - 64);
+
+	/* Placements survive a restart through WMState */
+	{
+		WMPropList *saved;
+		WRandRState restarted = { 0 };
+		WRandRAnchor d, c;
+
+		scr.randr_state = &state;
+		saved = WMDeepCopyPropList(wRandRGetPlacements(&scr));
+
+		restarted.heads = state.heads;
+		scr.randr_state = &restarted;
+		wRandRSetPlacements(&scr, saved);
+		memset(&d, 0, sizeof(d));
+		memset(&c, 0, sizeof(c));
+		setHeads(&scr, &restarted, 3, dock_names, dock_rects);
+		wRandR_RecallPlacement(&restarted, &restarted.heads, &d, &c);
+		assert(d.valid && d.right && strcmp(d.head, "eDP-1") == 0);
+		assert(c.valid && strcmp(c.head, "DP-1-2") == 0 && c.dy == 1440 - 64);
+		WMReleasePropList(saved);
+		WMReleasePropList(restarted.placements);
+		scr.randr_state = NULL;
+	}
+
+	/* A dock whose monitor disappears goes to the same side of the screen */
+	old = state.heads;
+	setHeads(&scr, &state, 3, dock_names, dock_rects);
+	dock.x_pos = 1920 + 2560 - 64;
+	dock.y_pos = 1440 - 64;
+	{
+		static const char *two_names[] = { "DP-1-3", "eDP-1" };
+		static const int two_rects[][4] = { { 0, 0, 1920, 1080 }, { 1920, 0, 1920, 1200 } };
+
+		WMReleasePropList(state.placements);
+		state.placements = NULL;
+		old = state.heads;
+		setHeads(&scr, &state, 2, two_names, two_rects);
+		wRandR_FollowHeads(&scr, &state, &old, True);
+		assert(dock_head == 1 && dock.on_right_side && dock.x_pos == 3840 - 64);
+		/* Bottom-anchored and kept with its icons on the head */
+		assert(dock.y_pos == 1200 - 5 * 64);
+	}
+
+	/* Leaving fullscreen on a smaller monitor stays on that monitor */
+	{
+		static const char *big_names[] = { "DP-1" };
+		static const int big_rects[][4] = { { 0, 0, 1920, 1080 } };
+		static const char *small_names[] = { "HDMI-1" };
+		static const int small_rects[][4] = { { 0, 0, 1280, 800 } };
+		WWindow full;
+		WFrameWindow frame;
+		WCoreWindow core;
+
+		scr.focused_window = NULL;
+		initWindow(&full, &frame, &core, &scr, 0, 0, 1920, 1080);
+		full.flags.fullscreen = True;
+		full.bfs_geometry.x = 1600;
+		full.bfs_geometry.y = 100;
+		full.bfs_geometry.width = 300;
+		full.bfs_geometry.height = 200;
+		setHeads(&scr, &state, 1, big_names, big_rects);
+		old = state.heads;
+		setHeads(&scr, &state, 1, small_names, small_rects);
+		wRandR_FollowHeads(&scr, &state, &old, True);
+		assert(core.width == 1280 && core.height == 800);
+		assert(full.bfs_geometry.x == 1280 - 320 && full.bfs_geometry.y == 100);
+	}
+
+	WMReleasePropList(state.placements);
+	wfree(scr.xine_info.screens);
+	wPreferences.flags.noclip = True;
+}
 
 int main(void)
 {
@@ -135,6 +384,8 @@ int main(void)
 	XRRModeInfo mode_info = { 0 };
 	Screen xscreen = { 0 };
 	int i;
+
+	placementTests();
 
 	dpy = (Display *)wmalloc(sizeof(*(_XPrivDisplay)dpy));
 	((_XPrivDisplay)dpy)->screens = &xscreen;

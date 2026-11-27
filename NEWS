@@ -169,6 +169,16 @@ Workspace backgrounds are re-rendered after monitor geometry changes,
 including layouts configured with external tools. The wallpaper helper
 refreshes its cached backgrounds and paints images on each active head.
 
+The dock can be dragged to the left or right edge of any monitor, not
+only to the edges of the whole screen. When monitors are added, removed
+or rearranged, the dock and the clip stay on the monitor they were on,
+following it to its new position; the clip is moved as needed so that
+its attached icons remain visible. Their placement is remembered for each
+set of monitors (saved in WMState) and restored when that set comes back.
+Windows also follow their monitor, and windows from a removed monitor are
+moved fully onto the primary one; maximized and fullscreen windows are
+fitted to their new monitor.
+
 
 Titlebar language button revamp
 -------------------------------

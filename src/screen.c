@@ -84,6 +84,7 @@ static WMPropList *dWorkspace;
 static WMPropList *dDock;
 static WMPropList *dClip;
 static WMPropList *dDrawers = NULL;
+static WMPropList *dMonitorPlacements;
 
 static void make_keys(void)
 {
@@ -95,6 +96,7 @@ static void make_keys(void)
 	dDock = WMCreatePLString("Dock");
 	dClip = WMCreatePLString("Clip");
 	dDrawers = WMCreatePLString("Drawers");
+	dMonitorPlacements = WMCreatePLString("MonitorPlacements");
 }
 
 /*
@@ -921,6 +923,10 @@ void wScreenRestoreState(WScreen * scr)
 	if (!scr->session_state)
 		scr->session_state = WMCreatePLDictionary(NULL, NULL);
 
+#ifdef USE_RANDR
+	wRandRSetPlacements(scr, WMGetFromPLDictionary(scr->session_state, dMonitorPlacements));
+#endif
+
 	if (!wPreferences.flags.nodock) {
 		state = WMGetFromPLDictionary(scr->session_state, dDock);
 		scr->dock = wDockRestoreState(scr, state, WM_DOCK);
@@ -944,6 +950,9 @@ void wScreenRestoreState(WScreen * scr)
 	}
 
 	wWorkspaceRestoreState(scr);
+#ifdef USE_RANDR
+	wRandRApplySavedPlacement(scr);
+#endif
 	wScreenUpdateUsableArea(scr);
 }
 
@@ -1008,6 +1017,16 @@ void wScreenSaveState(WScreen * scr)
 		if (foo != NULL)
 			WMPutInPLDictionary(scr->session_state, dWorkspace, foo);
 	}
+
+#ifdef USE_RANDR
+	foo = wRandRGetPlacements(scr);
+#else
+	foo = NULL;
+#endif
+	if (!foo)
+		foo = WMGetFromPLDictionary(old_state, dMonitorPlacements);
+	if (foo != NULL)
+		WMPutInPLDictionary(scr->session_state, dMonitorPlacements, foo);
 
 	/* clean up */
 	WMPLSetCaseSensitive(False);

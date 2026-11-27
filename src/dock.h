@@ -91,7 +91,9 @@ WAppIcon *wDockFindIconForWindow(WDock *dock, Window window);
 void wDockDoAutoLaunch(WDock *dock, int workspace);
 void wDockLaunchWithState(WAppIcon *btn, WSavedState *state);
 void wDockSwap(WDock *dock);
-void wClipSnapToHead(WDock *clip);
+void wDockMoveToEdge(WDock *dock, int head, Bool on_right_side, int y);
+void wDockMove(WDock *dock, int x, int y);
+WMRect wDockGetExtent(WDock *dock);
 
 #ifdef USE_DOCK_XDND
 int wDockReceiveDNDDrop(WScreen *scr, XEvent *event);

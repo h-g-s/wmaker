@@ -837,6 +837,72 @@ static int getDockXPosition(WScreen *scr, Bool on_right_side)
 	return x;
 }
 
+static int dockXForHead(WScreen *scr, int head, Bool on_right_side)
+{
+	WMRect rect = wGetRectForHead(scr, head);
+
+	if (on_right_side)
+		return rect.pos.x + rect.size.width - ICON_SIZE - DOCK_EXTRA_SPACE;
+	return rect.pos.x + DOCK_EXTRA_SPACE;
+}
+
+/* Head containing a point, or the closest one if it lies in dead space */
+static int dockNearestHead(WScreen *scr, int x, int y)
+{
+	long best_distance = -1;
+	int best = scr->xine_info.primary_head;
+	int i;
+
+	for (i = 0; i < wXineramaHeads(scr); i++) {
+		WMRect rect = wGetRectForHead(scr, i);
+		long dx = 0, dy = 0, distance;
+
+		if (x < rect.pos.x)
+			dx = rect.pos.x - x;
+		else if (x >= rect.pos.x + (int)rect.size.width)
+			dx = x - (rect.pos.x + (int)rect.size.width) + 1;
+		if (y < rect.pos.y)
+			dy = rect.pos.y - y;
+		else if (y >= rect.pos.y + (int)rect.size.height)
+			dy = y - (rect.pos.y + (int)rect.size.height) + 1;
+
+		distance = dx * dx + dy * dy;
+		if (best_distance < 0 || distance < best_distance) {
+			best_distance = distance;
+			best = i;
+		}
+	}
+
+	return best;
+}
+
+/* Every head has a left and a right dock edge; pick the one for a point */
+static int dockEdgeForPoint(WScreen *scr, int x, int y, Bool *on_right_side)
+{
+	WMRect rect;
+	int head;
+
+	if (wPreferences.keep_dock_on_primary_head)
+		head = scr->xine_info.primary_head;
+	else
+		head = dockNearestHead(scr, x, y);
+
+	rect = wGetRectForHead(scr, head);
+	*on_right_side = x >= rect.pos.x + (int)rect.size.width / 2;
+	return head;
+}
+
+static int dockClampYToHead(WScreen *scr, int head, int y)
+{
+	WMRect rect = wGetRectForHead(scr, head);
+
+	if (y > rect.pos.y + (int)rect.size.height - ICON_SIZE)
+		y = rect.pos.y + (int)rect.size.height - ICON_SIZE;
+	if (y < rect.pos.y)
+		y = rect.pos.y;
+	return y;
+}
+
 /* Name is only used when type == WM_DRAWER and when restoring a specific
  * drawer, with a specific name. When creating a drawer, leave name to NULL
  * and mainIconCreate will find the first unused unique name */
@@ -1846,19 +1912,14 @@ WDock *wDockRestoreState(WScreen *scr, WMPropList *dock_state, int type)
 					dock->x_pos = scr->scr_width - ICON_SIZE;
 				}
 			} else {
-				int left, right, midpoint;
+				Bool on_right_side;
+				int head;
 
-				left = getDockXPosition(scr, False);
-				right = getDockXPosition(scr, True);
-				midpoint = (left + right) / 2;
-
-				if (dock->x_pos < midpoint) {
-					dock->x_pos = left;
-					dock->on_right_side = 0;
-				} else {
-					dock->x_pos = right;
-					dock->on_right_side = 1;
-				}
+				head = dockEdgeForPoint(scr, dock->x_pos + ICON_SIZE / 2,
+				                        dock->y_pos + ICON_SIZE / 2, &on_right_side);
+				dock->x_pos = dockXForHead(scr, head, on_right_side);
+				dock->y_pos = dockClampYToHead(scr, head, dock->y_pos);
+				dock->on_right_side = on_right_side;
 			}
 		}
 	}
@@ -3032,14 +3093,12 @@ static void moveDock(WDock *dock, int new_x, int new_y)
 	}
 }
 
-void wDockSwap(WDock *dock)
+static void dockSetX(WDock *dock, int x)
 {
-	WScreen *scr = dock->screen_ptr;
 	WAppIcon *btn;
-	int x, i;
+	int i;
 
-	x = getDockXPosition(scr, dock->on_right_side);
-	swapDrawers(scr, x);
+	swapDrawers(dock->screen_ptr, x);
 	dock->x_pos = x;
 
 	for (i = 0; i < dock->max_icons; i++) {
@@ -3049,45 +3108,97 @@ void wDockSwap(WDock *dock)
 			XMoveWindow(dpy, btn->icon->core->window, btn->x_pos, btn->y_pos);
 		}
 	}
+}
 
+/* Snap the dock to its side of the head it is on */
+void wDockSwap(WDock *dock)
+{
+	WScreen *scr = dock->screen_ptr;
+	int head;
+
+	if (wPreferences.keep_dock_on_primary_head)
+		head = scr->xine_info.primary_head;
+	else
+		head = dockNearestHead(scr, dock->x_pos + ICON_SIZE / 2, dock->y_pos + ICON_SIZE / 2);
+
+	dockSetX(dock, dockXForHead(scr, head, dock->on_right_side));
 	wScreenUpdateUsableArea(scr);
 }
 
-/* Snap a clip back onto a visible head after a RandR reconfiguration,
- * preserving its relative position within that head */
-void wClipSnapToHead(WDock *clip)
+/* Place the dock at one side of a head, keeping its icons together */
+void wDockMoveToEdge(WDock *dock, int head, Bool on_right_side, int y)
 {
-	WScreen *scr = clip->screen_ptr;
-	WMRect rect, head;
-	float rel_x, rel_y;
-	int x = clip->x_pos;
-	int y = clip->y_pos;
+	dock->on_right_side = on_right_side;
+	dockSetX(dock, dockXForHead(dock->screen_ptr, head, on_right_side));
+	moveDock(dock, dock->x_pos, y);
+}
 
-	/* Already fully on a visible head, nothing to do */
-	if (!wScreenKeepInside(scr, &x, &y, ICON_SIZE, ICON_SIZE))
-		return;
+void wDockMove(WDock *dock, int x, int y)
+{
+	moveDock(dock, x, y);
+}
 
-	rect.pos.x = clip->x_pos;
-	rect.pos.y = clip->y_pos;
-	rect.size.width  = ICON_SIZE;
-	rect.size.height = ICON_SIZE;
+static void extendIconExtent(WAppIcon *btn, int *min_x, int *min_y, int *max_x, int *max_y)
+{
+	if (btn->xindex < *min_x)
+		*min_x = btn->xindex;
+	if (btn->yindex < *min_y)
+		*min_y = btn->yindex;
+	if (btn->xindex > *max_x)
+		*max_x = btn->xindex;
+	if (btn->yindex > *max_y)
+		*max_y = btn->yindex;
+}
 
-	/* Find the nearest remaining head to the clip's old position */
-	head = wGetRectForHead(scr, wGetHeadForRect(scr, rect));
+/* Area covered by a dock and its attached icons, relative to its main icon.
+ * All workspace clips share one position, so a clip covers the icons of every
+ * workspace plus the omnipresent ones. */
+WMRect wDockGetExtent(WDock *dock)
+{
+	WScreen *scr = dock->screen_ptr;
+	int min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+	WMRect extent;
+	int i, k;
 
-	/* Compute fractional position within that head and clamp to [0..1] */
-	rel_x = (float)(clip->x_pos - head.pos.x) / (float)head.size.width;
-	rel_y = (float)(clip->y_pos - head.pos.y) / (float)head.size.height;
+	if (dock->type == WM_CLIP) {
+		WAppIconChain *chain;
 
-	if (rel_x < 0.0f) rel_x = 0.0f;
-	else if (rel_x > 1.0f) rel_x = 1.0f;
-	if (rel_y < 0.0f) rel_y = 0.0f;
-	else if (rel_y > 1.0f) rel_y = 1.0f;
+		for (k = 0; k < scr->workspace_count; k++) {
+			WDock *clip = scr->workspaces[k]->clip;
 
-	x = head.pos.x + (int)(rel_x * (head.size.width  - ICON_SIZE));
-	y = head.pos.y + (int)(rel_y * (head.size.height - ICON_SIZE));
+			if (!clip)
+				continue;
+			for (i = 1; i < clip->max_icons; i++) {
+				if (clip->icon_array[i])
+					extendIconExtent(clip->icon_array[i], &min_x, &min_y, &max_x, &max_y);
+			}
+		}
+		for (chain = scr->global_icons; chain != NULL; chain = chain->next)
+			extendIconExtent(chain->aicon, &min_x, &min_y, &max_x, &max_y);
+	} else {
+		for (i = 1; i < dock->max_icons; i++) {
+			if (dock->icon_array[i])
+				extendIconExtent(dock->icon_array[i], &min_x, &min_y, &max_x, &max_y);
+		}
+		if (dock->type == WM_DOCK) {
+			WDrawerChain *dc;
 
-	moveDock(clip, x, y);
+			for (dc = scr->drawers; dc != NULL; dc = dc->next) {
+				int index = (dc->adrawer->y_pos - dock->y_pos) / ICON_SIZE;
+
+				if (index < min_y)
+					min_y = index;
+				if (index > max_y)
+					max_y = index;
+			}
+		}
+	}
+
+	extent.pos.x = min_x * ICON_SIZE;
+	extent.pos.y = min_y * ICON_SIZE;
+	extent.size.width = (max_x - min_x + 1) * ICON_SIZE;
+	extent.size.height = (max_y - min_y + 1) * ICON_SIZE;
+	return extent;
 }
 
 static pid_t execCommand(WAppIcon *btn, const char *command, WSavedState *state)
@@ -3739,7 +3850,7 @@ static void handleDockMove(WDock *dock, WAppIcon *aicon, XEvent *event)
 	int x = aicon->x_pos, y = aicon->y_pos;;
 	int shad_x = x, shad_y = y;
 	XEvent ev;
-	int grabbed = 0, done, previously_on_right, now_on_right, previous_x_pos, i;
+	int grabbed = 0, done, i;
 	Pixmap ghost = None;
 	int superfluous = wPreferences.superfluous;	/* we catch it to avoid problems */
 
@@ -3767,8 +3878,6 @@ static void handleDockMove(WDock *dock, WAppIcon *aicon, XEvent *event)
 		XMapWindow(dpy, scr->dock_shadow);
 	}
 
-	previously_on_right = now_on_right = dock->on_right_side;
-	previous_x_pos = dock->x_pos;
 	done = 0;
 	while (!done) {
 		WMMaskEvent(dpy, PointerMotionMask | ButtonReleaseMask | ButtonPressMask
@@ -3803,25 +3912,23 @@ static void handleDockMove(WDock *dock, WAppIcon *aicon, XEvent *event)
 				wScreenKeepInside(scr, &x, &y, ICON_SIZE, ICON_SIZE);
 				moveDock(dock, x, y);
 				break;
-			case WM_DOCK:
-				x = ev.xmotion.x_root - ofs_x;
+			case WM_DOCK: {
+				Bool now_on_right;
+				int head;
+
 				y = ev.xmotion.y_root - ofs_y;
-				if (previously_on_right)
-				{
-					now_on_right = (ev.xmotion.x_root >= previous_x_pos - ICON_SIZE);
-				}
-				else
-				{
-					now_on_right = (ev.xmotion.x_root > previous_x_pos + ICON_SIZE * 2);
-				}
-				if (now_on_right != dock->on_right_side)
+				/* The dock can sit on either side of any head */
+				head = dockEdgeForPoint(scr, ev.xmotion.x_root, ev.xmotion.y_root, &now_on_right);
+				x = dockXForHead(scr, head, now_on_right);
+				if (now_on_right != dock->on_right_side || x != dock->x_pos)
 				{
 					dock->on_right_side = now_on_right;
-					wDockSwap(dock);
+					dockSetX(dock, x);
+					wScreenUpdateUsableArea(scr);
 					wArrangeIcons(scr, False);
 				}
 				// Also perform the vertical move
-				wScreenKeepInside(scr, &x, &y, ICON_SIZE, ICON_SIZE);
+				y = dockClampYToHead(scr, head, y);
 				moveDock(dock, dock->x_pos, y);
 				if (wPreferences.flags.wrap_appicons_in_dock)
 				{
@@ -3877,6 +3984,7 @@ static void handleDockMove(WDock *dock, WAppIcon *aicon, XEvent *event)
 					}
 				}
 				break;
+			}
 			case WM_DRAWER:
 			{
 				WDock *real_dock = dock->screen_ptr->dock;

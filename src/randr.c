@@ -22,7 +22,10 @@
 
 #ifdef USE_RANDR
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <X11/Xlib.h>
 
 #include "randr.h"
@@ -52,9 +55,28 @@ typedef struct {
     char name[64];
 } WRandROutput;
 
+/* Active heads in Xinerama order, with the output name of each one */
+typedef struct {
+    WMRect rects[RANDR_MAX_OUTPUTS];
+    char names[RANDR_MAX_OUTPUTS][64];
+    int count;
+    int primary;
+} WRandRHeads;
+
+/* Position of the dock or clip relative to the monitor it is on */
+typedef struct {
+    Bool valid;
+    char head[64];
+    int dx, dy;            /* offset from the head origin */
+    int hw, hh;            /* head size when the anchor was taken */
+    Bool right;            /* dock side */
+} WRandRAnchor;
+
 typedef struct {
     WRandROutput outputs[RANDR_MAX_OUTPUTS];
     int n_outputs;
+    WRandRHeads heads;
+    WMPropList *placements; /* monitor set signature -> dock/clip anchors */
     Bool restore_pending;  /* connected monitors changed; look for a saved layout */
     int restore_attempts;
 } WRandRState;
@@ -125,6 +147,7 @@ static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
 {
     WMRect new_screens[RANDR_MAX_OUTPUTS];
     RROutput new_xids[RANDR_MAX_OUTPUTS];   /* parallel: XID of each head */
+    const char *new_names[RANDR_MAX_OUTPUTS];
     int count = 0;
     int old_count;
     int i;
@@ -162,6 +185,7 @@ static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
         new_screens[count].size.width = o->w;
         new_screens[count].size.height = o->h;
         new_xids[count] = o->xid;
+        new_names[count] = o->name;
         count++;
     }
 
@@ -173,6 +197,7 @@ static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
         new_screens[0].size.width = scr->scr_width;
         new_screens[0].size.height = scr->scr_height;
         new_xids[0] = None;
+        new_names[0] = "";
         count = 1;
     }
 
@@ -201,6 +226,14 @@ static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
 
     scr->xine_info.primary_head = wRandR_PrimaryHeadIndex(scr->root_win, new_xids, count);
 
+    memcpy(state->heads.rects, new_screens, sizeof(WMRect) * count);
+    for (i = 0; i < count; i++) {
+        strncpy(state->heads.names[i], new_names[i], sizeof(state->heads.names[i]) - 1);
+        state->heads.names[i][sizeof(state->heads.names[i]) - 1] = '\0';
+    }
+    state->heads.count = count;
+    state->heads.primary = scr->xine_info.primary_head;
+
     /* Reallocate per-head usable area arrays if the head count changed */
     if (old_count != count) {
         wfree(scr->usableArea);
@@ -220,6 +253,480 @@ static Bool wRandR_ApplyToXinerama(WScreen *scr, WRandRState *state)
     }
 
     return changed;
+}
+
+static int wRandR_HeadByName(const WRandRHeads *heads, const char *name)
+{
+    int i;
+
+    if (!name[0])
+        return -1;
+    for (i = 0; i < heads->count; i++) {
+        if (strcmp(heads->names[i], name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* Head containing a point, or the closest one */
+static int wRandR_NearestHead(const WRandRHeads *heads, int x, int y)
+{
+    long best_distance = -1;
+    int best = heads->primary;
+    int i;
+
+    for (i = 0; i < heads->count; i++) {
+        const WMRect *r = &heads->rects[i];
+        long dx = 0, dy = 0, distance;
+
+        if (x < r->pos.x)
+            dx = r->pos.x - x;
+        else if (x >= r->pos.x + (int)r->size.width)
+            dx = x - (r->pos.x + (int)r->size.width) + 1;
+        if (y < r->pos.y)
+            dy = r->pos.y - y;
+        else if (y >= r->pos.y + (int)r->size.height)
+            dy = y - (r->pos.y + (int)r->size.height) + 1;
+
+        distance = dx * dx + dy * dy;
+        if (best_distance < 0 || distance < best_distance) {
+            best_distance = distance;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* Head sharing the largest area with a rectangle, or -1 if none does */
+static int wRandR_HeadForRect(const WRandRHeads *heads, int x, int y, int w, int h)
+{
+    long best_area = 0;
+    int best = -1;
+    int i;
+
+    for (i = 0; i < heads->count; i++) {
+        const WMRect *r = &heads->rects[i];
+        int x1 = WMAX(x, r->pos.x);
+        int y1 = WMAX(y, r->pos.y);
+        int x2 = WMIN(x + w, r->pos.x + (int)r->size.width);
+        int y2 = WMIN(y + h, r->pos.y + (int)r->size.height);
+        long area;
+
+        if (x2 <= x1 || y2 <= y1)
+            continue;
+        area = (long)(x2 - x1) * (y2 - y1);
+        if (area > best_area) {
+            best_area = area;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* Sorted output names identify a monitor set */
+static void wRandR_HeadsSignature(const WRandRHeads *heads, char *buf, size_t size)
+{
+    const char *names[RANDR_MAX_OUTPUTS];
+    int count = 0;
+    int i, j;
+
+    buf[0] = '\0';
+    for (i = 0; i < heads->count; i++) {
+        const char *name = heads->names[i];
+
+        if (!name[0]) {
+            buf[0] = '\0';
+            return;
+        }
+        for (j = count; j > 0 && strcmp(names[j - 1], name) > 0; j--)
+            names[j] = names[j - 1];
+        names[j] = name;
+        count++;
+    }
+    for (i = 0; i < count; i++) {
+        if (i > 0)
+            wstrlcat(buf, ",", size);
+        wstrlcat(buf, names[i], size);
+    }
+}
+
+/* Map an offset from the old head size to the new one, keeping the distance
+ * to whichever edge of the head it was closer to */
+static int wRandR_EdgeRelative(int offset, int old_size, int new_size, int item_size)
+{
+    if (offset + item_size / 2 <= old_size / 2)
+        return offset;
+    return new_size - (old_size - offset);
+}
+
+/* Move a span [pos + lo, pos + hi) into [min, max). If it does not fit, keep
+ * the main item [pos, pos + item) visible and show as much of the rest as
+ * possible. */
+static int wRandR_ClampSpan(int pos, int lo, int hi, int item, int min, int max)
+{
+    if (hi - lo <= max - min) {
+        if (pos + hi > max)
+            pos = max - hi;
+        if (pos + lo < min)
+            pos = min - lo;
+        return pos;
+    }
+    if (lo >= 0)
+        return min;
+    if (hi <= item)
+        return max - item;
+    if (pos + item > max)
+        pos = max - item;
+    if (pos < min)
+        pos = min;
+    return pos;
+}
+
+static void wRandR_CaptureAnchor(const WRandRHeads *heads, int x, int y, WRandRAnchor *anchor)
+{
+    int head = wRandR_NearestHead(heads, x + wPreferences.icon_size / 2,
+                                  y + wPreferences.icon_size / 2);
+    const WMRect *r = &heads->rects[head];
+
+    memset(anchor, 0, sizeof(*anchor));
+    if (heads->count == 0)
+        return;
+    anchor->valid = True;
+    strncpy(anchor->head, heads->names[head], sizeof(anchor->head) - 1);
+    anchor->dx = x - r->pos.x;
+    anchor->dy = y - r->pos.y;
+    anchor->hw = r->size.width;
+    anchor->hh = r->size.height;
+}
+
+/* Find the anchored head (or the fallback one) and the position on it */
+static int wRandR_ResolveAnchor(const WRandRHeads *heads, const WRandRAnchor *anchor,
+                                int fallback, int *x, int *y)
+{
+    int head = wRandR_HeadByName(heads, anchor->head);
+    const WMRect *r;
+
+    if (head < 0)
+        head = fallback;
+    r = &heads->rects[head];
+    *x = r->pos.x + wRandR_EdgeRelative(anchor->dx, anchor->hw, r->size.width,
+                                        wPreferences.icon_size);
+    *y = r->pos.y + wRandR_EdgeRelative(anchor->dy, anchor->hh, r->size.height,
+                                        wPreferences.icon_size);
+    return head;
+}
+
+/* Leftmost or rightmost head, for a dock whose monitor went away */
+static int wRandR_DockFallbackHead(const WRandRHeads *heads, Bool right)
+{
+    int best = heads->primary;
+    int i;
+
+    if (wPreferences.keep_dock_on_primary_head)
+        return best;
+    for (i = 0; i < heads->count; i++) {
+        const WMRect *r = &heads->rects[i];
+        const WMRect *b = &heads->rects[best];
+
+        if (right ? r->pos.x + (int)r->size.width > b->pos.x + (int)b->size.width
+                  : r->pos.x < b->pos.x)
+            best = i;
+    }
+    return best;
+}
+
+static WMPropList *wRandR_AnchorToPL(const WRandRAnchor *anchor, Bool dock)
+{
+    WMPropList *dict, *key, *value;
+    char buf[32];
+
+    dict = WMCreatePLDictionary(NULL, NULL);
+
+#define PUT(name, val) do { \
+        key = WMCreatePLString(name); value = WMCreatePLString(val); \
+        WMPutInPLDictionary(dict, key, value); \
+        WMReleasePropList(key); WMReleasePropList(value); \
+    } while (0)
+#define PUTINT(name, val) do { snprintf(buf, sizeof(buf), "%i", (val)); PUT(name, buf); } while (0)
+    PUT("Head", anchor->head);
+    PUTINT("X", anchor->dx);
+    PUTINT("Y", anchor->dy);
+    PUTINT("Width", anchor->hw);
+    PUTINT("Height", anchor->hh);
+    if (dock)
+        PUT("Side", anchor->right ? "Right" : "Left");
+#undef PUTINT
+#undef PUT
+    return dict;
+}
+
+static Bool wRandR_AnchorFromPL(WMPropList *dict, WRandRAnchor *anchor)
+{
+    const char *keys[] = { "Head", "X", "Y", "Width", "Height" };
+    const char *values[5];
+    WMPropList *key, *value;
+    int i;
+
+    memset(anchor, 0, sizeof(*anchor));
+    if (!dict || !WMIsPLDictionary(dict))
+        return False;
+    for (i = 0; i < 5; i++) {
+        key = WMCreatePLString(keys[i]);
+        value = WMGetFromPLDictionary(dict, key);
+        WMReleasePropList(key);
+        if (!value || !WMIsPLString(value))
+            return False;
+        values[i] = WMGetFromPLString(value);
+    }
+    anchor->dx = atoi(values[1]);
+    anchor->dy = atoi(values[2]);
+    anchor->hw = atoi(values[3]);
+    anchor->hh = atoi(values[4]);
+    if (!values[0][0] || anchor->hw <= 0 || anchor->hh <= 0)
+        return False;
+    strncpy(anchor->head, values[0], sizeof(anchor->head) - 1);
+
+    key = WMCreatePLString("Side");
+    value = WMGetFromPLDictionary(dict, key);
+    WMReleasePropList(key);
+    anchor->right = value && WMIsPLString(value) &&
+        strcasecmp(WMGetFromPLString(value), "Right") == 0;
+    anchor->valid = True;
+    return True;
+}
+
+/* Remember where the dock and clip are for the current monitor set */
+static void wRandR_RememberPlacement(WRandRState *state, const WRandRHeads *heads,
+                                     const WRandRAnchor *dock, const WRandRAnchor *clip)
+{
+    char signature[RANDR_MAX_OUTPUTS * 64];
+    WMPropList *entry, *key, *value;
+
+    wRandR_HeadsSignature(heads, signature, sizeof(signature));
+    if (!signature[0] || (!dock->valid && !clip->valid))
+        return;
+
+    if (!state->placements)
+        state->placements = WMCreatePLDictionary(NULL, NULL);
+
+    entry = WMCreatePLDictionary(NULL, NULL);
+    if (dock->valid) {
+        key = WMCreatePLString("Dock");
+        value = wRandR_AnchorToPL(dock, True);
+        WMPutInPLDictionary(entry, key, value);
+        WMReleasePropList(key);
+        WMReleasePropList(value);
+    }
+    if (clip->valid) {
+        key = WMCreatePLString("Clip");
+        value = wRandR_AnchorToPL(clip, False);
+        WMPutInPLDictionary(entry, key, value);
+        WMReleasePropList(key);
+        WMReleasePropList(value);
+    }
+    key = WMCreatePLString(signature);
+    WMPutInPLDictionary(state->placements, key, entry);
+    WMReleasePropList(key);
+    WMReleasePropList(entry);
+}
+
+/* Use the placement remembered for this monitor set, if there is one */
+static void wRandR_RecallPlacement(WRandRState *state, const WRandRHeads *heads,
+                                   WRandRAnchor *dock, WRandRAnchor *clip)
+{
+    char signature[RANDR_MAX_OUTPUTS * 64];
+    WMPropList *entry, *key;
+    WRandRAnchor anchor;
+
+    wRandR_HeadsSignature(heads, signature, sizeof(signature));
+    if (!signature[0] || !state->placements)
+        return;
+
+    key = WMCreatePLString(signature);
+    entry = WMGetFromPLDictionary(state->placements, key);
+    WMReleasePropList(key);
+    if (!entry || !WMIsPLDictionary(entry))
+        return;
+
+    key = WMCreatePLString("Dock");
+    if (wRandR_AnchorFromPL(WMGetFromPLDictionary(entry, key), &anchor))
+        *dock = anchor;
+    WMReleasePropList(key);
+    key = WMCreatePLString("Clip");
+    if (wRandR_AnchorFromPL(WMGetFromPLDictionary(entry, key), &anchor))
+        *clip = anchor;
+    WMReleasePropList(key);
+}
+
+static void wRandR_CapturePlacement(WScreen *scr, const WRandRHeads *heads,
+                                    WRandRAnchor *dock, WRandRAnchor *clip)
+{
+    WDock *current_clip = NULL;
+
+    memset(dock, 0, sizeof(*dock));
+    memset(clip, 0, sizeof(*clip));
+
+    if (scr->dock) {
+        wRandR_CaptureAnchor(heads, scr->dock->x_pos, scr->dock->y_pos, dock);
+        dock->right = scr->dock->on_right_side;
+    }
+    if (!wPreferences.flags.noclip && scr->workspaces && scr->workspace_count > 0)
+        current_clip = scr->workspaces[scr->current_workspace]->clip;
+    if (current_clip)
+        wRandR_CaptureAnchor(heads, current_clip->x_pos, current_clip->y_pos, clip);
+}
+
+/* Put the dock and clip back on the monitors they were on, keeping the dock
+ * at a head edge and the clip together with its attached icons visible */
+static void wRandR_PlaceDockAndClip(WScreen *scr, const WRandRHeads *heads,
+                                    const WRandRAnchor *dock_anchor,
+                                    const WRandRAnchor *clip_anchor)
+{
+    int icon = wPreferences.icon_size;
+    int head, x, y, k;
+    WMRect extent;
+    const WMRect *r;
+
+    if (heads->count == 0)
+        return;
+
+    if (scr->dock && dock_anchor->valid) {
+        head = wRandR_ResolveAnchor(heads, dock_anchor,
+                                    wRandR_DockFallbackHead(heads, dock_anchor->right), &x, &y);
+        if (wPreferences.keep_dock_on_primary_head && head != heads->primary) {
+            head = heads->primary;
+            y = heads->rects[head].pos.y +
+                wRandR_EdgeRelative(dock_anchor->dy, dock_anchor->hh,
+                                    heads->rects[head].size.height, icon);
+        }
+        r = &heads->rects[head];
+        extent = wDockGetExtent(scr->dock);
+        y = wRandR_ClampSpan(y, extent.pos.y, extent.pos.y + (int)extent.size.height, icon,
+                             r->pos.y, r->pos.y + (int)r->size.height);
+        wDockMoveToEdge(scr->dock, head, dock_anchor->right, y);
+    }
+
+    if (!wPreferences.flags.noclip && clip_anchor->valid &&
+        scr->workspaces && scr->workspace_count > 0) {
+        WDock *current = scr->workspaces[scr->current_workspace]->clip;
+
+        if (!current)
+            return;
+        head = wRandR_ResolveAnchor(heads, clip_anchor, heads->primary, &x, &y);
+        r = &heads->rects[head];
+        extent = wDockGetExtent(current);
+        x = wRandR_ClampSpan(x, extent.pos.x, extent.pos.x + (int)extent.size.width, icon,
+                             r->pos.x, r->pos.x + (int)r->size.width);
+        y = wRandR_ClampSpan(y, extent.pos.y, extent.pos.y + (int)extent.size.height, icon,
+                             r->pos.y, r->pos.y + (int)r->size.height);
+        for (k = 0; k < scr->workspace_count; k++) {
+            if (scr->workspaces[k]->clip)
+                wDockMove(scr->workspaces[k]->clip, x, y);
+        }
+    }
+}
+
+/* Move a rectangle along with the head it was on. Returns the new head, or -1
+ * if the rectangle was on no head. It is kept fully visible if it was before
+ * or if its head went away; *changed tells whether its head changed at all. */
+static int wRandR_FollowRect(const WRandRHeads *old, const WRandRHeads *cur,
+                             int *x, int *y, int w, int h, Bool *changed)
+{
+    int oh, nh, target;
+    const WMRect *orr, *nr;
+    Bool was_inside;
+
+    *changed = False;
+    oh = wRandR_HeadForRect(old, *x, *y, w, h);
+    if (oh < 0)
+        return -1;
+    nh = wRandR_HeadByName(cur, old->names[oh]);
+    target = nh >= 0 ? nh : cur->primary;
+    orr = &old->rects[oh];
+    nr = &cur->rects[target];
+
+    if (nh >= 0 && orr->pos.x == nr->pos.x && orr->pos.y == nr->pos.y &&
+        orr->size.width == nr->size.width && orr->size.height == nr->size.height)
+        return target;
+    *changed = True;
+
+    was_inside = *x >= orr->pos.x && *y >= orr->pos.y &&
+        *x + w <= orr->pos.x + (int)orr->size.width &&
+        *y + h <= orr->pos.y + (int)orr->size.height;
+
+    *x = nr->pos.x + wRandR_EdgeRelative(*x - orr->pos.x, orr->size.width, nr->size.width, w);
+    *y = nr->pos.y + wRandR_EdgeRelative(*y - orr->pos.y, orr->size.height, nr->size.height, h);
+    if (was_inside || nh < 0) {
+        *x = wRandR_ClampSpan(*x, 0, w, w, nr->pos.x, nr->pos.x + (int)nr->size.width);
+        *y = wRandR_ClampSpan(*y, 0, h, h, nr->pos.y, nr->pos.y + (int)nr->size.height);
+    }
+    return target;
+}
+
+/* Geometry restored when leaving maximized or fullscreen state */
+static void wRandR_FollowSavedGeometry(const WRandRHeads *old, const WRandRHeads *cur,
+                                       int *x, int *y, unsigned int w, unsigned int h)
+{
+    Bool changed;
+
+    if (w > 0 && h > 0)
+        wRandR_FollowRect(old, cur, x, y, w, h, &changed);
+}
+
+/* Keep windows on the monitor they were on, following it when it moves, and
+ * bring windows from a removed monitor fully onto the primary one */
+static void wRandR_RelocateWindows(WScreen *scr, const WRandRHeads *old, const WRandRHeads *cur)
+{
+    WWindow *wwin;
+
+    if (old->count == 0 || cur->count == 0)
+        return;
+
+    for (wwin = scr->focused_window; wwin != NULL; wwin = wwin->prev) {
+        int bw, wx, wy, ww, wh, nx, ny, target;
+        const WMRect *nr;
+        Bool changed;
+
+        if (!wwin->frame || !wwin->frame->core)
+            continue;
+
+        bw = HAS_BORDER(wwin) ? scr->frame_border_width : 0;
+        wx = wwin->frame_x - bw;
+        wy = wwin->frame_y - bw;
+        ww = (int)wwin->frame->core->width + 2 * bw;
+        wh = (int)wwin->frame->core->height + 2 * bw;
+
+        nx = wx;
+        ny = wy;
+        target = wRandR_FollowRect(old, cur, &nx, &ny, ww, wh, &changed);
+        if (target < 0 || !changed)
+            continue;
+        nr = &cur->rects[target];
+
+        wRandR_FollowSavedGeometry(old, cur, &wwin->old_geometry.x, &wwin->old_geometry.y,
+                                   wwin->old_geometry.width, wwin->old_geometry.height);
+        wRandR_FollowSavedGeometry(old, cur, &wwin->bfs_geometry.x, &wwin->bfs_geometry.y,
+                                   wwin->bfs_geometry.width, wwin->bfs_geometry.height);
+
+        if (wwin->flags.fullscreen) {
+            wWindowConfigure(wwin, nr->pos.x, nr->pos.y, nr->size.width, nr->size.height);
+        } else if (wwin->flags.maximized && !wwin->flags.shaded) {
+            wWindowMove(wwin, nx + bw, ny + bw);
+            wMaximizeWindow(wwin, wwin->flags.maximized | MAX_KEYBOARD, target);
+        } else if ((ww > (int)nr->size.width || wh > (int)nr->size.height) &&
+                   IS_RESIZABLE(wwin) && !wwin->flags.shaded) {
+            /* Shrink windows larger than their new monitor to fit on it */
+            unsigned int cw = WMIN(ww, (int)nr->size.width) - 2 * bw;
+            unsigned int ch = WMIN(wh, (int)nr->size.height) - 2 * bw -
+                wwin->frame->top_width - wwin->frame->bottom_width;
+
+            wWindowConstrainSize(wwin, &cw, &ch);
+            wWindowConfigure(wwin, nx + bw, ny + bw, cw, ch);
+        } else if (nx != wx || ny != wy) {
+            wWindowMove(wwin, nx + bw, ny + bw);
+            wWindowSynthConfigureNotify(wwin);
+        }
+    }
 }
 
 /* Bring any off-screen windows in */
@@ -256,6 +763,41 @@ static void wRandR_BringAllWindowsInside(WScreen *scr)
             wWindowSnapToHead(wwin);
     }
 }
+
+/* Move the dock, clip and windows after the heads changed from old_heads */
+static void wRandR_FollowHeads(WScreen *scr, WRandRState *state,
+                               const WRandRHeads *old_heads, Bool geometry_changed)
+{
+    WRandRAnchor dock_anchor, clip_anchor;
+    char old_set[RANDR_MAX_OUTPUTS * 64], new_set[RANDR_MAX_OUTPUTS * 64];
+
+    wRandR_HeadsSignature(old_heads, old_set, sizeof(old_set));
+    wRandR_HeadsSignature(&state->heads, new_set, sizeof(new_set));
+
+    if (geometry_changed || old_heads->primary != state->heads.primary ||
+        strcmp(old_set, new_set) != 0) {
+        /* Remember where they were on the previous monitor set, then use
+         * the placement remembered for the new one, if any */
+        wRandR_CapturePlacement(scr, old_heads, &dock_anchor, &clip_anchor);
+        wRandR_RememberPlacement(state, old_heads, &dock_anchor, &clip_anchor);
+        wRandR_RecallPlacement(state, &state->heads, &dock_anchor, &clip_anchor);
+        wRandR_PlaceDockAndClip(scr, &state->heads, &dock_anchor, &clip_anchor);
+    }
+
+    /* Refresh usable areas and EWMH hints */
+    wScreenUpdateUsableArea(scr);
+    wNETWMUpdateWorkarea(scr);
+
+    if (geometry_changed)
+        wRandR_RelocateWindows(scr, old_heads, &state->heads);
+
+    /* Bring any windows that ended up in dead space to an active head */
+    wRandR_BringAllWindowsInside(scr);
+
+    /* Rearrange miniaturized and appicons into the icon yard */
+    wArrangeIcons(scr, True);
+}
+
 
 /* Auto-deactivate a physically disconnected output that still holds a CRTC
  *
@@ -551,6 +1093,7 @@ static void wRandR_Update(WScreen *scr)
     XRRScreenResources *sr;
     int i, j;
     Bool geometry_changed, connection_changed = False;
+    WRandRHeads old_heads;
 
     /* Assume all outputs removed until server confirms */
     for (i = 0; i < state->n_outputs; i++)
@@ -684,41 +1227,13 @@ static void wRandR_Update(WScreen *scr)
     XRRFreeScreenResources(sr);
 
     /* Apply new geometry to the Xinerama head layer */
-    i = scr->xine_info.primary_head;
+    old_heads = state->heads;
     geometry_changed = wRandR_ApplyToXinerama(scr, state);
 
     if (geometry_changed)
         wDefaultRefreshWorkspaceBackground(scr);
 
-    /* Move the dock if needed */
-    if (scr->dock &&
-        ((scr->xine_info.primary_head != i && wPreferences.keep_dock_on_primary_head) ||
-         scr->dock->x_pos < 0 ||
-         scr->dock->x_pos >= scr->scr_width))
-        wDockSwap(scr->dock);
-
-    /* Snap each workspace clip back onto a visible head if it ended up
-     * outside the (now smaller or rearranged) virtual framebuffer */
-    if (!wPreferences.flags.noclip) {
-        int k;
-
-        for (k = 0; k < scr->workspace_count; k++) {
-            WDock *clip = scr->workspaces[k]->clip;
-
-            if (clip)
-                wClipSnapToHead(clip);
-        }
-    }
-
-    /* Refresh usable areas and EWMH hints */
-    wScreenUpdateUsableArea(scr);
-    wNETWMUpdateWorkarea(scr);
-
-    /* Bring any windows that ended up in dead space to an active head */
-    wRandR_BringAllWindowsInside(scr);
-
-    /* Rearrange miniaturized and appicons into the icon yard */
-    wArrangeIcons(scr, True);
+    wRandR_FollowHeads(scr, state, &old_heads, geometry_changed);
 }
 
 static void wRandRDebounceTimerFired(void *data)
@@ -760,8 +1275,50 @@ void wRandRTeardown(WScreen *scr)
         scr->randr_debounce_timer = NULL;
     }
 
+    if (((WRandRState *)scr->randr_state)->placements)
+        WMReleasePropList(((WRandRState *)scr->randr_state)->placements);
     wfree(scr->randr_state);
     scr->randr_state = NULL;
+}
+
+/* Move the dock and clip to the placement remembered for the current
+ * monitor set, if any. WMState holds the positions of the set that was
+ * active on exit, which may not be the current one. */
+void wRandRApplySavedPlacement(WScreen *scr)
+{
+    WRandRState *state = (WRandRState *)scr->randr_state;
+    WRandRAnchor dock, clip;
+
+    if (!state)
+        return;
+    memset(&dock, 0, sizeof(dock));
+    memset(&clip, 0, sizeof(clip));
+    wRandR_RecallPlacement(state, &state->heads, &dock, &clip);
+    wRandR_PlaceDockAndClip(scr, &state->heads, &dock, &clip);
+}
+
+/* Dock and clip placements per monitor set, including the current one */
+WMPropList *wRandRGetPlacements(WScreen *scr)
+{
+    WRandRState *state = (WRandRState *)scr->randr_state;
+    WRandRAnchor dock, clip;
+
+    if (!state)
+        return NULL;
+    wRandR_CapturePlacement(scr, &state->heads, &dock, &clip);
+    wRandR_RememberPlacement(state, &state->heads, &dock, &clip);
+    return state->placements;
+}
+
+void wRandRSetPlacements(WScreen *scr, WMPropList *placements)
+{
+    WRandRState *state = (WRandRState *)scr->randr_state;
+
+    if (!state || !placements || !WMIsPLDictionary(placements))
+        return;
+    if (state->placements)
+        WMReleasePropList(state->placements);
+    state->placements = WMDeepCopyPropList(placements);
 }
 
 void wRandRHandleNotify(WScreen *scr, XEvent *event)
