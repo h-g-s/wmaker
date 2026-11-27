@@ -82,6 +82,7 @@ WINGs/Tests/wmquery
 WINGs/Tests/wtest
 WINGs/layout_test
 WINGs/scroller_test
+WINGs/popupbutton_test
 WPrefs.app/font_simple_test
 WPrefs.app/menu_test
 WPrefs.app/autostart_test

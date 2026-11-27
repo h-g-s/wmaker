@@ -213,6 +213,12 @@ static void iconThemeTest(void)
 	wDesktopIconsDestroy(icons);
 }
 
+static WMPixmap *selectedIcon(ApplicationRow *row)
+{
+	return WMGetMenuItemPixmap(WMGetPopUpButtonMenuItem(row->popup,
+							  WMGetPopUpButtonSelectedItem(row->popup)));
+}
+
 static void dialogTest(void)
 {
 	Display *display = XOpenDisplay(NULL);
@@ -254,13 +260,13 @@ static void dialogTest(void)
 	g_free(before);
 	g_free(after);
 	browser = &chooser.rows[WMDefaultBrowser];
-	browserIcon = WMGetLabelImage(browser->icon);
+	browserIcon = selectedIcon(browser);
 	g_assert_nonnull(browserIcon);
 	size = WMGetPixmapSize(browserIcon);
 	g_assert_cmpuint(size.width, ==, 24);
 	g_assert_cmpuint(size.height, ==, 12);
-	g_assert_nonnull(WMGetLabelImage(chooser.rows[WMDefaultFileManager].icon));
-	g_assert_null(WMGetLabelImage(chooser.rows[WMDefaultArchiveManager].icon));
+	g_assert_nonnull(selectedIcon(&chooser.rows[WMDefaultFileManager]));
+	g_assert_null(selectedIcon(&chooser.rows[WMDefaultArchiveManager]));
 	for (unsigned int i = 0; i < browser->apps->len; i++)
 		if (g_strcmp0(g_app_info_get_id(g_ptr_array_index(browser->apps, i)), "old.desktop") == 0)
 			selected = i + 1;
@@ -268,16 +274,16 @@ static void dialogTest(void)
 	WMSetPopUpButtonSelectedItem(browser->popup, selected);
 	selectionChanged(NULL, &chooser);
 	g_assert_true(WMGetButtonEnabled(chooser.apply));
-	oldIcon = WMGetLabelImage(browser->icon);
+	oldIcon = selectedIcon(browser);
 	g_assert_nonnull(oldIcon);
 	g_assert_true(oldIcon != browserIcon);
 	WMSetPopUpButtonSelectedItem(browser->popup, 0);
 	selectionChanged(NULL, &chooser);
 	g_assert_false(WMGetButtonEnabled(chooser.apply));
-	g_assert_null(WMGetLabelImage(browser->icon));
+	g_assert_null(selectedIcon(browser));
 	WMSetPopUpButtonSelectedItem(browser->popup, selected);
 	selectionChanged(NULL, &chooser);
-	g_assert_true(WMGetLabelImage(browser->icon) == oldIcon);
+	g_assert_true(selectedIcon(browser) == oldIcon);
 	applyDefaults(NULL, &chooser);
 	g_assert_false(WMGetButtonEnabled(chooser.apply));
 	assertDefault("x-scheme-handler/https", "old.desktop");

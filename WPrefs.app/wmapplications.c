@@ -23,10 +23,8 @@ static void print_help(const char *program)
 typedef struct {
 	WMDefaultRole role;
 	WMPopUpButton *popup;
-	WMLabel *icon;
 	GPtrArray *apps;
 	int saved;
-	int shown;
 } ApplicationRow;
 
 typedef struct {
@@ -86,29 +84,18 @@ static WMPixmap *loadIcon(WMScreen *screen, const char *path)
 	return pixmap;
 }
 
-static void updateRowIcon(ApplicationChooser *chooser, ApplicationRow *row)
+static WMPixmap *applicationIcon(ApplicationChooser *chooser, WMScreen *screen, GAppInfo *app)
 {
-	int selected = WMGetPopUpButtonSelectedItem(row->popup);
-	WMPixmap *pixmap = NULL;
-	const char *path = NULL;
+	const char *path = wDesktopIconsResolve(chooser->icons, g_app_info_get_icon(app));
 
-	if (selected == row->shown)
-		return;
-	row->shown = selected;
-	if (selected > 0) {
-		GAppInfo *app = g_ptr_array_index(row->apps, selected - 1);
+	if (!path)
+		return NULL;
+	if (!g_hash_table_contains(chooser->pixmaps, path)) {
+		WMPixmap *pixmap = loadIcon(screen, path);
 
-		path = wDesktopIconsResolve(chooser->icons, g_app_info_get_icon(app));
+		g_hash_table_insert(chooser->pixmaps, g_strdup(path), pixmap);
 	}
-	if (path) {
-		if (!g_hash_table_contains(chooser->pixmaps, path)) {
-			pixmap = loadIcon(WMWidgetScreen(row->icon), path);
-			g_hash_table_insert(chooser->pixmaps, g_strdup(path), pixmap);
-		} else {
-			pixmap = g_hash_table_lookup(chooser->pixmaps, path);
-		}
-	}
-	WMSetLabelImage(row->icon, pixmap);
+	return g_hash_table_lookup(chooser->pixmaps, path);
 }
 
 static void selectionChanged(WMWidget *widget, void *data)
@@ -120,7 +107,6 @@ static void selectionChanged(WMWidget *widget, void *data)
 	for (int i = 0; i < WMDefaultRoleCount; i++) {
 		int selected = WMGetPopUpButtonSelectedItem(chooser->rows[i].popup);
 
-		updateRowIcon(chooser, &chooser->rows[i]);
 		if (selected > 0 && selected != chooser->rows[i].saved)
 			changed = True;
 	}
@@ -170,19 +156,18 @@ static void createRow(ApplicationChooser *chooser, WMBox *column, WMDefaultRole 
 		chooser->pixmaps = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, releaseIcon);
 	}
 	row->role = role;
-	row->shown = -1;
 	row->apps = WMDefaultApplications(role);
 	WMSetBoxHorizontal(box, True);
 	WMSetLabelText(label, _(roleNames[role]));
 	labelSize = WMGetLabelPreferredSize(label);
 	labelSize.width = WMAX(130, labelSize.width);
-	row->icon = WMCreateLabel(box);
-	WMSetLabelImagePosition(row->icon, WIPImageOnly);
 	row->popup = WMCreatePopUpButton(box);
 	WMAddPopUpButtonItem(row->popup, _("Keep existing defaults"));
 	for (unsigned int i = 0; i < row->apps->len; i++) {
 		GAppInfo *app = g_ptr_array_index(row->apps, i);
 		WMAddPopUpButtonItem(row->popup, g_app_info_get_display_name(app));
+		WMSetPopUpButtonItemPixmap(row->popup, i + 1,
+					  applicationIcon(chooser, WMWidgetScreen(box), app));
 	}
 	if (role == WMDefaultTerminal)
 		terminalHelper = g_find_program_in_path("xdg-terminal-exec");
@@ -195,7 +180,6 @@ static void createRow(ApplicationChooser *chooser, WMBox *column, WMDefaultRole 
 		if (g_strcmp0(current, g_app_info_get_id(g_ptr_array_index(row->apps, i))) == 0)
 			row->saved = i + 1;
 	WMSetPopUpButtonSelectedItem(row->popup, row->saved);
-	updateRowIcon(chooser, row);
 	WMSetPopUpButtonEnabled(row->popup, row->apps->len > 0 &&
 			       (role != WMDefaultTerminal || terminalHelper != NULL));
 	WMSetPopUpButtonAction(row->popup, selectionChanged, chooser);
@@ -203,7 +187,6 @@ static void createRow(ApplicationChooser *chooser, WMBox *column, WMDefaultRole 
 	popupSize.width = 420;
 	labelSize.height = popupSize.height = WMAX(24, WMAX(labelSize.height, popupSize.height));
 	WMPackBoxSubview(box, label, labelSize, False, 8);
-	WMPackBoxSubview(box, row->icon, wmksize(24, popupSize.height), False, 8);
 	WMPackBoxSubview(box, row->popup, popupSize, True, 0);
 	WMPackBoxSubview(column, box, WMGetBoxMinimumSize(box), False, 12);
 	WMMapSubwidgets(box);

@@ -1468,6 +1468,8 @@ void WMRemovePopUpButtonItem(WMPopUpButton *bPtr, int index);
 
 void WMSetPopUpButtonItemEnabled(WMPopUpButton *bPtr, int index, Bool flag);
 
+void WMSetPopUpButtonItemPixmap(WMPopUpButton *bPtr, int index, WMPixmap *pixmap);
+
 Bool WMGetPopUpButtonItemEnabled(WMPopUpButton *bPtr, int index);
 
 void WMSetPopUpButtonSelectedItem(WMPopUpButton *bPtr, int index);
