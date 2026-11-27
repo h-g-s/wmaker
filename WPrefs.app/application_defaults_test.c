@@ -192,6 +192,27 @@ static void terminalCurrentTest(void)
 	g_free(helper);
 }
 
+static void iconThemeTest(void)
+{
+	WMDesktopIcons *icons = wDesktopIconsCreate(NULL, 24, NULL, NULL);
+	GIcon *icon = g_themed_icon_new("browser-themed");
+	char *expected = g_build_filename(dataDir, "icons", "TestParent", "48x48", "apps",
+					 "browser-themed.xpm", NULL);
+
+	g_assert_cmpstr(wDesktopIconsResolve(icons, icon), ==, expected);
+	g_object_unref(icon);
+	g_free(expected);
+	icon = g_themed_icon_new("old-themed");
+	expected = g_build_filename(dataDir, "icons", "hicolor", "48x48", "apps", "old-themed.xpm", NULL);
+	g_assert_cmpstr(wDesktopIconsResolve(icons, icon), ==, expected);
+	g_object_unref(icon);
+	g_free(expected);
+	icon = g_themed_icon_new("missing-test-icon");
+	g_assert_null(wDesktopIconsResolve(icons, icon));
+	g_object_unref(icon);
+	wDesktopIconsDestroy(icons);
+}
+
 static void dialogTest(void)
 {
 	Display *display = XOpenDisplay(NULL);
@@ -201,6 +222,8 @@ static void dialogTest(void)
 	char *path, *before, *after;
 	GError *error = NULL;
 	ApplicationRow *browser;
+	WMPixmap *browserIcon, *oldIcon;
+	WMSize size;
 	int selected = 0;
 
 	if (!display) {
@@ -213,6 +236,13 @@ static void dialogTest(void)
 	column = WMCreateBox(chooser.window);
 	for (int i = 0; i < WMDefaultRoleCount; i++)
 		createRow(&chooser, column, i);
+	for (int i = 0; i < WMDefaultRoleCount; i++) {
+		ApplicationRow *row = &chooser.rows[i];
+
+		for (unsigned int j = 0; j < row->apps->len; j++)
+			g_assert_cmpstr(WMGetPopUpButtonItem(row->popup, j + 1), ==,
+					g_app_info_get_display_name(g_ptr_array_index(row->apps, j)));
+	}
 	chooser.apply = WMCreateCommandButton(column);
 	selectionChanged(NULL, &chooser);
 	g_assert_false(WMGetButtonEnabled(chooser.apply));
@@ -224,6 +254,13 @@ static void dialogTest(void)
 	g_free(before);
 	g_free(after);
 	browser = &chooser.rows[WMDefaultBrowser];
+	browserIcon = WMGetLabelImage(browser->icon);
+	g_assert_nonnull(browserIcon);
+	size = WMGetPixmapSize(browserIcon);
+	g_assert_cmpuint(size.width, ==, 24);
+	g_assert_cmpuint(size.height, ==, 12);
+	g_assert_nonnull(WMGetLabelImage(chooser.rows[WMDefaultFileManager].icon));
+	g_assert_null(WMGetLabelImage(chooser.rows[WMDefaultArchiveManager].icon));
 	for (unsigned int i = 0; i < browser->apps->len; i++)
 		if (g_strcmp0(g_app_info_get_id(g_ptr_array_index(browser->apps, i)), "old.desktop") == 0)
 			selected = i + 1;
@@ -231,10 +268,16 @@ static void dialogTest(void)
 	WMSetPopUpButtonSelectedItem(browser->popup, selected);
 	selectionChanged(NULL, &chooser);
 	g_assert_true(WMGetButtonEnabled(chooser.apply));
+	oldIcon = WMGetLabelImage(browser->icon);
+	g_assert_nonnull(oldIcon);
+	g_assert_true(oldIcon != browserIcon);
 	WMSetPopUpButtonSelectedItem(browser->popup, 0);
 	selectionChanged(NULL, &chooser);
 	g_assert_false(WMGetButtonEnabled(chooser.apply));
+	g_assert_null(WMGetLabelImage(browser->icon));
 	WMSetPopUpButtonSelectedItem(browser->popup, selected);
+	selectionChanged(NULL, &chooser);
+	g_assert_true(WMGetLabelImage(browser->icon) == oldIcon);
 	applyDefaults(NULL, &chooser);
 	g_assert_false(WMGetButtonEnabled(chooser.apply));
 	assertDefault("x-scheme-handler/https", "old.desktop");
@@ -244,6 +287,8 @@ static void dialogTest(void)
 	for (int i = 0; i < WMDefaultRoleCount; i++)
 		g_ptr_array_unref(chooser.rows[i].apps);
 	WMDestroyWidget(chooser.window);
+	g_hash_table_unref(chooser.pixmaps);
+	wDesktopIconsDestroy(chooser.icons);
 	g_free(path);
 }
 
@@ -256,10 +301,39 @@ static void removeFiles(const char *directory)
 	while ((name = g_dir_read_name(dir))) {
 		char *path = g_build_filename(directory, name, NULL);
 
-		g_assert_cmpint(g_remove(path), ==, 0);
+		if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+			removeFiles(path);
+			g_assert_cmpint(g_rmdir(path), ==, 0);
+		} else {
+			g_assert_cmpint(g_remove(path), ==, 0);
+		}
 		g_free(path);
 	}
 	g_dir_close(dir);
+}
+
+static void createTheme(const char *name, const char *inherits, const char *iconName)
+{
+	char *base = g_build_filename(dataDir, "icons", name, NULL);
+	char *directory = g_build_filename(base, "48x48", "apps", NULL);
+	char *index = g_strdup_printf("[Icon Theme]\nName=%s\nDirectories=48x48/apps\nInherits=%s\n"
+				     "[48x48/apps]\nSize=48\nType=Fixed\n", name, inherits);
+
+	g_assert_cmpint(g_mkdir_with_parents(directory, 0700), ==, 0);
+	writeFile(base, "index.theme", index);
+	if (iconName) {
+		GString *xpm = g_string_new("/* XPM */\nstatic char *icon[] = {\n\"48 24 1 1\",\n\". c #cc3333\",\n");
+		char *pixels = g_strnfill(48, '.');
+
+		for (int i = 0; i < 24; i++)
+			g_string_append_printf(xpm, "\"%s\"%s\n", pixels, i == 23 ? "};" : ",");
+		writeFile(directory, iconName, xpm->str);
+		g_free(pixels);
+		g_string_free(xpm, TRUE);
+	}
+	g_free(index);
+	g_free(directory);
+	g_free(base);
 }
 #endif
 
@@ -286,16 +360,27 @@ int main(int argc, char **argv)
 	g_unsetenv("XDG_CURRENT_DESKTOP");
 	writeFile(applicationsDir, "browser.desktop",
 		  "[Desktop Entry]\nType=Application\nName=Browser\nExec=/bin/true %u\n"
+		  "Icon=browser-themed\n"
 		  "MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;\n");
 	writeFile(applicationsDir, "old.desktop",
 		  "[Desktop Entry]\nType=Application\nName=Old\nExec=/bin/true %u\n"
+		  "Icon=old-themed\n"
 		  "MimeType=x-scheme-handler/https;application/x-tar;text/plain;\n");
 	writeFile(applicationsDir, "archive.desktop",
 		  "[Desktop Entry]\nType=Application\nName=Archive\nExec=/bin/true %f\n"
+		  "Icon=missing-test-icon\n"
 		  "MimeType=application/zip;\n");
-	writeFile(applicationsDir, "files-mail.desktop",
-		  "[Desktop Entry]\nType=Application\nName=Files and Mail\nExec=/bin/true %u\n"
-		  "MimeType=inode/directory;x-scheme-handler/mailto;\n");
+	{
+		char *icon = g_build_filename(dataDir, "icons", "TestParent", "48x48", "apps",
+					     "browser-themed.xpm", NULL);
+		char *desktop = g_strdup_printf(
+			"[Desktop Entry]\nType=Application\nName=Files and Mail\nExec=/bin/true %%u\n"
+			"Icon=%s\nMimeType=inode/directory;x-scheme-handler/mailto;\n", icon);
+
+		writeFile(applicationsDir, "files-mail.desktop", desktop);
+		g_free(desktop);
+		g_free(icon);
+	}
 	writeFile(applicationsDir, "hidden.desktop",
 		  "[Desktop Entry]\nType=Application\nName=Hidden\nExec=/bin/true %u\nHidden=true\n"
 		  "MimeType=x-scheme-handler/http;\n");
@@ -318,18 +403,30 @@ int main(int argc, char **argv)
 		  "text/plain=old.desktop;\n"
 		  "inode/directory=files-mail.desktop;\n"
 		  "x-scheme-handler/mailto=files-mail.desktop;\n");
+	{
+		char *gtk = g_build_filename(configDir, "gtk-4.0", NULL);
+
+		g_assert_cmpint(g_mkdir(gtk, 0700), ==, 0);
+		writeFile(gtk, "settings.ini", "[Settings]\ngtk-icon-theme-name=TestSelected\n");
+		g_free(gtk);
+	}
+	createTheme("TestSelected", "TestParent", NULL);
+	createTheme("TestParent", "", "browser-themed.xpm");
+	createTheme("hicolor", "", "old-themed.xpm");
 	g_test_add_func("/applications/discovery", discoveryTest);
 	g_test_add_func("/applications/associations", associationsTest);
 	g_test_add_func("/applications/other-roles", otherRolesTest);
 	g_test_add_func("/applications/terminal", terminalTest);
 	g_test_add_func("/applications/terminal-error", terminalErrorTest);
 	g_test_add_func("/applications/terminal-current", terminalCurrentTest);
+	g_test_add_func("/applications/icon-theme", iconThemeTest);
 	WMInitializeApplication("applicationDefaultsTest", &argc, argv);
 	g_test_add_func("/applications/dialog", dialogTest);
 	result = g_test_run();
 	removeFiles(applicationsDir);
 	removeFiles(configDir);
 	g_assert_cmpint(g_rmdir(applicationsDir), ==, 0);
+	removeFiles(dataDir);
 	g_assert_cmpint(g_rmdir(dataDir), ==, 0);
 	g_assert_cmpint(g_rmdir(configDir), ==, 0);
 	removeFiles(root);

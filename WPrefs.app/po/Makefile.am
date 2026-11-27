@@ -11,6 +11,7 @@ EXTRA_DIST = bg.po ca.po cs.po de.po es.po et.po fi.po fr.po fy.po hr.po hu.po \
 POTFILES  = \
 	$(top_srcdir)/WPrefs.app/Appearance.c \
 	$(top_srcdir)/WPrefs.app/ApplicationDefaults.c \
+	$(top_srcdir)/src/desktop_icons.c \
 	$(top_srcdir)/WPrefs.app/wmapplications.c \
 	$(top_srcdir)/WPrefs.app/Autostart.c \
 	$(top_srcdir)/WPrefs.app/Configurations.c \

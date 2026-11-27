@@ -10,6 +10,11 @@ is a WINGs dialog for selecting a web browser, email client, terminal
 emulator, file manager and archive manager from installed desktop entries.
 It requires a build with GIO desktop application support.
 .PP
+Application names are shown without desktop file IDs. The selected application's
+icon is displayed beside its selector when available. Icon lookup uses the
+GTK 4, GTK 3 or GTK 2 icon-theme setting, with theme inheritance, hicolor
+and XDG icon/pixmap directory fallbacks, as in the Applications menu.
+.PP
 The Apply button saves changed selections using GIO and the freedesktop.org
 MIME Applications specification. Only MIME types and URL schemes declared
 by the chosen application are changed. Other associations are preserved.
