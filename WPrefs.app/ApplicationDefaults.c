@@ -83,7 +83,8 @@ GPtrArray *WMDefaultApplications(WMDefaultRole role)
 	GList *all = g_app_info_get_all();
 
 	for (GList *item = all; item; item = item->next)
-		if (eligible(role, item->data))
+		if (eligible(role, item->data) &&
+		    !g_desktop_app_info_get_nodisplay(G_DESKTOP_APP_INFO(item->data)))
 			g_ptr_array_add(apps, g_object_ref(item->data));
 	g_list_free_full(all, g_object_unref);
 	g_ptr_array_sort(apps, compareApps);

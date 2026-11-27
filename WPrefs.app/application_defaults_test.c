@@ -53,6 +53,7 @@ static void discoveryTest(void)
 	GPtrArray *apps = WMDefaultApplications(WMDefaultBrowser);
 
 	g_assert_true(containsApp(apps, "browser.desktop"));
+	g_assert_false(containsApp(apps, "browser-alias.desktop"));
 	g_assert_false(containsApp(apps, "hidden.desktop"));
 	g_assert_false(containsApp(apps, "archive.desktop"));
 	g_assert_false(containsApp(apps, "missing.desktop"));
@@ -63,6 +64,26 @@ static void discoveryTest(void)
 	g_assert_false(containsApp(apps, "legacy-terminal.desktop"));
 	g_assert_cmpuint(apps->len, ==, 1);
 	g_ptr_array_unref(apps);
+}
+
+static void noDisplayDefaultTest(void)
+{
+	GAppInfo *alias = getApp("browser-alias.desktop");
+	GAppInfo *browser = getApp("browser.desktop");
+	GError *error = NULL;
+	char *id;
+
+	g_assert_true(g_desktop_app_info_get_nodisplay(G_DESKTOP_APP_INFO(alias)));
+	g_assert_true(WMSetDefaultApplication(WMDefaultBrowser, alias, &error));
+	g_assert_no_error(error);
+	id = WMDefaultApplicationID(WMDefaultBrowser, &error);
+	g_assert_no_error(error);
+	g_assert_cmpstr(id, ==, "browser-alias.desktop");
+	g_free(id);
+	g_assert_true(WMSetDefaultApplication(WMDefaultBrowser, browser, &error));
+	g_assert_no_error(error);
+	g_object_unref(alias);
+	g_object_unref(browser);
 }
 
 static void associationsTest(void)
@@ -368,6 +389,10 @@ int main(int argc, char **argv)
 		  "[Desktop Entry]\nType=Application\nName=Browser\nExec=/bin/true %u\n"
 		  "Icon=browser-themed\n"
 		  "MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;\n");
+	writeFile(applicationsDir, "browser-alias.desktop",
+		  "[Desktop Entry]\nType=Application\nName=Browser\nExec=/bin/true %u\n"
+		  "Icon=browser-themed\nNoDisplay=true\n"
+		  "MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;\n");
 	writeFile(applicationsDir, "old.desktop",
 		  "[Desktop Entry]\nType=Application\nName=Old\nExec=/bin/true %u\n"
 		  "Icon=old-themed\n"
@@ -420,6 +445,7 @@ int main(int argc, char **argv)
 	createTheme("TestParent", "", "browser-themed.xpm");
 	createTheme("hicolor", "", "old-themed.xpm");
 	g_test_add_func("/applications/discovery", discoveryTest);
+	g_test_add_func("/applications/nodisplay-default", noDisplayDefaultTest);
 	g_test_add_func("/applications/associations", associationsTest);
 	g_test_add_func("/applications/other-roles", otherRolesTest);
 	g_test_add_func("/applications/terminal", terminalTest);
