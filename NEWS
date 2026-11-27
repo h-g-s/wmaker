@@ -177,7 +177,9 @@ its attached icons remain visible. Their placement is remembered for each
 set of monitors (saved in WMState) and restored when that set comes back.
 Windows also follow their monitor, and windows from a removed monitor are
 moved fully onto the primary one; maximized and fullscreen windows are
-fitted to their new monitor.
+fitted to their new monitor. Windows that were clear of the dock and clip
+are kept clear of them after the change, moving beside them or, when there
+is no room, shrinking to fit.
 
 
 Titlebar language button revamp

@@ -626,6 +626,156 @@ static void wRandR_PlaceDockAndClip(WScreen *scr, const WRandRHeads *heads,
     }
 }
 
+typedef struct {
+    int x, y, w, h;
+} WRandRBox;
+
+static Bool wRandR_BoxesOverlap(const WRandRBox *a, const WRandRBox *b)
+{
+    return a->x < b->x + b->w && b->x < a->x + a->w &&
+        a->y < b->y + b->h && b->y < a->y + a->h;
+}
+
+static Bool wRandR_BoxIsFree(const WRandRBox *box, const WRandRBox *obstacles, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++) {
+        if (wRandR_BoxesOverlap(box, &obstacles[i]))
+            return False;
+    }
+    return True;
+}
+
+/* Areas taken by the dock and the current clip with their icons */
+static int wRandR_DockAndClipBoxes(WScreen *scr, WRandRBox *boxes)
+{
+    int icon = wPreferences.icon_size;
+    int count = 0;
+    WMRect extent;
+
+    if (scr->dock) {
+        extent = wDockGetExtent(scr->dock);
+        boxes[count].x = scr->dock->x_pos + extent.pos.x;
+        boxes[count].y = scr->dock->y_pos + extent.pos.y;
+        boxes[count].w = extent.size.width;
+        boxes[count].h = extent.size.height;
+        count++;
+    }
+    if (!wPreferences.flags.noclip && scr->workspaces && scr->workspace_count > 0) {
+        WDock *clip = scr->workspaces[scr->current_workspace]->clip;
+
+        if (clip) {
+            if (clip->collapsed) {
+                extent.pos.x = extent.pos.y = 0;
+                extent.size.width = extent.size.height = icon;
+            } else {
+                extent = wDockGetExtent(clip);
+            }
+            boxes[count].x = clip->x_pos + extent.pos.x;
+            boxes[count].y = clip->y_pos + extent.pos.y;
+            boxes[count].w = extent.size.width;
+            boxes[count].h = extent.size.height;
+            count++;
+        }
+    }
+    return count;
+}
+
+static int wRandR_ClampToRange(int pos, int size, int min, int max)
+{
+    if (pos > max - size)
+        pos = max - size;
+    if (pos < min)
+        pos = min;
+    return pos;
+}
+
+/* Move a box inside a head the least possible so that it does not cover any
+ * obstacle. If there is no such position and the box can be resized, shrink
+ * it into the largest part of the head left free by the obstacles. */
+static void wRandR_AvoidBoxes(const WMRect *head, const WRandRBox *obstacles, int count,
+                              WRandRBox *box, Bool resizable)
+{
+    int xs[1 + 2 * 2], ys[1 + 2 * 2];
+    int hx1 = head->pos.x, hy1 = head->pos.y;
+    int hx2 = hx1 + (int)head->size.width, hy2 = hy1 + (int)head->size.height;
+    long best_distance = -1;
+    WRandRBox best = *box, free_area;
+    int nxs = 0, nys = 0, i, j;
+
+    if (wRandR_BoxIsFree(box, obstacles, count))
+        return;
+
+    xs[nxs++] = box->x;
+    ys[nys++] = box->y;
+    for (i = 0; i < count && i < 2; i++) {
+        xs[nxs++] = obstacles[i].x - box->w;
+        xs[nxs++] = obstacles[i].x + obstacles[i].w;
+        ys[nys++] = obstacles[i].y - box->h;
+        ys[nys++] = obstacles[i].y + obstacles[i].h;
+    }
+
+    for (i = 0; i < nxs; i++) {
+        for (j = 0; j < nys; j++) {
+            WRandRBox c = *box;
+            long distance;
+
+            c.x = wRandR_ClampToRange(xs[i], c.w, hx1, hx2);
+            c.y = wRandR_ClampToRange(ys[j], c.h, hy1, hy2);
+            if (c.x < hx1 || c.y < hy1 || !wRandR_BoxIsFree(&c, obstacles, count))
+                continue;
+            distance = labs((long)c.x - box->x) + labs((long)c.y - box->y);
+            if (best_distance < 0 || distance < best_distance) {
+                best_distance = distance;
+                best = c;
+            }
+        }
+    }
+    if (best_distance >= 0) {
+        *box = best;
+        return;
+    }
+    if (!resizable)
+        return;
+
+    /* Cut each obstacle off the side of the head that keeps the most room */
+    free_area.x = hx1;
+    free_area.y = hy1;
+    free_area.w = hx2 - hx1;
+    free_area.h = hy2 - hy1;
+    for (i = 0; i < count; i++) {
+        const WRandRBox *o = &obstacles[i];
+        WRandRBox cuts[4] = { free_area, free_area, free_area, free_area };
+        long area, best_area = -1;
+        int k;
+
+        if (!wRandR_BoxesOverlap(&free_area, o))
+            continue;
+        cuts[0].w = o->x - free_area.x;
+        cuts[1].x = o->x + o->w;
+        cuts[1].w = free_area.x + free_area.w - cuts[1].x;
+        cuts[2].h = o->y - free_area.y;
+        cuts[3].y = o->y + o->h;
+        cuts[3].h = free_area.y + free_area.h - cuts[3].y;
+        for (k = 0; k < 4; k++) {
+            area = cuts[k].w > 0 && cuts[k].h > 0 ? (long)cuts[k].w * cuts[k].h : 0;
+            if (area > best_area) {
+                best_area = area;
+                best = cuts[k];
+            }
+        }
+        if (best_area <= 0)
+            return;
+        free_area = best;
+    }
+
+    box->w = WMIN(box->w, free_area.w);
+    box->h = WMIN(box->h, free_area.h);
+    box->x = wRandR_ClampToRange(box->x, box->w, free_area.x, free_area.x + free_area.w);
+    box->y = wRandR_ClampToRange(box->y, box->h, free_area.y, free_area.y + free_area.h);
+}
+
 /* Move a rectangle along with the head it was on. Returns the new head, or -1
  * if the rectangle was on no head. It is kept fully visible if it was before
  * or if its head went away; *changed tells whether its head changed at all. */
@@ -674,8 +824,11 @@ static void wRandR_FollowSavedGeometry(const WRandRHeads *old, const WRandRHeads
 }
 
 /* Keep windows on the monitor they were on, following it when it moves, and
- * bring windows from a removed monitor fully onto the primary one */
-static void wRandR_RelocateWindows(WScreen *scr, const WRandRHeads *old, const WRandRHeads *cur)
+ * bring windows from a removed monitor fully onto the primary one. Windows
+ * that were clear of the dock and clip stay clear of them. */
+static void wRandR_RelocateWindows(WScreen *scr, const WRandRHeads *old, const WRandRHeads *cur,
+                                   const WRandRBox *old_boxes, int old_count,
+                                   const WRandRBox *new_boxes, int new_count)
 {
     WWindow *wwin;
 
@@ -699,8 +852,17 @@ static void wRandR_RelocateWindows(WScreen *scr, const WRandRHeads *old, const W
         nx = wx;
         ny = wy;
         target = wRandR_FollowRect(old, cur, &nx, &ny, ww, wh, &changed);
-        if (target < 0 || !changed)
+        if (target < 0)
             continue;
+        if (!changed) {
+            /* Still on the same monitor, but the dock or clip may have come
+             * over it from a removed one */
+            WRandRBox box = { wx, wy, ww, wh };
+
+            if (wwin->flags.fullscreen || wwin->flags.maximized ||
+                wRandR_BoxIsFree(&box, new_boxes, new_count))
+                continue;
+        }
         nr = &cur->rects[target];
 
         wRandR_FollowSavedGeometry(old, cur, &wwin->old_geometry.x, &wwin->old_geometry.y,
@@ -713,18 +875,34 @@ static void wRandR_RelocateWindows(WScreen *scr, const WRandRHeads *old, const W
         } else if (wwin->flags.maximized && !wwin->flags.shaded) {
             wWindowMove(wwin, nx + bw, ny + bw);
             wMaximizeWindow(wwin, wwin->flags.maximized | MAX_KEYBOARD, target);
-        } else if ((ww > (int)nr->size.width || wh > (int)nr->size.height) &&
-                   IS_RESIZABLE(wwin) && !wwin->flags.shaded) {
-            /* Shrink windows larger than their new monitor to fit on it */
-            unsigned int cw = WMIN(ww, (int)nr->size.width) - 2 * bw;
-            unsigned int ch = WMIN(wh, (int)nr->size.height) - 2 * bw -
-                wwin->frame->top_width - wwin->frame->bottom_width;
+        } else {
+            Bool resizable = IS_RESIZABLE(wwin) && !wwin->flags.shaded;
+            WRandRBox box = { wx, wy, ww, wh };
+            WRandRBox target_box;
 
-            wWindowConstrainSize(wwin, &cw, &ch);
-            wWindowConfigure(wwin, nx + bw, ny + bw, cw, ch);
-        } else if (nx != wx || ny != wy) {
-            wWindowMove(wwin, nx + bw, ny + bw);
-            wWindowSynthConfigureNotify(wwin);
+            /* Shrink windows larger than their new monitor to fit on it */
+            target_box.x = nx;
+            target_box.y = ny;
+            target_box.w = resizable ? WMIN(ww, (int)nr->size.width) : ww;
+            target_box.h = resizable ? WMIN(wh, (int)nr->size.height) : wh;
+
+            if (wRandR_BoxIsFree(&box, old_boxes, old_count) &&
+                target_box.x >= nr->pos.x && target_box.y >= nr->pos.y &&
+                target_box.x + target_box.w <= nr->pos.x + (int)nr->size.width &&
+                target_box.y + target_box.h <= nr->pos.y + (int)nr->size.height)
+                wRandR_AvoidBoxes(nr, new_boxes, new_count, &target_box, resizable);
+
+            if (target_box.w != ww || target_box.h != wh) {
+                unsigned int cw = target_box.w - 2 * bw;
+                unsigned int ch = target_box.h - 2 * bw -
+                    wwin->frame->top_width - wwin->frame->bottom_width;
+
+                wWindowConstrainSize(wwin, &cw, &ch);
+                wWindowConfigure(wwin, target_box.x + bw, target_box.y + bw, cw, ch);
+            } else if (target_box.x != wx || target_box.y != wy) {
+                wWindowMove(wwin, target_box.x + bw, target_box.y + bw);
+                wWindowSynthConfigureNotify(wwin);
+            }
         }
     }
 }
@@ -770,6 +948,10 @@ static void wRandR_FollowHeads(WScreen *scr, WRandRState *state,
 {
     WRandRAnchor dock_anchor, clip_anchor;
     char old_set[RANDR_MAX_OUTPUTS * 64], new_set[RANDR_MAX_OUTPUTS * 64];
+    WRandRBox old_boxes[2], new_boxes[2];
+    int old_count, new_count;
+
+    old_count = wRandR_DockAndClipBoxes(scr, old_boxes);
 
     wRandR_HeadsSignature(old_heads, old_set, sizeof(old_set));
     wRandR_HeadsSignature(&state->heads, new_set, sizeof(new_set));
@@ -788,8 +970,11 @@ static void wRandR_FollowHeads(WScreen *scr, WRandRState *state,
     wScreenUpdateUsableArea(scr);
     wNETWMUpdateWorkarea(scr);
 
-    if (geometry_changed)
-        wRandR_RelocateWindows(scr, old_heads, &state->heads);
+    if (geometry_changed) {
+        new_count = wRandR_DockAndClipBoxes(scr, new_boxes);
+        wRandR_RelocateWindows(scr, old_heads, &state->heads,
+                               old_boxes, old_count, new_boxes, new_count);
+    }
 
     /* Bring any windows that ended up in dead space to an active head */
     wRandR_BringAllWindowsInside(scr);

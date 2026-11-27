@@ -372,6 +372,47 @@ static void placementTests(void)
 		assert(full.bfs_geometry.x == 1280 - 320 && full.bfs_geometry.y == 100);
 	}
 
+	/* Windows clear of the dock stay clear of it on their new monitor */
+	{
+		static const char *two_names[] = { "DP-1", "DP-2" };
+		static const int two_rects[][4] = { { 0, 0, 1920, 1080 }, { 1920, 0, 1920, 1080 } };
+		static const char *one_names[] = { "DP-1" };
+		static const int one_rects[][4] = { { 0, 0, 1920, 1080 } };
+		const WMRect head = { { 0, 0 }, { 1000, 1000 } };
+		const WRandRBox column = { 0, 0, 64, 1000 };
+		WRandRBox box = { 10, 10, 960, 400 };
+		WWindow clear, covering;
+		WFrameWindow frame[2];
+		WCoreWindow core[2];
+
+		/* No position avoids the column, so the window shrinks beside it */
+		wRandR_AvoidBoxes(&head, &column, 1, &box, True);
+		assert(box.x == 64 && box.y == 10 && box.w == 936 && box.h == 400);
+		box.x = 10;
+		box.w = 960;
+		wRandR_AvoidBoxes(&head, &column, 1, &box, False);
+		assert(box.x == 10 && box.w == 960);
+
+		wPreferences.flags.noclip = True;
+		WMReleasePropList(state.placements);
+		state.placements = NULL;
+		scr.focused_window = NULL;
+		setHeads(&scr, &state, 2, two_names, two_rects);
+		dock.on_right_side = True;
+		dock.x_pos = 3840 - 64;
+		dock.y_pos = 0;
+		initWindow(&clear, &frame[0], &core[0], &scr, 1220, 100, 700, 500);
+		initWindow(&covering, &frame[1], &core[1], &scr, 3200, 100, 600, 500);
+		old = state.heads;
+		setHeads(&scr, &state, 1, one_names, one_rects);
+		wRandR_FollowHeads(&scr, &state, &old, True);
+		assert(dock.x_pos == 1920 - 64 && dock.y_pos == 0);
+		assert(clear.frame_x == 1920 - 64 - 700 && clear.frame_y == 100);
+		assert(core[0].width == 700 && core[0].height == 500);
+		/* A window that was already over the dock is not pushed around */
+		assert(covering.frame_x + 600 > 1920 - 64);
+	}
+
 	WMReleasePropList(state.placements);
 	wfree(scr.xine_info.screens);
 	wPreferences.flags.noclip = True;
