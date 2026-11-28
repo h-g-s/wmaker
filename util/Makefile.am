@@ -81,7 +81,7 @@ wmmenugen_CPPFLAGS = $(AM_CPPFLAGS) @GIO_CFLAGS@
 wmmenugen_SOURCES = wmmenugen.c wmmenugen.h wmmenugen_misc.c \
 	wmmenugen_parse_wmconfig.c \
 	wmmenugen_parse_xdg.c wmmenugen_desktop.c wmmenugen_cache.c wmmenugen_cache.h \
-	../src/desktop_icons.c ../src/desktop_icons.h
+	../src/desktop_icons.c ../src/desktop_icons.h ../src/desktop_entry.c ../src/desktop_entry.h
 
 wmiv_CFLAGS = @PANGO_CFLAGS@ @PTHREAD_CFLAGS@
 

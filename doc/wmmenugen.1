@@ -9,6 +9,11 @@
 .IR fspec " [" fspec "...]"
 .BI \fR[\fP\-parser= <name>
 .IR fspec " [" fspec "...]...]"
+.br
+.B wmmenugen
+.BI \-\-launch " DESKTOP-ID"
+.RI [ \-\- ]
+.RI [ FILE-OR-URI ...]
 .SH "DESCRIPTION"
 .B wmmenugen
 generates a menu in the
@@ -51,6 +56,10 @@ PNG and XPM are supported; SVG icons require an ImageMagick-enabled build.
 Launch a desktop file ID or absolute desktop filename using GIO. This preserves
 desktop-entry argument quoting and field codes, Terminal, Path and D-Bus activation,
 rather than interpreting Exec as a shell command.
+Optional file paths or URIs are passed to the application through its desktop
+entry. Relative paths are resolved from the invoking directory. Use
+.B \-\-
+before arguments beginning with a hyphen.
 .TP
 .B \-\-no-cache
 Generate the Applications menu without reading or writing its persistent cache.

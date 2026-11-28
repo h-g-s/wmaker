@@ -9,6 +9,7 @@
 #include "../src/applications_menu.h"
 #include "wmmenugen_cache.h"
 #include "../src/desktop_icons.h"
+#include "../src/desktop_entry.h"
 
 static void watchIconPath(void *data, const char *path)
 {
@@ -89,8 +90,9 @@ static WMPropList *newSubmenu(const char *title)
 
 int wmDesktopMenuMain(int argc, char **argv)
 {
-	gboolean applications = FALSE, noIcons = FALSE, noCache = FALSE;
+	gboolean applications = FALSE, resolve = FALSE, noIcons = FALSE, noCache = FALSE;
 	char *category = NULL, *launch = NULL, *themeName = NULL;
+	char **arguments = NULL;
 	int iconSize = 24, status = 0;
 	GError *error = NULL;
 	GOptionEntry options[] = {
@@ -100,10 +102,12 @@ int wmDesktopMenuMain(int argc, char **argv)
 		{ "no-icons", 0, 0, G_OPTION_ARG_NONE, &noIcons, "Omit application icons", NULL },
 		{ "icon-theme", 0, 0, G_OPTION_ARG_STRING, &themeName, "Select an icon theme (default: GTK setting or hicolor)", "THEME" },
 		{ "icon-size", 0, 0, G_OPTION_ARG_INT, &iconSize, "Preferred icon size in pixels (default: 24)", "SIZE" },
-		{ "launch", 0, 0, G_OPTION_ARG_STRING, &launch, "Launch a desktop file ID or absolute filename", "DESKTOP-ID" },
+		{ "launch", 0, 0, G_OPTION_ARG_STRING, &launch, "Launch a desktop entry with optional files or URIs", "DESKTOP-ID" },
+		{ "resolve-window", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &resolve, "Resolve a window to a desktop launcher", NULL },
+		{ G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &arguments, NULL, "FILE-OR-URI" },
 		{ NULL }
 	};
-	GOptionContext *context = g_option_context_new(NULL);
+	GOptionContext *context = g_option_context_new("[-- FILE-OR-URI...]");
 
 	g_option_context_add_main_entries(context, options, NULL);
 	if (!g_option_context_parse(context, &argc, &argv, &error)) {
@@ -112,15 +116,24 @@ int wmDesktopMenuMain(int argc, char **argv)
 		status = 2;
 		goto finish;
 	}
-	if (argc != 1 || applications == (launch != NULL) ||
+	if ((!launch && !resolve && arguments) || applications + resolve + (launch != NULL) != 1 ||
+	    (resolve && (!arguments || g_strv_length(arguments) != 3)) ||
 	    (category && !wApplicationsCategoryValid(category)) ||
 	    (themeName && !wDesktopIconThemeValid(themeName)) || iconSize < 1 || iconSize > 512 ||
-	    (launch && (category || themeName || noIcons || noCache || iconSize != 24))) {
+	    ((launch || resolve) && (category || themeName || noIcons || noCache || iconSize != 24))) {
 		fprintf(stderr, "%s: invalid Applications menu arguments\n", argv[0]);
 		status = 2;
 		goto finish;
 	}
-	if (launch) {
+	if (resolve) {
+		char *command = wDesktopEntryCommand(arguments[0], arguments[1], arguments[2]);
+
+		if (command) {
+			if (fputs(command, stdout) == EOF)
+				status = 1;
+			wfree(command);
+		}
+	} else if (launch) {
 		GDesktopAppInfo *app = g_path_is_absolute(launch) ?
 			g_desktop_app_info_new_from_filename(launch) : g_desktop_app_info_new(launch);
 
@@ -128,11 +141,30 @@ int wmDesktopMenuMain(int argc, char **argv)
 			fprintf(stderr, "%s: could not load desktop entry \"%s\"\n", argv[0], launch);
 			status = 1;
 		} else {
-			if (!g_app_info_launch(G_APP_INFO(app), NULL, NULL, &error)) {
+			GList *files = NULL, *uris = NULL;
+			gboolean hasUri = FALSE, launched;
+
+			for (int i = 0; arguments && arguments[i]; i++) {
+				GFile *file = g_file_new_for_commandline_arg(arguments[i]);
+				char *scheme = g_uri_parse_scheme(arguments[i]);
+
+				if (scheme)
+					hasUri = TRUE;
+				g_free(scheme);
+				files = g_list_prepend(files, file);
+				uris = g_list_prepend(uris, g_file_get_uri(file));
+			}
+			files = g_list_reverse(files);
+			uris = g_list_reverse(uris);
+			launched = hasUri ? g_app_info_launch_uris(G_APP_INFO(app), uris, NULL, &error) :
+				g_app_info_launch(G_APP_INFO(app), files, NULL, &error);
+			if (!launched) {
 				fprintf(stderr, "%s: could not launch \"%s\": %s\n", argv[0], launch, error->message);
 				g_clear_error(&error);
 				status = 1;
 			}
+			g_list_free_full(files, g_object_unref);
+			g_list_free_full(uris, g_free);
 			g_object_unref(app);
 		}
 	} else {
@@ -209,6 +241,7 @@ finish:
 	g_free(category);
 	g_free(launch);
 	g_free(themeName);
+	g_strfreev(arguments);
 	return status;
 }
 #else

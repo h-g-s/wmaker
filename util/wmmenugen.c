@@ -58,6 +58,7 @@ char *env_lang, *env_ctry, *env_enc, *env_mod;
 static void print_help(void)
 {
 	printf("Usage: %s -parser:<parser> fspec [fspec...]\n", prog_name);
+	printf("       %s --launch=<id> [--] [file-or-uri...]\n", prog_name);
 	puts("Dynamically generate a menu in Property List format for Window Maker");
 	puts("");
 	puts("  -h, --help\t\tdisplay this help and exit");
@@ -70,6 +71,7 @@ static void print_help(void)
 	puts("  --icon-theme=<name>\tselect an icon theme");
 	puts("  --icon-size=<pixels>\tpreferred icon size (default: 24)");
 	puts("  --launch=<id>\t\tlaunch a desktop file ID or absolute filename");
+	puts("Use -- before file or URI arguments beginning with a hyphen.");
 	puts("");
 	puts("fspec: the file to be converted or the directory containing all the menu files");
 	puts("");
@@ -99,7 +101,8 @@ int main(int argc, char **argv)
 
 	prog_name = argv[0];
 	for (i = 1; i < argc; i++)
-		if (strcmp(argv[i], "--applications") == 0 || strcmp(argv[i], "--launch") == 0 ||
+		if (strcmp(argv[i], "--applications") == 0 || strcmp(argv[i], "--resolve-window") == 0 ||
+		    strcmp(argv[i], "--launch") == 0 ||
 		    strncmp(argv[i], "--launch=", 9) == 0)
 			break;
 	if (i < argc) {

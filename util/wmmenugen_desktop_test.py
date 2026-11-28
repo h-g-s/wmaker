@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -313,6 +314,13 @@ def main():
         run("--applications", "--icon-theme", "../invalid", status=2)
         run("--launch", "does-not-exist.desktop", status=1)
         run("--launch", "browser.desktop", "--category", "Network", status=2)
+        assert run("--resolve-window", "--", "", "", "FreshWindow") == ""
+        fresh = user / "applications" / "fresh.desktop"
+        desktop(fresh, "Fresh", "StartupWMClass=FreshWindow\nNoDisplay=true\n")
+        assert run("--resolve-window", "--", "", "", "FreshWindow") == "wmmenugen --launch 'fresh.desktop'"
+        fresh.unlink()
+        assert run("--resolve-window", "--", "", "", "FreshWindow") == ""
+        run("--resolve-window", "--", "too-few", status=2)
 
         output = root / "launched.json"
         recorder = root / "record.py"
@@ -333,6 +341,51 @@ def main():
         arguments, cwd = json.loads(output.read_text())
         assert arguments == ["two words", "Launch App", str(launcher), "--icon", "browser", "%"], arguments
         assert cwd == str(working), cwd
+
+        def recorded():
+            deadline = time.monotonic() + 5
+            while not output.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            arguments, cwd = json.loads(output.read_text())
+            output.unlink()
+            return arguments, cwd
+
+        output.unlink()
+        desktop(launcher, "Launch App", f"Path={working}\n", f'{sys.executable} "{recorder}" %F')
+        filenames = ["two words.txt", "a'quote.txt", "--option", "--"]
+        command = " ".join(shlex.quote(arg) for arg in
+                           [generator, "--launch", "launch.desktop", "--", *filenames])
+        result = subprocess.run(command, shell=True, cwd=root, env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        arguments, cwd = recorded()
+        assert arguments == [str(root / name) for name in filenames], arguments
+        assert cwd == str(working), cwd
+
+        desktop(launcher, "Launch App", command=f'{sys.executable} "{recorder}" %U')
+        remote = "https://example.com/some%20path?query=value"
+        local_uri = (root / "uri file.txt").as_uri()
+        result = subprocess.run([generator, "--launch", str(launcher), "--",
+                                 filenames[0], remote, local_uri],
+                                cwd=root, env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        arguments, _ = recorded()
+        assert arguments == [str(root / filenames[0]), remote, str(root / "uri file.txt")], arguments
+
+        desktop(launcher, "Launch App", command=f'{sys.executable} "{recorder}" %f')
+        run("--launch", "launch.desktop", local_uri)
+        arguments, _ = recorded()
+        assert arguments == [str(root / "uri file.txt")], arguments
+        desktop(launcher, "Launch App", command=f'{sys.executable} "{recorder}" %u')
+        run("--launch", "launch.desktop", remote)
+        arguments, _ = recorded()
+        assert arguments == [remote], arguments
+
+        run("--launch", "launch.desktop", "--unknown-option", status=2)
+        run("--applications", "--", "unexpected", status=2)
+        desktop(launcher, "Launch App", "Path=/nonexistent/wmmenugen-test-directory\n", command="/bin/true %F")
+        result = subprocess.run([generator, "--launch", "launch.desktop", "file"],
+                                env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 1 and 'could not launch "launch.desktop"' in result.stderr, result.stderr
         test_cache(generator, root, env)
     print("PASS: XDG discovery, icons, launching, cache reuse, invalidation, corruption and concurrent generation")
     return 0

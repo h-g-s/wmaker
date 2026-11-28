@@ -340,7 +340,7 @@ void ShowDockAppSettingsPanel(WAppIcon * aicon)
 	WMPackBoxSubview(content, panel->pasteCommandField,
 			 WMGetTextFieldPreferredSize(panel->pasteCommandField, 26), False, spacing);
 	panel->pasteCommandLabel = WMCreateLabel(content);
-	WMSetLabelText(panel->pasteCommandLabel, _("%s will be replaced with current selection"));
+	WMSetLabelText(panel->pasteCommandLabel, _("%s inserts the selection; %S inserts it as one argument"));
 	WMPackBoxSubview(content, panel->pasteCommandLabel, WMGetLabelPreferredSize(panel->pasteCommandLabel),
 			 False, 0);
 	packSettingsFrame(vbox, panel->pasteCommandFrame, content, title, padding, spacing);

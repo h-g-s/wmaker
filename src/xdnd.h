@@ -26,6 +26,19 @@ Bool wXDNDProcessSelection(XEvent *event);
 Bool wXDNDProcessClientMessage(XClientMessageEvent *event);
 void wXDNDMakeAwareness(Window window);
 
+static inline void wXDNDAppendQuoted(char *out, const char *path)
+{
+	*out++ = ' ';
+	*out++ = '"';
+	for (; *path; path++) {
+		if (*path == '"' || *path == '\\')
+			*out++ = '\\';
+		*out++ = *path;
+	}
+	*out++ = '"';
+	*out = 0;
+}
+
 #define XDND_VERSION 3L
 
 #define XDND_ENTER_SOURCE_WIN(e)	((e)->data.l[0])

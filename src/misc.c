@@ -564,6 +564,7 @@ getuserinput(WScreen *scr, const char *line, int *ptr, Bool advanced)
  * NORMAL	etc.	NORMAL		<input>
  * ESCAPE	any	NORMAL		<input>
  * OPTION	s	NORMAL		<selection buffer>
+ * OPTION	S	NORMAL		<selection buffer as one argument>
  * OPTION	w	NORMAL		<selected window id>
  * OPTION	a	NORMAL		<input text>
  * OPTION	d	NORMAL		<OffiX DND selection object>
@@ -704,6 +705,7 @@ char *ExpandOptions(WScreen *scr, const char *cmdline)
 #endif	/* USE_DOCK_XDND */
 
 			case 's':
+			case 'S':
 				if (!selection) {
 					selection = getselection(scr);
 				}
@@ -712,6 +714,14 @@ char *ExpandOptions(WScreen *scr, const char *cmdline)
 					goto error;
 				}
 				slen = strlen(selection);
+				if (cmdline[ptr] == 'S') {
+					const char *p;
+
+					slen += 2;
+					for (p = selection; *p; p++)
+						if (*p == '"' || *p == '\\')
+							slen++;
+				}
 				olen += slen;
 				nout = realloc(out, olen);
 				if (!nout) {
@@ -719,8 +729,21 @@ char *ExpandOptions(WScreen *scr, const char *cmdline)
 					goto error;
 				}
 				out = nout;
-				strcat(out, selection);
-				optr += slen;
+				if (cmdline[ptr] == 'S') {
+					const char *p;
+
+					out[optr++] = '"';
+					for (p = selection; *p; p++) {
+						if (*p == '"' || *p == '\\')
+							out[optr++] = '\\';
+						out[optr++] = *p;
+					}
+					out[optr++] = '"';
+					out[optr] = 0;
+				} else {
+					strcat(out, selection);
+					optr += slen;
+				}
 				break;
 
 			default:

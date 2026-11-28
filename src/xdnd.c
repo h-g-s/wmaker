@@ -140,7 +140,7 @@ Bool wXDNDProcessSelection(XEvent *event)
 				str_size = strlen(&retain[length + 1]);
 				if (str_size) {
 					WMAddToArray(items, wstrdup(&retain[length + 1]));
-					total_size += str_size + 3;	/* reserve for " \"\"" */
+					total_size += 2 * str_size + 3;
 					/* this is nonsense -- if (length)
 					   WMAppendArray(items, WMCreateArray(1)); */
 				}
@@ -149,7 +149,7 @@ Bool wXDNDProcessSelection(XEvent *event)
 		}
 		/* final one */
 		WMAddToArray(items, wstrdup(retain));
-		total_size += strlen(retain) + 3;
+		total_size += 2 * strlen(retain) + 3;
 		wfree(retain);
 
 		/* now pack new string */
@@ -160,9 +160,7 @@ Bool wXDNDProcessSelection(XEvent *event)
 			if (!strncmp(tmp, "file://", 7)) {
 				/* drag-and-drop file name format as per the spec is encoded as an URI */
 				wXDNDDecodeURI(&tmp[7]);
-				strcat(scr->xdestring, " \"");
-				strcat(scr->xdestring, &tmp[7]);
-				strcat(scr->xdestring, "\"");
+				wXDNDAppendQuoted(scr->xdestring + strlen(scr->xdestring), tmp + 7);
 			}
 			wfree(tmp);
 		}

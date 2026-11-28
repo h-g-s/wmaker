@@ -59,6 +59,7 @@
 #include "placement.h"
 #include "misc.h"
 #include "event.h"
+#include "desktop_entry.h"
 
 /**** Local variables ****/
 #define CLIP_REWIND       1
@@ -2212,10 +2213,42 @@ int wDockReceiveDNDDrop(WScreen *scr, XEvent *event)
 }
 #endif	/* USE_DOCK_XDND */
 
+static char *desktopCommandForIcon(WAppIcon *icon)
+{
+#ifdef HAVE_GIO
+	WWindow *owner = icon->icon->owner;
+	char *command, *application_id = NULL;
+	Atom property, type, utf8;
+	int format;
+	unsigned long count, remaining;
+	unsigned char *value = NULL;
+
+	if (!owner)
+		return NULL;
+	property = XInternAtom(dpy, "_GTK_APPLICATION_ID", True);
+	utf8 = XInternAtom(dpy, "UTF8_STRING", True);
+	if (property != None && utf8 != None &&
+	    XGetWindowProperty(dpy, owner->client_win, property, 0, 1024, False, utf8,
+			       &type, &format, &count, &remaining, &value) == Success &&
+	    type == utf8 && format == 8 && count && !remaining &&
+	    !memchr(value, '\0', count))
+		application_id = wstrdup((char *)value);
+	command = wDesktopEntryResolve(application_id, icon->wm_instance, icon->wm_class);
+	if (application_id)
+		wfree(application_id);
+	if (value)
+		XFree(value);
+	return command;
+#else
+	(void)icon;
+	return NULL;
+#endif
+}
+
 Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon)
 {
-	WWindow *wwin;
 	Bool lupdate_icon = False;
+	Bool desktop_launcher = False;
 	char *command = NULL;
 	int index;
 
@@ -2224,45 +2257,51 @@ Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon
 	if (update_icon)
 		lupdate_icon = True;
 
-	if (icon->command == NULL) {
-		/* If icon->owner exists, it means the application is running */
-		if (icon->icon->owner) {
-			wwin = icon->icon->owner;
-			command = GetCommandForWindow(wwin->client_win);
+	if (!icon->docked && icon->icon->owner) {
+		if (!icon->command)
+			icon->command = GetCommandForWindow(icon->icon->owner->client_win);
+		if (!wDesktopCommandExecutable(icon->command)) {
+			command = desktopCommandForIcon(icon);
+			if (command) {
+				if (icon->command)
+					wfree(icon->command);
+				icon->command = command;
+				desktop_launcher = True;
+				command = NULL;
+			} else if (icon->command) {
+				command = icon->command;
+				icon->command = NULL;
+			}
 		}
+	}
 
-		if (command) {
-			icon->command = command;
-		} else {
-			/* icon->forced_dock = 1; */
-			if (dock->type != WM_CLIP || !icon->attracted) {
-				icon->editing = 1;
-				if (wInputDialog(dock->screen_ptr, _("Dock Icon"),
-						 _("Type the command used to launch the application"), &command)) {
-					if (command && (command[0] == 0 || (command[0] == '-' && command[1] == 0))) {
-						wfree(command);
-						command = NULL;
+	if (icon->command == NULL) {
+		if (dock->type != WM_CLIP || !icon->attracted) {
+			icon->editing = 1;
+			if (wInputDialog(dock->screen_ptr, _("Dock Icon"),
+					 _("Type the command used to launch the application"), &command)) {
+				if (command && (command[0] == 0 || (command[0] == '-' && command[1] == 0))) {
+					wfree(command);
+					command = NULL;
+				}
+				icon->command = command;
+				icon->editing = 0;
+			} else {
+				icon->editing = 0;
+				if (command)
+					wfree(command);
+				if (dock->type == WM_CLIP) {
+					icon->attracted = 1;
+					if (!icon->icon->shadowed) {
+						icon->icon->shadowed = 1;
+						lupdate_icon = True;
 					}
-					icon->command = command;
-					icon->editing = 0;
 				} else {
-					icon->editing = 0;
-					if (command)
-						wfree(command);
-					/* If the target is the dock, reject the icon. If
-					 * the target is the clip, make it an attracted icon
-					 */
-					if (dock->type == WM_CLIP) {
-						icon->attracted = 1;
-						if (!icon->icon->shadowed) {
-							icon->icon->shadowed = 1;
-							lupdate_icon = True;
-						}
-					} else {
-						return False;
-					}
+					return False;
 				}
 			}
+		} else if (command) {
+			wfree(command);
 		}
 	}
 
@@ -2316,16 +2355,16 @@ Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon
 
 #ifdef USE_DOCK_XDND
 	if (icon->command && !icon->dnd_command) {
-		int len = strlen(icon->command) + 8;
+		int len = strlen(icon->command) + 16;
 		icon->dnd_command = wmalloc(len);
-		snprintf(icon->dnd_command, len, "%s %%d", icon->command);
+		snprintf(icon->dnd_command, len, desktop_launcher ? "%s -- %%d" : "%s %%d", icon->command);
 	}
 #endif
 
 	if (icon->command && !icon->paste_command) {
-		int len = strlen(icon->command) + 8;
+		int len = strlen(icon->command) + 16;
 		icon->paste_command = wmalloc(len);
-		snprintf(icon->paste_command, len, "%s %%s", icon->command);
+		snprintf(icon->paste_command, len, desktop_launcher ? "%s -- %%S" : "%s %%s", icon->command);
 	}
 
 	return True;

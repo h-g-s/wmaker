@@ -33,6 +33,8 @@ wmaker_SOURCES = 	\
 	dialog.c \
 	dialog.h \
 	dock.c \
+	desktop_entry.c \
+	desktop_entry.h \
 	dockedapp.c \
 	dockedapp.h \
 	dock.h \
@@ -164,7 +166,7 @@ xmodifier.hack_nf.c: xmodifier.c $(top_srcdir)/script/nested-func-to-macro.sh
 endif
 
 
-AM_CFLAGS = @PANGO_CFLAGS@
+AM_CFLAGS = @PANGO_CFLAGS@ @GIO_CFLAGS@
 
 AM_CPPFLAGS = $(DFLAGS) \
 	-I$(top_builddir)/wrlib \
@@ -184,6 +186,7 @@ wmaker_LDADD = \
 	@XLIBS@ \
 	@LIBM@ \
 	@INTLIBS@
+wmaker_LDADD += @GIO_LIBS@
 
 ######################################################################
 
@@ -193,7 +196,11 @@ am__v_CHKOPTS_  = $(am__v_CHKOPTS_$(AM_DEFAULT_VERBOSITY))
 am__v_CHKOPTS_0 = @echo "  CHK      $@" ;
 am__v_CHKOPTS_1 =
 
-check_PROGRAMS = randr_hotplug_test winoverview_navigation_test autostart_name_test
+check_PROGRAMS = randr_hotplug_test winoverview_navigation_test autostart_name_test desktop_entry_test xdnd_quote_test
+xdnd_quote_test_SOURCES = xdnd_quote_test.c
+xdnd_quote_test_LDADD = $(wmaker_LDADD)
+desktop_entry_test_SOURCES = desktop_entry_test.c desktop_entry.c desktop_entry.h
+desktop_entry_test_LDADD = $(wmaker_LDADD)
 autostart_name_test_SOURCES = autostart_name_test.c
 autostart_name_test_CFLAGS = $(AM_CFLAGS) -Wno-unused-parameter
 autostart_name_test_LDADD = $(wmaker_LDADD)
@@ -209,12 +216,15 @@ check-local: defaults-callbacks-static defaults-callbacks-dynamic $(check_PROGRA
 	./randr_hotplug_test || test $$? -eq 77
 	./winoverview_navigation_test
 	./autostart_name_test
+	./desktop_entry_test
+	./xdnd_quote_test
 	$(MAKE) -C "$(top_builddir)/util" wmmenugen
 	python3 "$(srcdir)/menu_icon_test.py" ./wmaker || test $$? -eq 77
+	python3 "$(srcdir)/desktop_dock_test.py" ./wmaker || test $$? -eq 77
 	python3 "$(srcdir)/command_shortcuts_test.py" ./wmaker || test $$? -eq 77
 	python3 "$(srcdir)/autostart_test.py" ./wmaker || test $$? -eq 77
 
-EXTRA_DIST += menu_icon_test.py command_shortcuts_test.py autostart_test.py
+EXTRA_DIST += menu_icon_test.py desktop_dock_test.py command_shortcuts_test.py autostart_test.py
 
 # Check that the callback functions used to load the configuration match
 # the type of the variable where the value will be stored
